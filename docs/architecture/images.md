@@ -62,6 +62,19 @@ becoming declared profile truth. Eight complete 256-value ramps plus Display P3
 and non-D65 fixtures match independently calculated references exactly on both
 compiled architectures.
 
+An `iCCP` wrapper must provide a valid 1-to-79-byte PNG profile name, compression
+method zero, and one independently bounded zlib stream. The decompressed ICC
+profile is limited to 4 MiB and must be an ICC v2 or v4 scanner/display RGB
+matrix profile using XYZ PCS and the D50 PCS illuminant. Zagkit validates the
+declared profile size, header signature, reserved header bytes, rendering intent,
+bounded aligned tag table, unique required tags, XYZ tag types, and transfer
+curve types before executing it. The current executable subset accepts the six
+required RGB matrix/TRC tags when all three curves are the same identity curve,
+single gamma curve, or type-0 parametric gamma curve. Matrix columns are converted
+from D50 PCS into linear sRGB, then encoded through the canonical sRGB transfer.
+An understood `iCCP` profile takes precedence over compatibility `sRGB`, `gAMA`,
+and `cHRM` chunks. The result records declared rather than assumed profile truth.
+
 `png_decode_resource_spec`
 adapts a successful owned result to the normal copying resource-store API, so
 the decoder can be freed immediately after insertion.
@@ -72,17 +85,19 @@ the canonical resource store, and compares full-surface hashes at 1x, 1.25x,
 headless scale evidence, not native compositor or monitor evidence.
 
 The strict deterministic fuzz gate decodes 20,000 arbitrary byte streams,
-20,000 structured mutations of a valid PNG, every strict seed prefix, and 4,096
-decode/free repetitions on both x86-64 and ARM64. Every result must preserve
-success or failure ownership invariants. Coverage-guided sanitizer campaigns
+20,000 structured mutations of a valid PNG, 20,000 arbitrary decompressed ICC
+profiles, every strict seed prefix, and 4,096 decode/free repetitions on both
+x86-64 and ARM64. Every result must preserve success or failure ownership
+invariants. Coverage-guided sanitizer campaigns
 and a larger published malformed corpus remain additional required evidence.
 
 Dimension, encoded-data, decompressed-scanline, output-pixel, palette-index,
-filter, color-matrix, and arithmetic limits fail before out-of-bounds access.
-Explicit iCCP still fails as an unsupported color profile. Unknown interlace
-methods fail before decompression. This unavailable path keeps `G3-PNG` open
-until ICC profile conversion and
-coverage-guided malformed-input evidence land.
+filter, color-matrix, ICC inflate, ICC tag-table, and arithmetic limits fail
+before out-of-bounds access. Sampled or per-channel curves, parametric curve
+types 1 through 4, monochrome profiles, LUT profiles, device-link profiles, and
+unsupported `cICP` metadata fail as unsupported color profiles. Unknown interlace
+methods fail before decompression. These paths keep `G3-PNG` open until general
+ICC execution and coverage-guided malformed-input evidence land.
 
 Linear-light filtering, wide-gamut output surfaces, mipmapping,
 high-quality downsampling, image tiling, and GPU upload caches also remain

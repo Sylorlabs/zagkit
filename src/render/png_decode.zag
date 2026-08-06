@@ -65,6 +65,16 @@ struct PngColorTransform {
     valid: i32,
 }
 
+struct PngIccTag { offset: i32, size: i32, found: i32, valid: i32 }
+
+struct PngIccVectorResult { value: PngVectorF64, valid: i32 }
+
+struct PngIccProfileResult {
+    transform: PngColorTransform,
+    source_gamma: i64,
+    valid: i32,
+}
+
 fn png_decode_input_limit() i64 { return 134217728; }
 fn png_decode_pixel_byte_limit() i64 { return 67108864; }
 fn png_decode_dimension_limit() i32 { return 8192; }
@@ -366,6 +376,197 @@ fn png_chrm_transform(bytes: []u8, offset: i32,
         .m22 = png_quantize_matrix_value(final_matrix.m22),
         .active = 1, .valid = 1,
     };
+}
+
+fn png_data_is(bytes: []u8, offset: i32, name: []u8) i32 {
+    if (name.len != 4 || offset < 0 || offset + 4 > bytes.len) { return 0; }
+    let i: i32 = 0;
+    while (i < 4) {
+        if (bytes[offset + i] != name[i]) { return 0; }
+        i = i + 1;
+    }
+    return 1;
+}
+
+fn png_read_s15_fixed16(bytes: []u8, offset: i32) f64 {
+    let raw: i64 = png_read_u32_be(bytes, offset);
+    if (raw >= 2147483648) { raw = raw - 4294967296; }
+    return raw as f64 / 65536.0;
+}
+
+fn png_icc_tag(bytes: []u8, signature: []u8) PngIccTag {
+    let missing: PngIccTag = PngIccTag{
+        .offset = 0, .size = 0, .found = 0, .valid = 1,
+    };
+    if (bytes.len < 132) { missing.valid = 0; return missing; }
+    let count64: i64 = png_read_u32_be(bytes, 128);
+    if (count64 > 128 || 132 + count64 * 12 > bytes.len as i64) {
+        missing.valid = 0; return missing;
+    }
+    let result: PngIccTag = missing;
+    let index: i32 = 0;
+    while (index < count64 as i32) {
+        let entry: i32 = 132 + index * 12;
+        let tag_offset64: i64 = png_read_u32_be(bytes, entry + 4);
+        let tag_size64: i64 = png_read_u32_be(bytes, entry + 8);
+        if (tag_offset64 < 132 + count64 * 12 || tag_offset64 % 4 != 0 ||
+            tag_size64 < 12 || tag_offset64 + tag_size64 > bytes.len as i64) {
+            result.valid = 0; return result;
+        }
+        if (png_data_is(bytes, entry, signature) != 0) {
+            if (result.found != 0) { result.valid = 0; return result; }
+            result.offset = tag_offset64 as i32;
+            result.size = tag_size64 as i32;
+            result.found = 1;
+        }
+        index = index + 1;
+    }
+    return result;
+}
+
+fn png_icc_xyz(bytes: []u8, tag: PngIccTag) PngIccVectorResult {
+    let result: PngIccVectorResult = PngIccVectorResult{
+        .value = PngVectorF64{ .x = 0.0, .y = 0.0, .z = 0.0 }, .valid = 0,
+    };
+    if (tag.valid == 0 || tag.found == 0 || tag.size < 20 ||
+        png_data_is(bytes, tag.offset, "XYZ ") == 0 ||
+        png_read_u32_be(bytes, tag.offset + 4) != 0) { return result; }
+    result.value = PngVectorF64{
+        .x = png_read_s15_fixed16(bytes, tag.offset + 8),
+        .y = png_read_s15_fixed16(bytes, tag.offset + 12),
+        .z = png_read_s15_fixed16(bytes, tag.offset + 16),
+    };
+    if (result.value.x != result.value.x || result.value.y != result.value.y ||
+        result.value.z != result.value.z || png_f64_abs(result.value.x) > 4.0 ||
+        png_f64_abs(result.value.y) > 4.0 ||
+        png_f64_abs(result.value.z) > 4.0) { return result; }
+    result.valid = 1;
+    return result;
+}
+
+fn png_icc_curve_gamma(bytes: []u8, tag: PngIccTag) i64 {
+    if (tag.valid == 0 || tag.found == 0 || tag.size < 12 ||
+        png_read_u32_be(bytes, tag.offset + 4) != 0) { return 0; }
+    let numerator: i64 = 0;
+    let encoded_gamma: i64 = 0;
+    if (png_data_is(bytes, tag.offset, "curv") != 0) {
+        let count: i64 = png_read_u32_be(bytes, tag.offset + 8);
+        if (count == 0) { return 100000; }
+        if (count != 1 || tag.size < 14) { return 0; }
+        encoded_gamma = png_read_u16_be(bytes, tag.offset + 12);
+        numerator = 25600000;
+    } else if (png_data_is(bytes, tag.offset, "para") != 0) {
+        if (tag.size < 16 || png_read_u16_be(bytes, tag.offset + 8) != 0 ||
+            png_read_u16_be(bytes, tag.offset + 10) != 0) { return 0; }
+        encoded_gamma = png_read_u32_be(bytes, tag.offset + 12);
+        numerator = 6553600000;
+    } else { return 0; }
+    if (encoded_gamma <= 0 || encoded_gamma > 655360) { return 0; }
+    let source_gamma: i64 = (numerator + encoded_gamma / 2) / encoded_gamma;
+    if (source_gamma < 10000 || source_gamma > 1000000) { return 0; }
+    return source_gamma;
+}
+
+fn png_icc_matrix_profile(bytes: []u8) PngIccProfileResult {
+    let result: PngIccProfileResult = PngIccProfileResult{
+        .transform = png_color_transform_identity(), .source_gamma = 0, .valid = 0,
+    };
+    if (bytes.len < 132 || bytes.len > 4194304 ||
+        png_read_u32_be(bytes, 0) != bytes.len as i64 ||
+        (bytes[8] != 2 && bytes[8] != 4) ||
+        !(png_data_is(bytes, 12, "scnr") != 0 ||
+          png_data_is(bytes, 12, "mntr") != 0) ||
+        png_data_is(bytes, 16, "RGB ") == 0 ||
+        png_data_is(bytes, 20, "XYZ ") == 0 ||
+        png_data_is(bytes, 36, "acsp") == 0 ||
+        png_read_u32_be(bytes, 64) > 3) { return result; }
+    let reserved: i32 = 100;
+    while (reserved < 128) {
+        if (bytes[reserved] != 0) { return result; }
+        reserved = reserved + 1;
+    }
+    let illuminant: PngVectorF64 = PngVectorF64{
+        .x = png_read_s15_fixed16(bytes, 68),
+        .y = png_read_s15_fixed16(bytes, 72),
+        .z = png_read_s15_fixed16(bytes, 76),
+    };
+    if (png_f64_abs(illuminant.x - 0.9642) > 0.001 ||
+        png_f64_abs(illuminant.y - 1.0) > 0.001 ||
+        png_f64_abs(illuminant.z - 0.8249) > 0.001) { return result; }
+    let red_xyz: PngIccVectorResult = png_icc_xyz(bytes, png_icc_tag(bytes, "rXYZ"));
+    let green_xyz: PngIccVectorResult = png_icc_xyz(bytes, png_icc_tag(bytes, "gXYZ"));
+    let blue_xyz: PngIccVectorResult = png_icc_xyz(bytes, png_icc_tag(bytes, "bXYZ"));
+    if (red_xyz.valid == 0 || green_xyz.valid == 0 || blue_xyz.valid == 0) {
+        return result;
+    }
+    let red_gamma: i64 = png_icc_curve_gamma(bytes, png_icc_tag(bytes, "rTRC"));
+    let green_gamma: i64 = png_icc_curve_gamma(bytes, png_icc_tag(bytes, "gTRC"));
+    let blue_gamma: i64 = png_icc_curve_gamma(bytes, png_icc_tag(bytes, "bTRC"));
+    if (red_gamma == 0 || red_gamma != green_gamma || red_gamma != blue_gamma) {
+        return result;
+    }
+    let source: PngMatrixF64 = PngMatrixF64{
+        .m00 = red_xyz.value.x, .m01 = green_xyz.value.x, .m02 = blue_xyz.value.x,
+        .m10 = red_xyz.value.y, .m11 = green_xyz.value.y, .m12 = blue_xyz.value.y,
+        .m20 = red_xyz.value.z, .m21 = green_xyz.value.z, .m22 = blue_xyz.value.z,
+    };
+    let target: PngMatrixF64 = PngMatrixF64{
+        .m00 = 0.4360747, .m01 = 0.3850649, .m02 = 0.1430804,
+        .m10 = 0.2225045, .m11 = 0.7168786, .m12 = 0.0606169,
+        .m20 = 0.0139322, .m21 = 0.0971045, .m22 = 0.7141733,
+    };
+    let target_inverse: PngMatrixF64Result = png_matrix_inverse(target);
+    if (target_inverse.valid == 0) { return result; }
+    let matrix: PngMatrixF64 = png_matrix_multiply(target_inverse.matrix, source);
+    if (png_matrix_finite_bounded(matrix, 8.0) == 0) { return result; }
+    result.transform = PngColorTransform{
+        .m00 = png_quantize_matrix_value(matrix.m00),
+        .m01 = png_quantize_matrix_value(matrix.m01),
+        .m02 = png_quantize_matrix_value(matrix.m02),
+        .m10 = png_quantize_matrix_value(matrix.m10),
+        .m11 = png_quantize_matrix_value(matrix.m11),
+        .m12 = png_quantize_matrix_value(matrix.m12),
+        .m20 = png_quantize_matrix_value(matrix.m20),
+        .m21 = png_quantize_matrix_value(matrix.m21),
+        .m22 = png_quantize_matrix_value(matrix.m22),
+        .active = 1, .valid = 1,
+    };
+    result.source_gamma = red_gamma; result.valid = 1;
+    return result;
+}
+
+fn png_iccp_profile(bytes: []u8, offset: i32,
+    length: i32) PngIccProfileResult {
+    let result: PngIccProfileResult = PngIccProfileResult{
+        .transform = png_color_transform_identity(), .source_gamma = 0, .valid = 0,
+    };
+    if (length < 9) { return result; }
+    let name_end: i32 = offset;
+    while (name_end < offset + length && name_end - offset < 80 &&
+        bytes[name_end] != 0) {
+        let value: i32 = bytes[name_end] as i32;
+        if (!((value >= 32 && value <= 126) || value >= 161) ||
+            ((name_end == offset || bytes[name_end - 1] == 32) && value == 32)) {
+            return result;
+        }
+        name_end = name_end + 1;
+    }
+    if (name_end == offset || name_end >= offset + length ||
+        name_end - offset > 79 || bytes[name_end] != 0 ||
+        bytes[name_end - 1] == 32 || name_end + 2 >= offset + length ||
+        bytes[name_end + 1] != 0) { return result; }
+    let compressed_offset: i32 = name_end + 2;
+    let inflated: ZlibInflateResult = zlib_inflate(
+        bytes[compressed_offset..offset + length], 4194304
+    );
+    if (inflated.error != ZlibInflateError.none) {
+        zlib_inflate_free(&inflated); return result;
+    }
+    let parsed: PngIccProfileResult = png_icc_matrix_profile(
+        inflated.bytes.data[0..inflated.bytes.len]
+    );
+    zlib_inflate_free(&inflated);
+    return parsed;
 }
 
 fn png_color_channels(color_type: i32) i32 {
@@ -907,8 +1108,11 @@ fn png_decode(bytes: []u8) PngDecodeResult {
     let saw_srgb: i32 = 0;
     let saw_gamma: i32 = 0;
     let saw_chrm: i32 = 0;
+    let saw_icc: i32 = 0;
     let source_gamma: i64 = 0;
     let color_transform: PngColorTransform = png_color_transform_identity();
+    let icc_gamma: i64 = 0;
+    let icc_transform: PngColorTransform = png_color_transform_identity();
     let offset: i32 = 8;
 
     while (offset < bytes.len && saw_end == 0) {
@@ -1073,6 +1277,29 @@ fn png_decode(bytes: []u8) PngDecodeResult {
             }
             saw_chrm = 1;
         } else if (png_chunk_is(bytes, offset, "iCCP") != 0) {
+            if (saw_icc != 0) {
+                return png_decode_parse_fail(&idat, &palette, &transparency,
+                    PngDecodeError.duplicate_chunk, offset as i64);
+            }
+            if (saw_palette != 0 || saw_idat != 0) {
+                return png_decode_parse_fail(&idat, &palette, &transparency,
+                    PngDecodeError.invalid_chunk_order, offset as i64);
+            }
+            if (!(color_type == 2 || color_type == 3 || color_type == 6)) {
+                return png_decode_parse_fail(&idat, &palette, &transparency,
+                    PngDecodeError.unsupported_color_profile, offset as i64);
+            }
+            let profile: PngIccProfileResult = png_iccp_profile(
+                bytes, data_offset, length
+            );
+            if (profile.valid == 0) {
+                return png_decode_parse_fail(&idat, &palette, &transparency,
+                    PngDecodeError.unsupported_color_profile, offset as i64);
+            }
+            icc_gamma = profile.source_gamma;
+            icc_transform = profile.transform;
+            saw_icc = 1;
+        } else if (png_chunk_is(bytes, offset, "cICP") != 0) {
             return png_decode_parse_fail(&idat, &palette, &transparency,
                 PngDecodeError.unsupported_color_profile, offset as i64);
         } else {
@@ -1149,11 +1376,16 @@ fn png_decode(bytes: []u8) PngDecodeResult {
         conversion_gamma = 0;
         effective_transform = png_color_transform_identity();
     }
+    if (saw_icc != 0) {
+        conversion_gamma = icc_gamma;
+        effective_transform = icc_transform;
+    }
     let result: PngDecodeResult = png_expand_rgba(
         scanlines.bytes.data[0..scanlines.bytes.len], width, height,
         row_bytes64 as i32, bit_depth, color_type, palette, transparency,
         conversion_gamma, effective_transform,
-        (saw_srgb == 0 && !(source_gamma != 0 && saw_chrm != 0)) as i32
+        (saw_srgb == 0 && saw_icc == 0 &&
+            !(source_gamma != 0 && saw_chrm != 0)) as i32
     );
     free[u8](&scanlines.bytes); free[u8](&palette); free[u8](&transparency);
     return result;

@@ -201,8 +201,79 @@ fn fixture_rewrite_crc(bytes: *ArrayList[u8], chunk_offset: i32) void {
     fixture_write_u32_be(bytes, crc_offset, crc);
 }
 
+fn fixture_write_signature(bytes: *ArrayList[u8], offset: i32,
+    signature: []u8) void {
+    let i: i32 = 0;
+    while (i < 4) { bytes.*.data[offset + i] = signature[i]; i = i + 1; }
+}
+
+fn fixture_icc_tag(bytes: *ArrayList[u8], entry: i32, signature: []u8,
+    data_offset: i32, data_size: i32) void {
+    fixture_write_signature(bytes, entry, signature);
+    fixture_write_u32_be(bytes, entry + 4, data_offset);
+    fixture_write_u32_be(bytes, entry + 8, data_size);
+}
+
+fn fixture_icc_xyz(bytes: *ArrayList[u8], offset: i32,
+    x: i64, y: i64, z: i64) void {
+    fixture_write_signature(bytes, offset, "XYZ ");
+    fixture_write_u32_be(bytes, offset + 8, x);
+    fixture_write_u32_be(bytes, offset + 12, y);
+    fixture_write_u32_be(bytes, offset + 16, z);
+}
+
+fn fixture_matrix_icc(kind: i32) ArrayList[u8] {
+    let bytes: ArrayList[u8] = make[u8](280);
+    let i: i32 = 0;
+    while (i < 280) { push[u8](&bytes, 0); i = i + 1; }
+    fixture_write_u32_be(&bytes, 0, 280);
+    bytes.data[8] = 4;
+    fixture_write_signature(&bytes, 12, "mntr");
+    fixture_write_signature(&bytes, 16, "RGB ");
+    fixture_write_signature(&bytes, 20, "XYZ ");
+    fixture_write_signature(&bytes, 36, "acsp");
+    fixture_write_u32_be(&bytes, 68, 63190);
+    fixture_write_u32_be(&bytes, 72, 65536);
+    fixture_write_u32_be(&bytes, 76, 54061);
+    fixture_write_u32_be(&bytes, 128, 6);
+    fixture_icc_tag(&bytes, 132, "rXYZ", 204, 20);
+    fixture_icc_tag(&bytes, 144, "gXYZ", 224, 20);
+    fixture_icc_tag(&bytes, 156, "bXYZ", 244, 20);
+    fixture_icc_tag(&bytes, 168, "rTRC", 264, 12);
+    fixture_icc_tag(&bytes, 180, "gTRC", 264, 12);
+    fixture_icc_tag(&bytes, 192, "bTRC", 264, 12);
+    if (kind == 2) {
+        fixture_icc_xyz(&bytes, 204, 33759, 15807, 0 - 69);
+        fixture_icc_xyz(&bytes, 224, 19135, 45367, 2745);
+        fixture_icc_xyz(&bytes, 244, 10296, 4363, 51385);
+    } else {
+        fixture_icc_xyz(&bytes, 204, 28579, 14582, 913);
+        fixture_icc_xyz(&bytes, 224, 25236, 46981, 6364);
+        fixture_icc_xyz(&bytes, 244, 9377, 3973, 46804);
+    }
+    fixture_write_signature(&bytes, 264, "curv");
+    if (kind == 3) { fixture_write_u32_be(&bytes, 136, 4000000); }
+    if (kind == 4) {
+        fixture_write_u32_be(&bytes, 176, 16);
+        fixture_write_u32_be(&bytes, 188, 16);
+        fixture_write_u32_be(&bytes, 200, 16);
+        fixture_write_u32_be(&bytes, 272, 2);
+        bytes.data[278] = 255; bytes.data[279] = 255;
+    }
+    if (kind == 8) {
+        fixture_write_u32_be(&bytes, 176, 16);
+        fixture_write_u32_be(&bytes, 188, 16);
+        fixture_write_u32_be(&bytes, 200, 16);
+        fixture_write_signature(&bytes, 264, "para");
+        fixture_write_u32_be(&bytes, 276, 65536);
+    }
+    if (kind == 10) { fixture_write_signature(&bytes, 144, "rXYZ"); }
+    if (kind == 11) { fixture_write_u32_be(&bytes, 0, 279); }
+    return bytes;
+}
+
 fn fixture_profile_png(gamma_count: i32, chromaticity_kind: i32,
-    gamma_value: i64, include_srgb: i32) PngEncodeResult {
+    gamma_value: i64, include_srgb: i32, icc_kind: i32) PngEncodeResult {
     let compressed: ZlibStoreEncodeResult = zlib_store_encode("\x00\x11\x22\x33\xff");
     let output: ArrayList[u8] = make[u8](compressed.bytes.len + 160);
     push[u8](&output, 137); push[u8](&output, 80);
@@ -224,6 +295,36 @@ fn fixture_profile_png(gamma_count: i32, chromaticity_kind: i32,
         gamma_index = gamma_index + 1;
     }
     free[u8](&gamma);
+    if (icc_kind == 9) {
+        png_write_chunk(&output, "cICP", "\x01\x0d\x00\x01");
+    } else if (icc_kind != 0) {
+        let profile: ArrayList[u8] = fixture_matrix_icc(icc_kind);
+        let compressed_profile: ZlibStoreEncodeResult = zlib_store_encode(
+            profile.data[0..profile.len]
+        );
+        if (icc_kind == 12 && compressed_profile.bytes.len > 3) {
+            compressed_profile.bytes.data[2] =
+                compressed_profile.bytes.data[2] ^ 1;
+        }
+        let iccp: ArrayList[u8] = make[u8](compressed_profile.bytes.len + 16);
+        let name: []u8 = "Zagkit matrix";
+        if (icc_kind == 5) { push[u8](&iccp, 32); }
+        let name_index: i32 = 0;
+        while (name_index < name.len) {
+            push[u8](&iccp, name[name_index]); name_index = name_index + 1;
+        }
+        push[u8](&iccp, 0);
+        if (icc_kind == 6) { push[u8](&iccp, 1); }
+        else { push[u8](&iccp, 0); }
+        png_copy_append(&iccp,
+            compressed_profile.bytes.data[0..compressed_profile.bytes.len]);
+        png_write_chunk(&output, "iCCP", iccp.data[0..iccp.len]);
+        if (icc_kind == 7) {
+            png_write_chunk(&output, "iCCP", iccp.data[0..iccp.len]);
+        }
+        free[u8](&iccp); zlib_store_encode_free(&compressed_profile);
+        free[u8](&profile);
+    }
     if (chromaticity_kind != 0) {
         let chromaticity: ArrayList[u8] = make[u8](32);
         let white_x: i64 = 31270; let white_y: i64 = 32900;
@@ -426,7 +527,7 @@ fn color_contract(state: *TestState) void {
 }
 
 fn color_profile_contract(state: *TestState) void {
-    let declared_fixture: PngEncodeResult = fixture_profile_png(1, 1, 45455, 0);
+    let declared_fixture: PngEncodeResult = fixture_profile_png(1, 1, 45455, 0, 0);
     let declared: PngDecodeResult = png_decode(
         declared_fixture.bytes.data[0..declared_fixture.bytes.len]
     );
@@ -436,7 +537,7 @@ fn color_profile_contract(state: *TestState) void {
         "declared gamma and standard primaries convert without assumed profile truth");
     png_decode_free(&declared); png_encode_free(&declared_fixture);
 
-    let gamma_only_fixture: PngEncodeResult = fixture_profile_png(1, 0, 45455, 0);
+    let gamma_only_fixture: PngEncodeResult = fixture_profile_png(1, 0, 45455, 0, 0);
     let gamma_only: PngDecodeResult = png_decode(
         gamma_only_fixture.bytes.data[0..gamma_only_fixture.bytes.len]
     );
@@ -445,7 +546,7 @@ fn color_profile_contract(state: *TestState) void {
         "gamma without declared primaries keeps the fallback-profile truth visible");
     png_decode_free(&gamma_only); png_encode_free(&gamma_only_fixture);
 
-    let linear_fixture: PngEncodeResult = fixture_profile_png(1, 0, 100000, 0);
+    let linear_fixture: PngEncodeResult = fixture_profile_png(1, 0, 100000, 0, 0);
     let linear: PngDecodeResult = png_decode(
         linear_fixture.bytes.data[0..linear_fixture.bytes.len]
     );
@@ -456,7 +557,7 @@ fn color_profile_contract(state: *TestState) void {
         "linear-gamma samples convert deterministically into canonical sRGB");
     png_decode_free(&linear); png_encode_free(&linear_fixture);
 
-    let zero_fixture: PngEncodeResult = fixture_profile_png(1, 0, 0, 0);
+    let zero_fixture: PngEncodeResult = fixture_profile_png(1, 0, 0, 0, 0);
     let zero: PngDecodeResult = png_decode(
         zero_fixture.bytes.data[0..zero_fixture.bytes.len]
     );
@@ -466,7 +567,7 @@ fn color_profile_contract(state: *TestState) void {
         "meaningless zero gamma is ignored while fallback truth stays visible");
     png_decode_free(&zero); png_encode_free(&zero_fixture);
 
-    let p3_fixture: PngEncodeResult = fixture_profile_png(1, 2, 100000, 0);
+    let p3_fixture: PngEncodeResult = fixture_profile_png(1, 2, 100000, 0, 0);
     let p3: PngDecodeResult = png_decode(
         p3_fixture.bytes.data[0..p3_fixture.bytes.len]
     );
@@ -476,7 +577,7 @@ fn color_profile_contract(state: *TestState) void {
         "Display P3 primaries convert through the bounded linear matrix path");
     png_decode_free(&p3); png_encode_free(&p3_fixture);
 
-    let adapted_fixture: PngEncodeResult = fixture_profile_png(1, 3, 100000, 0);
+    let adapted_fixture: PngEncodeResult = fixture_profile_png(1, 3, 100000, 0, 0);
     let adapted: PngDecodeResult = png_decode(
         adapted_fixture.bytes.data[0..adapted_fixture.bytes.len]
     );
@@ -486,7 +587,7 @@ fn color_profile_contract(state: *TestState) void {
         "non-D65 white points use deterministic Bradford adaptation");
     png_decode_free(&adapted); png_encode_free(&adapted_fixture);
 
-    let assumed_fixture: PngEncodeResult = fixture_profile_png(0, 2, 0, 0);
+    let assumed_fixture: PngEncodeResult = fixture_profile_png(0, 2, 0, 0, 0);
     let assumed: PngDecodeResult = png_decode(
         assumed_fixture.bytes.data[0..assumed_fixture.bytes.len]
     );
@@ -496,7 +597,7 @@ fn color_profile_contract(state: *TestState) void {
         "chromaticities without a transfer curve preserve fallback-profile truth");
     png_decode_free(&assumed); png_encode_free(&assumed_fixture);
 
-    let precedence_fixture: PngEncodeResult = fixture_profile_png(1, 2, 100000, 1);
+    let precedence_fixture: PngEncodeResult = fixture_profile_png(1, 2, 100000, 1, 0);
     let precedence: PngDecodeResult = png_decode(
         precedence_fixture.bytes.data[0..precedence_fixture.bytes.len]
     );
@@ -506,7 +607,7 @@ fn color_profile_contract(state: *TestState) void {
         "explicit sRGB takes precedence over accompanying gamma and chromaticities");
     png_decode_free(&precedence); png_encode_free(&precedence_fixture);
 
-    let duplicate_fixture: PngEncodeResult = fixture_profile_png(2, 0, 45455, 0);
+    let duplicate_fixture: PngEncodeResult = fixture_profile_png(2, 0, 45455, 0, 0);
     let duplicate: PngDecodeResult = png_decode(
         duplicate_fixture.bytes.data[0..duplicate_fixture.bytes.len]
     );
@@ -514,13 +615,140 @@ fn color_profile_contract(state: *TestState) void {
         "duplicate color metadata fails before image decompression");
     png_decode_free(&duplicate); png_encode_free(&duplicate_fixture);
 
-    let singular_fixture: PngEncodeResult = fixture_profile_png(1, 4, 45455, 0);
+    let singular_fixture: PngEncodeResult = fixture_profile_png(1, 4, 45455, 0, 0);
     let singular: PngDecodeResult = png_decode(
         singular_fixture.bytes.data[0..singular_fixture.bytes.len]
     );
     expect(state, singular.error == PngDecodeError.unsupported_color_profile,
         "singular chromaticities fail before decompression or conversion");
     png_decode_free(&singular); png_encode_free(&singular_fixture);
+
+    let icc_fixture: PngEncodeResult = fixture_profile_png(0, 0, 0, 0, 1);
+    let icc: PngDecodeResult = png_decode(
+        icc_fixture.bytes.data[0..icc_fixture.bytes.len]
+    );
+    expect(state, icc.error == PngDecodeError.none && icc.profile_assumed == 0 &&
+        icc.pixels.data[0] == 73 && icc.pixels.data[1] == 102 &&
+        icc.pixels.data[2] == 124,
+        "bounded ICC matrix and identity TRCs execute as declared profile truth");
+    png_decode_free(&icc); png_encode_free(&icc_fixture);
+
+    let icc_p3_fixture: PngEncodeResult = fixture_profile_png(0, 0, 0, 0, 2);
+    let icc_p3: PngDecodeResult = png_decode(
+        icc_p3_fixture.bytes.data[0..icc_p3_fixture.bytes.len]
+    );
+    expect(state, icc_p3.error == PngDecodeError.none &&
+        icc_p3.profile_assumed == 0 && icc_p3.pixels.data[0] == 64 &&
+        icc_p3.pixels.data[1] == 103 && icc_p3.pixels.data[2] == 126,
+        "Display P3 ICC matrix columns convert through the D50 PCS");
+    png_decode_free(&icc_p3); png_encode_free(&icc_p3_fixture);
+
+    let icc_precedence_fixture: PngEncodeResult = fixture_profile_png(
+        1, 1, 45455, 1, 2
+    );
+    let icc_precedence: PngDecodeResult = png_decode(
+        icc_precedence_fixture.bytes.data[0..icc_precedence_fixture.bytes.len]
+    );
+    expect(state, icc_precedence.error == PngDecodeError.none &&
+        icc_precedence.pixels.data[0] == 64 &&
+        icc_precedence.pixels.data[1] == 103 &&
+        icc_precedence.pixels.data[2] == 126,
+        "understood iCCP takes precedence over compatibility color chunks");
+    png_decode_free(&icc_precedence);
+    png_encode_free(&icc_precedence_fixture);
+
+    let bad_icc_fixture: PngEncodeResult = fixture_profile_png(0, 0, 0, 0, 3);
+    let bad_icc: PngDecodeResult = png_decode(
+        bad_icc_fixture.bytes.data[0..bad_icc_fixture.bytes.len]
+    );
+    expect(state, bad_icc.error == PngDecodeError.unsupported_color_profile,
+        "ICC tag offsets cannot escape the bounded decompressed profile");
+    png_decode_free(&bad_icc); png_encode_free(&bad_icc_fixture);
+
+    let lut_icc_fixture: PngEncodeResult = fixture_profile_png(0, 0, 0, 0, 4);
+    let lut_icc: PngDecodeResult = png_decode(
+        lut_icc_fixture.bytes.data[0..lut_icc_fixture.bytes.len]
+    );
+    expect(state, lut_icc.error == PngDecodeError.unsupported_color_profile,
+        "unevaluated sampled ICC curves fail instead of being approximated");
+    png_decode_free(&lut_icc); png_encode_free(&lut_icc_fixture);
+
+    let bad_name_fixture: PngEncodeResult = fixture_profile_png(0, 0, 0, 0, 5);
+    let bad_name: PngDecodeResult = png_decode(
+        bad_name_fixture.bytes.data[0..bad_name_fixture.bytes.len]
+    );
+    expect(state, bad_name.error == PngDecodeError.unsupported_color_profile,
+        "iCCP profile names reject leading and consecutive spaces");
+    png_decode_free(&bad_name); png_encode_free(&bad_name_fixture);
+
+    let bad_method_fixture: PngEncodeResult = fixture_profile_png(0, 0, 0, 0, 6);
+    let bad_method: PngDecodeResult = png_decode(
+        bad_method_fixture.bytes.data[0..bad_method_fixture.bytes.len]
+    );
+    expect(state, bad_method.error == PngDecodeError.unsupported_color_profile,
+        "unknown iCCP compression methods fail before profile inflate");
+    png_decode_free(&bad_method); png_encode_free(&bad_method_fixture);
+
+    let duplicate_icc_fixture: PngEncodeResult = fixture_profile_png(0, 0, 0, 0, 7);
+    let duplicate_icc: PngDecodeResult = png_decode(
+        duplicate_icc_fixture.bytes.data[0..duplicate_icc_fixture.bytes.len]
+    );
+    expect(state, duplicate_icc.error == PngDecodeError.duplicate_chunk,
+        "duplicate iCCP chunks fail before image decompression");
+    png_decode_free(&duplicate_icc); png_encode_free(&duplicate_icc_fixture);
+
+    let parametric_icc_fixture: PngEncodeResult = fixture_profile_png(
+        0, 0, 0, 0, 8
+    );
+    let parametric_icc: PngDecodeResult = png_decode(
+        parametric_icc_fixture.bytes.data[0..parametric_icc_fixture.bytes.len]
+    );
+    expect(state, parametric_icc.error == PngDecodeError.none &&
+        parametric_icc.profile_assumed == 0 &&
+        parametric_icc.pixels.data[0] == 73 &&
+        parametric_icc.pixels.data[1] == 102 &&
+        parametric_icc.pixels.data[2] == 124,
+        "ICC parametric gamma curves execute through the same linear pipeline");
+    png_decode_free(&parametric_icc);
+    png_encode_free(&parametric_icc_fixture);
+
+    let cicp_fixture: PngEncodeResult = fixture_profile_png(0, 0, 0, 0, 9);
+    let cicp: PngDecodeResult = png_decode(
+        cicp_fixture.bytes.data[0..cicp_fixture.bytes.len]
+    );
+    expect(state, cicp.error == PngDecodeError.unsupported_color_profile,
+        "unimplemented higher-precedence cICP metadata fails explicitly");
+    png_decode_free(&cicp); png_encode_free(&cicp_fixture);
+
+    let duplicate_tag_fixture: PngEncodeResult = fixture_profile_png(
+        0, 0, 0, 0, 10
+    );
+    let duplicate_tag: PngDecodeResult = png_decode(
+        duplicate_tag_fixture.bytes.data[0..duplicate_tag_fixture.bytes.len]
+    );
+    expect(state, duplicate_tag.error == PngDecodeError.unsupported_color_profile,
+        "duplicate required ICC tags fail without ambiguous profile execution");
+    png_decode_free(&duplicate_tag); png_encode_free(&duplicate_tag_fixture);
+
+    let size_mismatch_fixture: PngEncodeResult = fixture_profile_png(
+        0, 0, 0, 0, 11
+    );
+    let size_mismatch: PngDecodeResult = png_decode(
+        size_mismatch_fixture.bytes.data[0..size_mismatch_fixture.bytes.len]
+    );
+    expect(state, size_mismatch.error == PngDecodeError.unsupported_color_profile,
+        "ICC declared size must equal the bounded decompressed profile");
+    png_decode_free(&size_mismatch); png_encode_free(&size_mismatch_fixture);
+
+    let broken_iccp_fixture: PngEncodeResult = fixture_profile_png(
+        0, 0, 0, 0, 12
+    );
+    let broken_iccp: PngDecodeResult = png_decode(
+        broken_iccp_fixture.bytes.data[0..broken_iccp_fixture.bytes.len]
+    );
+    expect(state, broken_iccp.error == PngDecodeError.unsupported_color_profile,
+        "corrupt iCCP zlib streams fail before ICC tag parsing");
+    png_decode_free(&broken_iccp); png_encode_free(&broken_iccp_fixture);
 
     let ramp: ArrayList[u8] = make[u8](256);
     let sample: i32 = 0;

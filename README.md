@@ -184,9 +184,12 @@ pixels. End-to-end decoded-resource CPU goldens pass at 1x, 1.25x, 1.5x, 2x,
 and 3x on both compiled architectures. Non-sRGB gamma transfer curves and
 arbitrary valid `cHRM` primaries now convert deterministically to sRGB, including
 Bradford white-point adaptation; eight full transfer ramps and Display P3/D50
-fixtures match independent references. A deterministic 40,000-input mutation
-harness plus 4,096 repeated cleanup cycles passes on both architectures. ICC
-profile conversion and coverage-guided sanitizer evidence remain open, so the `G3-PNG`
+fixtures match independent references. Bounded `iCCP` ingestion executes ICC
+v2/v4 RGB matrix profiles in XYZ PCS with shared identity, gamma, or type-0
+parametric curves; malformed wrappers, profile bounds, unsupported sampled
+curves, and LUT profiles fail explicitly. A deterministic 60,000-input PNG/ICC
+validation harness plus 4,096 repeated cleanup cycles passes on both architectures. General
+ICC curve/LUT execution and coverage-guided sanitizer evidence remain open, so the `G3-PNG`
 completion box remains deliberately unchecked. See the
 [image and PNG ingestion contract](docs/architecture/images.md).
 

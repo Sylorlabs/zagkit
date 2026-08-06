@@ -104,6 +104,32 @@ fn mutation_contract(state: *FuzzState) void {
     png_encode_free(&encoded); cpu_surface_free(&surface);
 }
 
+fn icc_profile_contract(state: *FuzzState) void {
+    let random: i64 = 297121507;
+    let valid: i32 = 1;
+    let case_index: i32 = 0;
+    while (case_index < 20000 && valid != 0) {
+        let length: i32 = (fuzz_next(&random) % 1025) as i32;
+        let bytes: ArrayList[u8] = make[u8](length);
+        let i: i32 = 0;
+        while (i < length) {
+            push[u8](&bytes, (fuzz_next(&random) & 255) as u8);
+            i = i + 1;
+        }
+        let profile: PngIccProfileResult = png_icc_matrix_profile(
+            bytes.data[0..bytes.len]
+        );
+        if ((profile.valid != 0 && profile.valid != 1) ||
+            (profile.valid != 0 && (profile.transform.valid == 0 ||
+                profile.transform.active == 0 || profile.source_gamma <= 0))) {
+            valid = 0;
+        }
+        free[u8](&bytes); case_index = case_index + 1;
+    }
+    fuzz_expect(state, valid != 0 && case_index == 20000,
+        "20000 arbitrary ICC profiles remain bounded and fail closed");
+}
+
 fn prefix_and_repeat_contract(state: *FuzzState) void {
     let surface: CpuSurface = fuzz_seed_surface();
     let encoded: PngEncodeResult = png_encode_surface(surface);
@@ -143,6 +169,7 @@ fn main() i32 {
     let state: FuzzState = FuzzState{ .passed = 0, .failed = 0 };
     arbitrary_bytes_contract(&state);
     mutation_contract(&state);
+    icc_profile_contract(&state);
     prefix_and_repeat_contract(&state);
     _zag_print("PNG decode fuzz: pass=");
     let passed: []u8 = _zag_i64_to_str(state.passed as i64);
