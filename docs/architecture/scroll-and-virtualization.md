@@ -69,6 +69,14 @@ minimum and maximum bounds, reports consumed and unconsumed delta, and advances
 both column and model revisions only when width changes. Pinned columns must be
 one contiguous logical-leading region and mirror physically under RTL.
 
+`semantics_project_table` creates a bounded parallel tree from those live
+cells. The Table root retains the full logical row and column counts. Live row,
+header, and cell nodes retain exact fixed-point frames and zero-based logical
+indices. Their `NodeKey` values derive deterministically from the authoritative
+composite identity; all generated keys and the caller-owned root ID are checked
+against the existing semantic tree before the first node is added. A collision
+therefore fails without a partial semantic projection.
+
 ## Tree projection
 
 Tree input is canonical preorder with stable ID, explicit parent ID, depth,
@@ -82,6 +90,14 @@ row frame remains available for selection and hit testing. RTL moves indentation
 to the right without changing semantic order. An open-addressed stable-ID index
 keeps duplicate validation linear; the current retained projection remains
 capped at 16,384 source nodes as an explicit allocation bound.
+
+`semantics_project_tree` retains the visible projection count on the Tree root
+while adding only live placements. Each live item exposes its stable source ID,
+full row frame, zero-based visible row, one-based hierarchy level and set
+position, and an expand or collapse action that matches current state. Virtual
+items are direct semantic children of the collection root so an offscreen
+ancestor is never fabricated as a live node; level metadata preserves the
+hierarchy required by native accessibility adapters.
 
 ## Focus and recycling lifecycle
 
@@ -106,9 +122,10 @@ The executable suites prove a one-million-row mid-list query with nine live
 placements and fewer than 64 examined records, a million-row two-axis Table,
 collapsed and expanded Tree projections, sparse variable extents, anchor and
 offscreen-focus stability, RTL placement, exact empty and padding-only ranges,
-bounded allocation failures, malformed input, overflow rejection, and scroll,
-expansion, and 100-window recycling sweeps. Replay incorporates List, Table,
-Tree, scroll, and lifecycle identities. Stopwatch timing in CI is not a 120 Hz
+bounded allocation failures, malformed input, overflow rejection, scroll,
+expansion, semantic collection projection, collision-atomic identity, and
+100-window recycling sweeps. Replay incorporates List, Table, Tree, scroll,
+semantics, and lifecycle identities. Stopwatch timing in CI is not a 120 Hz
 claim. Native input, semantic adapters, editable cells, sorting, selection,
 drag reordering, general Tree indexing, and reference-hardware performance
 remain open.

@@ -1,0 +1,151 @@
+@import("std:list")
+@import("../src/semantics/collections.zag")
+
+struct TestState { passed: i32, failed: i32 }
+
+fn expect(state: *TestState, condition: i32, name: []u8) void {
+    if (condition != 0) {
+        state.*.passed = state.*.passed + 1;
+        _zag_print("ok  "); _zag_println(name);
+    } else {
+        state.*.failed = state.*.failed + 1;
+        _zag_print("FAIL "); _zag_println(name);
+    }
+}
+
+fn table_semantics_contract(state: *TestState) void {
+    let overrides: ArrayList[VirtualExtentOverride] = make[VirtualExtentOverride](1);
+    let rows: VirtualListModel = virtual_model(1000000, 1000, 20, 1, 3, overrides);
+    let columns: ArrayList[VirtualTableColumn] = make[VirtualTableColumn](4);
+    let pinned: VirtualTableColumn = virtual_table_column(10, 40, 30, 60);
+    pinned.pinned = 1;
+    push[VirtualTableColumn](&columns, pinned);
+    push[VirtualTableColumn](&columns, virtual_table_column(11, 50, 30, 80));
+    push[VirtualTableColumn](&columns, virtual_table_column(12, 50, 30, 80));
+    push[VirtualTableColumn](&columns, virtual_table_column(13, 50, 30, 80));
+    let model: VirtualTableModel = virtual_table_model(7, rows, columns, 2);
+    let style: VirtualTableStyle = virtual_table_style(20, 2, insets_all(2));
+    let scroll: i64 = virtual_item_offset(rows,
+        virtual_style(VirtualAxis.vertical, insets_all(0)), 500000);
+    let layout: VirtualTableResult = virtual_table_layout(model, size(180, 120), scroll, 20, style);
+    let tree: SemanticsTree = semantics_tree_make();
+    let root_id: NodeKey = node_key_scoped(700, 2);
+    let projected: CollectionSemanticsResult = semantics_project_table(
+        &tree, layout, root_id, semantic_root_key(), "Parts"
+    );
+    let root_index: i32 = semantics_find_index(tree, root_id);
+    expect(state, projected.error == CollectionSemanticsError.none && root_index >= 0 &&
+        tree.nodes.data[root_index].row_count == 1000000 &&
+        tree.nodes.data[root_index].column_count == 4,
+        "Table semantics retain full logical counts while materializing only live cells");
+    expect(state, projected.live_items == layout.cells.len &&
+        projected.nodes_added < 200 && tree.nodes.len == projected.nodes_added,
+        "Table semantic residency stays bounded by live layout output");
+
+    let target: VirtualTableCell = layout.cells.data[2];
+    let target_id: NodeKey = semantic_table_cell_key(root_id, target.id);
+    let target_index: i32 = semantics_find_index(tree, target_id);
+    expect(state, target_index >= 0 &&
+        tree.nodes.data[target_index].column_index == target.column_index as i64 &&
+        tree.nodes.data[target_index].bounds.x == target.frame.x &&
+        tree.nodes.data[target_index].has_bounds == 1,
+        "Table cells expose stable ID-first coordinates and exact layout geometry");
+    expect(state, node_key_equal(target_id, semantic_table_cell_key(root_id, target.id)) == 1,
+        "Table cell semantic IDs are deterministic from authoritative composite identity");
+
+    let before: i32 = tree.nodes.len;
+    let duplicate: CollectionSemanticsResult = semantics_project_table(
+        &tree, layout, root_id, semantic_root_key(), "Parts"
+    );
+    expect(state, duplicate.error == CollectionSemanticsError.identity_collision &&
+        tree.nodes.len == before,
+        "Table identity collisions fail during preflight without partial tree mutation");
+
+    layout.cells.data[0].id.column_id = 999;
+    let malformed_tree: SemanticsTree = semantics_tree_make();
+    let malformed: CollectionSemanticsResult = semantics_project_table(
+        &malformed_tree, layout, node_key(701), semantic_root_key(), "Malformed"
+    );
+    expect(state, malformed.error == CollectionSemanticsError.invalid_result &&
+        malformed.error_index == 0 && malformed_tree.nodes.len == 0,
+        "fabricated Table cell identity is rejected before semantic mutation");
+    semantics_tree_free(&malformed_tree);
+    semantics_tree_free(&tree);
+    virtual_table_free(&layout);
+    free[VirtualTableColumn](&columns);
+    free[VirtualExtentOverride](&overrides);
+}
+
+fn tree_source() ArrayList[VirtualTreeNode] {
+    let source: ArrayList[VirtualTreeNode] = make[VirtualTreeNode](5);
+    push[VirtualTreeNode](&source, virtual_tree_node(1, 0, 0, 1, 1, 12, 1));
+    push[VirtualTreeNode](&source, virtual_tree_node(2, 1, 1, 0, 0, 10, 1));
+    push[VirtualTreeNode](&source, virtual_tree_node(3, 1, 1, 1, 0, 10, 1));
+    push[VirtualTreeNode](&source, virtual_tree_node(4, 3, 2, 0, 0, 10, 1));
+    push[VirtualTreeNode](&source, virtual_tree_node(5, 0, 0, 0, 0, 10, 1));
+    return source;
+}
+
+fn tree_semantics_contract(state: *TestState) void {
+    let source: ArrayList[VirtualTreeNode] = tree_source();
+    let projection: VirtualTreeProjection = virtual_tree_project(source, 1);
+    let style: VirtualTreeStyle = virtual_tree_style(10, 1, 4, insets_all(1));
+    let layout: VirtualTreeResult = virtual_tree_layout(projection, size(100, 30), 0, style);
+    let tree: SemanticsTree = semantics_tree_make();
+    let root_id: NodeKey = node_key_scoped(800, 4);
+    let projected: CollectionSemanticsResult = semantics_project_tree(
+        &tree, layout, root_id, semantic_root_key(), "Assembly"
+    );
+    let root_index: i32 = semantics_find_index(tree, root_id);
+    expect(state, projected.error == CollectionSemanticsError.none && root_index >= 0 &&
+        tree.nodes.data[root_index].row_count == layout.semantic_count &&
+        projected.live_items == layout.placements.len,
+        "Tree semantics retain the full expanded projection count with bounded live nodes");
+
+    let expandable_id: NodeKey = semantic_tree_item_key(root_id, 3);
+    let expandable_index: i32 = semantics_find_index(tree, expandable_id);
+    expect(state, expandable_index >= 0 &&
+        tree.nodes.data[expandable_index].level == 2 &&
+        tree.nodes.data[expandable_index].expanded == 0 &&
+        semantic_actions_has(tree.nodes.data[expandable_index].action_mask,
+            SemanticAction.expand) == 1,
+        "Tree items expose one-based level and truthful expansion action");
+    let child_id: NodeKey = semantic_tree_item_key(root_id, 2);
+    let child_index: i32 = semantics_find_index(tree, child_id);
+    expect(state, child_index >= 0 && tree.nodes.data[child_index].position_in_set == 2 &&
+        tree.nodes.data[child_index].bounds.x == layout.placements.data[1].frame.x,
+        "Tree semantic position and row bounds follow stable visible identity");
+
+    semantics_tree_free(&tree);
+    virtual_tree_free(&layout);
+    virtual_tree_projection_free(&projection);
+    free[VirtualTreeNode](&source);
+}
+
+fn failure_contract(state: *TestState) void {
+    let tree: SemanticsTree = semantics_tree_make();
+    let invalid: VirtualTreeResult = virtual_tree_result_error(VirtualTreeError.invalid_node, 4);
+    let result: CollectionSemanticsResult = semantics_project_tree(
+        &tree, invalid, node_key(90), semantic_root_key(), "Invalid"
+    );
+    expect(state, result.error == CollectionSemanticsError.invalid_result &&
+        result.error_index == 4 && tree.nodes.len == 0,
+        "invalid virtual layouts cannot leak partial semantic nodes");
+    virtual_tree_free(&invalid);
+    semantics_tree_free(&tree);
+}
+
+fn main() i32 {
+    let state: TestState = TestState{ .passed = 0, .failed = 0 };
+    table_semantics_contract(&state);
+    tree_semantics_contract(&state);
+    failure_contract(&state);
+    let passed_text: []u8 = _zag_i64_to_str(state.passed as i64);
+    let failed_text: []u8 = _zag_i64_to_str(state.failed as i64);
+    _zag_print("Collection semantics contract: pass="); _zag_print(passed_text);
+    _zag_print(" fail="); _zag_println(failed_text);
+    _zag_str_free(passed_text);
+    _zag_str_free(failed_text);
+    if (state.failed == 0) { return 0; }
+    return 1;
+}

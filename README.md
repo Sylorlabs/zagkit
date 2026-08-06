@@ -43,7 +43,7 @@ is normative in [DEPENDENCIES.md](DEPENDENCIES.md).
 | Product and architecture contract | accepted | [RFC index](docs/rfcs/README.md) |
 | Compiler dependency | pinned, prerequisites incomplete | [toolchain lock](contracts/toolchain.json) |
 | Platform shells | unavailable | [support matrix](SUPPORT.md) |
-| Headless core | experimental state, reconciliation, intrinsic measurement, geometry, Flex, Grid, Overlay, scroll, virtual list, semantics, Talkback, display lists, CPU raster, input, replay, and motion | [headless test](tools/test-headless.sh) |
+| Headless core | experimental state, reconciliation, intrinsic measurement, geometry, Flex, Grid, Overlay, scroll, virtual collections, collection semantics, Talkback, display lists, CPU raster, input, replay, and motion | [headless test](tools/test-headless.sh) |
 | Components and visual language | inventory only, visual review pending | [component inventory](contracts/components.json) |
 | Flex and Zagkit Talkback | Flex foundation and in-process ID-first Talkback dispatch executing; native transport remains unavailable | [Talkback contract](docs/automation/talkback.md) |
 | Benchmarks | scene specifications only, no results | [benchmark contract](benchmarks/README.md) |
@@ -107,17 +107,24 @@ generation when its logical ID returns. These identities participate in replay.
 Sorting, selection, editing, drag reordering, component semantics, and native
 interaction remain open.
 
-The semantics slice owns copied names and values, stable keys, explicit action
-capabilities, deterministic focus order, live-region state, ranges, selection,
-and text-navigation bounds. Invalid parents, duplicate IDs and focus order,
-malformed ranges, and malformed selections fail visibly before tree mutation.
-Native accessibility adapters and the Zagkit Talkback protocol remain open.
+The semantics slice owns copied names, descriptions, and values; stable keys;
+logical bounds; label, description, and control relationships; explicit action
+capabilities; deterministic focus order; live-region state; ranges; selection;
+text navigation; collection coordinates and counts; tree levels; set position;
+and expansion truth. Invalid geometry, dangling relationships, collection
+metadata, parents, IDs, focus order, ranges, and selections fail visibly before
+tree mutation. Virtual Table and Tree projection retain full logical counts
+while materializing only live semantic rows and cells. Composite collection
+identities are deterministically mapped to `NodeKey` and collision-preflighted
+before any tree mutation. Native accessibility adapters remain open.
 
-The first in-process Zagkit Talkback dispatcher now resolves queries and emits
-validated actions against those semantic IDs, rejects stale revisions and
-unavailable actions, keeps pixel fallback disabled unless explicitly
-advertised, applies recorded display scale to pixel bounds, and logs accepted
-and rejected requests in one ordered stream.
+The in-process Zagkit Talkback dispatcher resolves queries and emits validated
+actions against those semantic IDs. Query responses expose role, actions,
+fixed-point bounds, collection coordinates and counts, tree state, owned-text
+lengths, state flags, and a deterministic semantic evidence hash. Dispatch
+rejects stale revisions and unavailable actions, keeps pixel fallback disabled
+unless explicitly advertised, applies recorded display scale to pixel bounds,
+and logs accepted and rejected requests in one ordered stream.
 It is not yet a native automation transport; the exact available and unavailable
 surface is documented in [the protocol contract](docs/automation/talkback.md).
 

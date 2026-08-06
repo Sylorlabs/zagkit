@@ -26,14 +26,19 @@ must be positive. Timeouts must be between 1 and 300000 milliseconds. Every
 dispatch receives one monotonic event sequence and records the command, target
 kind, target ID, semantic revision, status, coordinates, and scale.
 
-The first in-process slice resolves semantic discovery and queries and validates
+The in-process slice resolves semantic discovery and queries and validates
 click, type, focus, and scroll before emitting them into the ordered event
-stream. Responses distinguish read-only results from emitted actions and name
-the resolved semantic-node index. Capability reports and timeline counts are
-available. Key, drag, gesture, wait, assertion payloads, screenshots, snapshots,
-replay, native action consumption, and native transport remain unavailable and
-fail closed. Advertising a command in the protocol vocabulary does not claim
-its runtime capability.
+stream. Protocol minor version 2 query responses distinguish read-only results
+from emitted actions and expose the resolved node index, role, action mask,
+fixed-point bounds, collection counts and coordinates, tree level and expansion
+state, owned-text lengths, state flags, and a deterministic evidence hash over
+the complete semantic node. This makes geometry and semantic-state changes
+observable even before the native transport gains structured text payloads.
+Capability reports and timeline counts are available. Key, drag, gesture,
+wait, assertion payloads, screenshots, snapshots, replay, native action
+consumption, and native transport remain unavailable and fail closed.
+Advertising a command in the protocol vocabulary does not claim its runtime
+capability.
 
 ## Planned agent contract
 

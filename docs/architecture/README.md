@@ -55,11 +55,14 @@ areas, text scale, breakpoints, and physical RTL without changing logical ID
 order. Wrapped output retains line ranges, exact placement identity, and
 fail-visible overflow or malformed input. See [flex.md](flex.md).
 
-The parallel experimental `SemanticsTree` retains owned names and values plus
-roles, actions, focus order, live regions, ranges, selection, and text
-navigation. Its stable `NodeKey` identity is shared with rendering, so future
-accessibility adapters, semantic tests, and Zagkit Talkback automation can
-query product meaning without reconstructing it from pixels.
+The parallel experimental `SemanticsTree` retains owned names, descriptions,
+and values plus roles, actions, focus order, live regions, ranges, selection,
+text navigation, fixed-point bounds, relationships, collection coordinates,
+full collection counts, tree level, set position, and expansion truth. Virtual
+Table and Tree output projects only live semantic descendants while preserving
+the complete logical range on the root. Stable `NodeKey` identity is shared
+with rendering, so accessibility adapters, semantic tests, and Zagkit Talkback
+automation query product meaning without reconstructing it from pixels.
 
 Rendering begins with an experimental immutable `DisplayList`. Every operation
 retains its owning `NodeKey`; paths, images, glyph runs, clips, transforms,

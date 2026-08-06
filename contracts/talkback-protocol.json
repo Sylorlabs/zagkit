@@ -1,6 +1,6 @@
 {
   "name": "Zagkit Talkback",
-  "version": "0.1.0-experimental",
+  "version": "0.2.0-experimental",
   "android_assistive_technology": "Android TalkBack",
   "transport": "not-yet-available",
   "targeting": {
@@ -64,7 +64,22 @@
     "event-sequence",
     "resolved-node-index",
     "result-count",
-    "emitted-action"
+    "emitted-action",
+    "resolved-role",
+    "action-mask",
+    "has-bounds",
+    "bounds",
+    "row-count",
+    "column-count",
+    "row-index",
+    "column-index",
+    "level",
+    "expanded",
+    "name-length",
+    "description-length",
+    "value-length",
+    "state-flags",
+    "evidence-hash"
   ],
   "event_contract": {
     "ordered": true,

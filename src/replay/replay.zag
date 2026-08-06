@@ -291,6 +291,7 @@ fn replay_semantics_hash(tree: SemanticsTree) i64 {
         hash = display_mix(hash, node.parent.generation);
         hash = display_mix(hash, node.role as i64);
         hash = replay_hash_text(hash, node.name);
+        hash = replay_hash_text(hash, node.description);
         hash = replay_hash_text(hash, node.value);
         hash = display_mix(hash, node.action_mask);
         hash = display_mix(hash, node.focus_order);
@@ -306,6 +307,27 @@ fn replay_semantics_hash(tree: SemanticsTree) i64 {
         hash = display_mix(hash, node.text_length);
         hash = display_mix(hash, node.selection_start);
         hash = display_mix(hash, node.selection_end);
+        hash = display_mix(hash, node.has_bounds as i64);
+        hash = display_mix(hash, node.bounds.x);
+        hash = display_mix(hash, node.bounds.y);
+        hash = display_mix(hash, node.bounds.width);
+        hash = display_mix(hash, node.bounds.height);
+        hash = display_mix(hash, node.labelled_by.value);
+        hash = display_mix(hash, node.labelled_by.generation);
+        hash = display_mix(hash, node.described_by.value);
+        hash = display_mix(hash, node.described_by.generation);
+        hash = display_mix(hash, node.controls.value);
+        hash = display_mix(hash, node.controls.generation);
+        hash = display_mix(hash, node.row_count);
+        hash = display_mix(hash, node.column_count);
+        hash = display_mix(hash, node.row_index);
+        hash = display_mix(hash, node.column_index);
+        hash = display_mix(hash, node.row_span);
+        hash = display_mix(hash, node.column_span);
+        hash = display_mix(hash, node.level);
+        hash = display_mix(hash, node.set_size);
+        hash = display_mix(hash, node.position_in_set);
+        hash = display_mix(hash, node.expanded as i64);
         i = i + 1;
     }
     return hash;

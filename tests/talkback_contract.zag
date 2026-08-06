@@ -18,6 +18,10 @@ fn make_tree() SemanticsTree {
     _ = semantics_add(&tree, root);
     let button: SemanticsSpec = semantics_spec(node_key(2), node_key(1), SemanticRole.button, "Create part");
     button.action_mask = semantic_actions_add(semantic_actions(SemanticAction.activate), SemanticAction.focus);
+    button.description = "Creates a part in the active document";
+    button.has_bounds = 1;
+    button.bounds = rect(10, 20, 120, 32);
+    button.selected = 1;
     _ = semantics_add(&tree, button);
     let field: SemanticsSpec = semantics_spec(node_key(3), node_key(1), SemanticRole.text_field, "Part name");
     field.action_mask = semantic_actions_add(semantic_actions(SemanticAction.set_value), SemanticAction.focus);
@@ -37,6 +41,13 @@ fn id_target_contract(state: *TestState) void {
     let type_button: TalkbackResponse = talkback_dispatch(&session, tree, viewport, talkback_request(4, TalkbackCommand.type_text, node_key(2), tree.revision));
     expect(state, query.status == TalkbackStatus.accepted && click.status == TalkbackStatus.accepted && type_field.status == TalkbackStatus.accepted, "ID queries and declared semantic actions are accepted");
     expect(state, query.resolved_node_index == semantics_find_index(tree, node_key(2)) && query.result_count == 1, "ID queries resolve to an inspectable semantic node");
+    expect(state, query.resolved_role == SemanticRole.button && query.has_bounds == 1 &&
+        query.bounds.x == 10 && query.bounds.width == 120 && query.action_mask ==
+            semantic_actions_add(semantic_actions(SemanticAction.activate), SemanticAction.focus),
+        "Talkback query evidence exposes role, exact bounds, and declared actions");
+    expect(state, query.name_length == 11 && query.description_length == 37 &&
+        query.value_length == 0 && query.state_flags == 2 && query.evidence_hash != 0,
+        "Talkback query evidence fingerprints owned text and explicit state");
     expect(state, click.emitted_action == 1 && query.emitted_action == 0, "responses distinguish emitted actions from read-only queries");
     expect(state, type_button.status == TalkbackStatus.action_unavailable, "an ID action absent from semantics fails visibly");
 
@@ -95,7 +106,7 @@ fn capability_contract(state: *TestState) void {
     expect(state, report.status == TalkbackStatus.accepted, "capability reporting is always queryable");
     expect(state, screenshot.status == TalkbackStatus.unsupported_command && replay.status == TalkbackStatus.unsupported_command, "unavailable screenshot and replay capabilities fail closed");
     expect(state, assertion.status == TalkbackStatus.unsupported_command, "assertions remain unavailable until payload comparison is implemented");
-    expect(state, capabilities.protocol_major == 0 && capabilities.protocol_minor == 1, "the experimental protocol version is explicit");
+    expect(state, capabilities.protocol_major == 0 && capabilities.protocol_minor == 2, "the experimental protocol version is explicit");
     talkback_session_free(&session);
     semantics_tree_free(&tree);
 }

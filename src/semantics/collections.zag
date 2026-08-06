@@ -1,0 +1,351 @@
+@import("std:list")
+@import("semantics.zag")
+@import("../layout/virtual_table.zag")
+@import("../layout/virtual_tree.zag")
+
+enum CollectionSemanticsError {
+    none,
+    invalid_result,
+    missing_parent,
+    identity_collision,
+    semantic_error,
+}
+
+struct CollectionSemanticsResult {
+    root_id: NodeKey,
+    nodes_added: i32,
+    live_items: i32,
+    logical_items: i64,
+    error: CollectionSemanticsError,
+    semantic_error: SemanticsError,
+    error_index: i32,
+}
+
+fn collection_semantics_result(root_id: NodeKey) CollectionSemanticsResult {
+    return CollectionSemanticsResult{
+        .root_id = root_id, .nodes_added = 0, .live_items = 0, .logical_items = 0,
+        .error = CollectionSemanticsError.none, .semantic_error = SemanticsError.none,
+        .error_index = 0 - 1,
+    };
+}
+
+fn collection_semantics_mix(hash: i64, value: i64) i64 {
+    return (hash * 1099511628211) ^ value;
+}
+
+fn collection_semantic_key(root_id: NodeKey, kind: i64,
+    item_id: i64, column_id: i64) NodeKey {
+    let hash: i64 = collection_semantics_mix(17, root_id.value);
+    hash = collection_semantics_mix(hash, root_id.generation);
+    hash = collection_semantics_mix(hash, kind);
+    hash = collection_semantics_mix(hash, item_id);
+    hash = collection_semantics_mix(hash, column_id);
+    return node_key_scoped(hash, root_id.value ^ root_id.generation);
+}
+
+fn semantic_table_row_key(root_id: NodeKey, row_id: i64, header: i32) NodeKey {
+    let kind: i64 = 100;
+    if (header != 0) { kind = 101; }
+    return collection_semantic_key(root_id, kind, row_id, 0);
+}
+
+fn semantic_table_cell_key(root_id: NodeKey, cell_id: VirtualTableCellId) NodeKey {
+    let kind: i64 = 200;
+    if (cell_id.header != 0) { kind = 201; }
+    return collection_semantic_key(root_id, kind, cell_id.row_id, cell_id.column_id);
+}
+
+fn semantic_tree_item_key(root_id: NodeKey, item_id: i64) NodeKey {
+    return collection_semantic_key(root_id, 300, item_id, 0);
+}
+
+fn collection_key_preflight(tree: SemanticsTree, keys: *ArrayList[NodeKey],
+    key: NodeKey) i32 {
+    if (node_key_equal(key, semantic_root_key()) == 1 ||
+        node_key_equal(key, semantic_none_key()) == 1) { return 0; }
+    if (semantics_find_index(tree, key) >= 0) { return 0; }
+    let i: i32 = 0;
+    while (i < keys.*.len) {
+        if (node_key_equal(keys.*.data[i], key) == 1) { return 0; }
+        i = i + 1;
+    }
+    push[NodeKey](keys, key);
+    return 1;
+}
+
+fn collection_parent_valid(tree: SemanticsTree, parent: NodeKey) i32 {
+    return (node_key_equal(parent, semantic_root_key()) == 1 ||
+        semantics_find_index(tree, parent) >= 0) as i32;
+}
+
+fn collection_rect_valid(bounds: Rect) i32 {
+    return (bounds.x >= 0 - unbounded_extent() && bounds.x <= unbounded_extent() &&
+        bounds.y >= 0 - unbounded_extent() && bounds.y <= unbounded_extent() &&
+        bounds.width >= 0 && bounds.width <= unbounded_extent() &&
+        bounds.height >= 0 && bounds.height <= unbounded_extent() &&
+        bounds.x <= unbounded_extent() - bounds.width &&
+        bounds.y <= unbounded_extent() - bounds.height) as i32;
+}
+
+fn collection_table_cell_valid(table: VirtualTableResult,
+    cell: VirtualTableCell) i32 {
+    if (cell.id.table_id <= 0 || cell.id.row_id != cell.row_id ||
+        cell.id.column_id != cell.column_id || cell.id.header != cell.header ||
+        cell.column_id <= 0 || cell.column_index < 0 ||
+        cell.column_index >= table.semantic_columns ||
+        (cell.header != 0 && cell.header != 1) || collection_rect_valid(cell.frame) == 0) {
+        return 0;
+    }
+    if (cell.header != 0) {
+        return (cell.row_id == 0 && cell.row_index == 0 - 1) as i32;
+    }
+    return (cell.row_id > 0 && cell.row_index >= 0 &&
+        cell.row_index < table.semantic_rows) as i32;
+}
+
+fn collection_tree_placement_valid(layout: VirtualTreeResult,
+    placement: VirtualTreePlacement) i32 {
+    return (placement.id > 0 && placement.parent_id >= 0 &&
+        placement.visible_index >= 0 && placement.visible_index < layout.semantic_count &&
+        placement.depth >= 0 && placement.depth <= 512 &&
+        (placement.has_children == 0 || placement.has_children == 1) &&
+        (placement.expanded == 0 || placement.expanded == 1) &&
+        (placement.has_children != 0 || placement.expanded == 0) &&
+        collection_rect_valid(placement.frame) == 1 &&
+        collection_rect_valid(placement.content_frame) == 1) as i32;
+}
+
+fn collection_semantics_rollback(tree: *SemanticsTree,
+    checkpoint: SemanticsCheckpoint, result: *CollectionSemanticsResult,
+    error: SemanticsError, index: i32) void {
+    _ = semantics_tree_rollback(tree, checkpoint);
+    result.*.nodes_added = 0;
+    result.*.error = CollectionSemanticsError.semantic_error;
+    result.*.semantic_error = error;
+    result.*.error_index = index;
+}
+
+fn collection_table_row_bounds(table: VirtualTableResult,
+    row_id: i64, header: i32) Rect {
+    let found: i32 = 0;
+    let bounds: Rect = rect(0, 0, 0, 0);
+    let i: i32 = 0;
+    while (i < table.cells.len) {
+        let cell: VirtualTableCell = table.cells.data[i];
+        if (cell.row_id == row_id && cell.header == header) {
+            if (found == 0) {
+                bounds = cell.frame;
+                found = 1;
+            } else {
+                let left: i64 = bounds.x;
+                if (cell.frame.x < left) { left = cell.frame.x; }
+                let top: i64 = bounds.y;
+                if (cell.frame.y < top) { top = cell.frame.y; }
+                let right: i64 = bounds.x + bounds.width;
+                if (cell.frame.x + cell.frame.width > right) {
+                    right = cell.frame.x + cell.frame.width;
+                }
+                let bottom: i64 = bounds.y + bounds.height;
+                if (cell.frame.y + cell.frame.height > bottom) {
+                    bottom = cell.frame.y + cell.frame.height;
+                }
+                bounds = rect(left, top, right - left, bottom - top);
+            }
+        }
+        i = i + 1;
+    }
+    return bounds;
+}
+
+fn collection_table_row_first(table: VirtualTableResult,
+    cell_index: i32) i32 {
+    let cell: VirtualTableCell = table.cells.data[cell_index];
+    let i: i32 = 0;
+    while (i < cell_index) {
+        if (table.cells.data[i].row_id == cell.row_id &&
+            table.cells.data[i].header == cell.header) { return 0; }
+        i = i + 1;
+    }
+    return 1;
+}
+
+fn semantics_project_table(tree: *SemanticsTree, table: VirtualTableResult,
+    root_id: NodeKey, parent: NodeKey, name: []u8) CollectionSemanticsResult {
+    let result: CollectionSemanticsResult = collection_semantics_result(root_id);
+    result.live_items = table.cells.len;
+    result.logical_items = table.semantic_rows * table.semantic_columns as i64;
+    if (table.error != VirtualTableError.none || table.semantic_rows < 0 ||
+        table.semantic_columns <= 0 || table.viewport.width <= 0 || table.viewport.height <= 0) {
+        result.error = CollectionSemanticsError.invalid_result;
+        result.error_index = table.error_index;
+        return result;
+    }
+    if (collection_parent_valid(tree.*, parent) == 0) {
+        result.error = CollectionSemanticsError.missing_parent;
+        return result;
+    }
+
+    let keys: ArrayList[NodeKey] = make[NodeKey](table.cells.len * 2 + 2);
+    if (collection_key_preflight(tree.*, &keys, root_id) == 0) {
+        free[NodeKey](&keys); result.error = CollectionSemanticsError.identity_collision; return result;
+    }
+    let i: i32 = 0;
+    while (i < table.cells.len) {
+        let cell: VirtualTableCell = table.cells.data[i];
+        if (collection_table_cell_valid(table, cell) == 0) {
+            free[NodeKey](&keys); result.error = CollectionSemanticsError.invalid_result;
+            result.error_index = i; return result;
+        }
+        if (collection_table_row_first(table, i) != 0 &&
+            collection_key_preflight(tree.*, &keys,
+                semantic_table_row_key(root_id, cell.row_id, cell.header)) == 0) {
+            free[NodeKey](&keys); result.error = CollectionSemanticsError.identity_collision;
+            result.error_index = i; return result;
+        }
+        if (collection_key_preflight(tree.*, &keys,
+            semantic_table_cell_key(root_id, cell.id)) == 0) {
+            free[NodeKey](&keys); result.error = CollectionSemanticsError.identity_collision;
+            result.error_index = i; return result;
+        }
+        i = i + 1;
+    }
+    free[NodeKey](&keys);
+
+    let checkpoint: SemanticsCheckpoint = semantics_tree_checkpoint(tree.*);
+    let root: SemanticsSpec = semantics_spec(root_id, parent, SemanticRole.table, name);
+    root.row_count = table.semantic_rows;
+    root.column_count = table.semantic_columns as i64;
+    root.has_bounds = 1;
+    root.bounds = rect(0, 0, table.viewport.width, table.viewport.height);
+    root.action_mask = semantic_actions(SemanticAction.scroll);
+    let added: SemanticsError = semantics_add(tree, root);
+    if (added != SemanticsError.none) {
+        result.error = CollectionSemanticsError.semantic_error;
+        result.semantic_error = added;
+        return result;
+    }
+    result.nodes_added = 1;
+
+    i = 0;
+    while (i < table.cells.len) {
+        let cell: VirtualTableCell = table.cells.data[i];
+        let row_id: NodeKey = semantic_table_row_key(root_id, cell.row_id, cell.header);
+        if (collection_table_row_first(table, i) != 0) {
+            let row: SemanticsSpec = semantics_spec(row_id, root_id, SemanticRole.row, "");
+            row.has_bounds = 1;
+            row.bounds = collection_table_row_bounds(table, cell.row_id, cell.header);
+            if (cell.header == 0) {
+                row.row_index = cell.row_index;
+                row.row_span = 1;
+            }
+            let row_error: SemanticsError = semantics_add(tree, row);
+            if (row_error != SemanticsError.none) {
+                collection_semantics_rollback(tree, checkpoint, &result, row_error, i);
+                return result;
+            }
+            result.nodes_added = result.nodes_added + 1;
+        }
+        let cell_spec: SemanticsSpec = semantics_spec(
+            semantic_table_cell_key(root_id, cell.id), row_id, SemanticRole.cell, ""
+        );
+        cell_spec.has_bounds = 1;
+        cell_spec.bounds = cell.frame;
+        cell_spec.column_index = cell.column_index as i64;
+        cell_spec.column_span = 1;
+        if (cell.header == 0) {
+            cell_spec.row_index = cell.row_index;
+            cell_spec.row_span = 1;
+        }
+        let cell_error: SemanticsError = semantics_add(tree, cell_spec);
+        if (cell_error != SemanticsError.none) {
+            collection_semantics_rollback(tree, checkpoint, &result, cell_error, i);
+            return result;
+        }
+        result.nodes_added = result.nodes_added + 1;
+        i = i + 1;
+    }
+    return result;
+}
+
+fn semantics_project_tree(tree: *SemanticsTree, layout: VirtualTreeResult,
+    root_id: NodeKey, parent: NodeKey, name: []u8) CollectionSemanticsResult {
+    let result: CollectionSemanticsResult = collection_semantics_result(root_id);
+    result.live_items = layout.placements.len;
+    result.logical_items = layout.semantic_count;
+    if (layout.error != VirtualTreeError.none || layout.semantic_count < 0 ||
+        layout.viewport.width <= 0 || layout.viewport.height <= 0) {
+        result.error = CollectionSemanticsError.invalid_result;
+        result.error_index = layout.error_index;
+        return result;
+    }
+    if (collection_parent_valid(tree.*, parent) == 0) {
+        result.error = CollectionSemanticsError.missing_parent;
+        return result;
+    }
+    let keys: ArrayList[NodeKey] = make[NodeKey](layout.placements.len + 1);
+    if (collection_key_preflight(tree.*, &keys, root_id) == 0) {
+        free[NodeKey](&keys); result.error = CollectionSemanticsError.identity_collision; return result;
+    }
+    let i: i32 = 0;
+    while (i < layout.placements.len) {
+        if (collection_tree_placement_valid(layout, layout.placements.data[i]) == 0) {
+            free[NodeKey](&keys); result.error = CollectionSemanticsError.invalid_result;
+            result.error_index = i; return result;
+        }
+        if (collection_key_preflight(tree.*, &keys,
+            semantic_tree_item_key(root_id, layout.placements.data[i].id)) == 0) {
+            free[NodeKey](&keys); result.error = CollectionSemanticsError.identity_collision;
+            result.error_index = i; return result;
+        }
+        i = i + 1;
+    }
+    free[NodeKey](&keys);
+
+    let checkpoint: SemanticsCheckpoint = semantics_tree_checkpoint(tree.*);
+    let root: SemanticsSpec = semantics_spec(root_id, parent, SemanticRole.tree, name);
+    root.row_count = layout.semantic_count;
+    root.column_count = 1;
+    root.has_bounds = 1;
+    root.bounds = rect(0, 0, layout.viewport.width, layout.viewport.height);
+    root.action_mask = semantic_actions(SemanticAction.scroll);
+    let added: SemanticsError = semantics_add(tree, root);
+    if (added != SemanticsError.none) {
+        result.error = CollectionSemanticsError.semantic_error;
+        result.semantic_error = added;
+        return result;
+    }
+    result.nodes_added = 1;
+    i = 0;
+    while (i < layout.placements.len) {
+        let placement: VirtualTreePlacement = layout.placements.data[i];
+        let item: SemanticsSpec = semantics_spec(
+            semantic_tree_item_key(root_id, placement.id), root_id,
+            SemanticRole.tree_item, ""
+        );
+        item.has_bounds = 1;
+        item.bounds = placement.frame;
+        item.row_index = placement.visible_index;
+        item.row_span = 1;
+        item.column_index = 0;
+        item.column_span = 1;
+        item.level = placement.depth as i64 + 1;
+        item.set_size = layout.semantic_count;
+        item.position_in_set = placement.visible_index + 1;
+        if (placement.has_children != 0) {
+            item.expanded = placement.expanded;
+            if (placement.expanded != 0) {
+                item.action_mask = semantic_actions(SemanticAction.collapse);
+            } else {
+                item.action_mask = semantic_actions(SemanticAction.expand);
+            }
+        }
+        let item_error: SemanticsError = semantics_add(tree, item);
+        if (item_error != SemanticsError.none) {
+            collection_semantics_rollback(tree, checkpoint, &result, item_error, i);
+            return result;
+        }
+        result.nodes_added = result.nodes_added + 1;
+        i = i + 1;
+    }
+    return result;
+}

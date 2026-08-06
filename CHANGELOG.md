@@ -26,9 +26,16 @@ include a generated capability record and exact Zag compiler revision.
   column wrapping, RTL line bands, baseline-safe extents, per-line growth,
   typed overflow, malformed-input rejection, and layout identity.
 - An experimental owned semantics tree with roles, actions, focus order,
-  live regions, ranges, selection, text navigation, and stable generated IDs.
+  live regions, ranges, selection, text navigation, descriptions, bounds,
+  relationships, collection coordinates and counts, hierarchy, expansion, and
+  stable generated IDs.
+- Bounded virtual Table and Tree semantic projection with full logical counts,
+  exact live geometry, deterministic collection IDs, and collision-atomic
+  preflight.
 - The first in-process Zagkit Talkback dispatcher and machine-readable protocol
-  contract with ID-first targeting and explicit scale-aware pixel fallback.
+  with protocol 0.2 query evidence for semantic geometry, collection metadata,
+  tree state, owned-text lengths, state flags, deterministic hashes, ID-first
+  targeting, and explicit scale-aware pixel fallback.
 - An experimental immutable display list for explicit paints, resources, clips,
   transforms, layers, and effects with deterministic content identity.
 - A versioned canonical display-list codec with bounded validated decoding and

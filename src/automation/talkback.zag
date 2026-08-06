@@ -68,6 +68,21 @@ struct TalkbackResponse {
     resolved_node_index: i32,
     result_count: i32,
     emitted_action: i32,
+    resolved_role: SemanticRole,
+    action_mask: i64,
+    has_bounds: i32,
+    bounds: Rect,
+    row_count: i64,
+    column_count: i64,
+    row_index: i64,
+    column_index: i64,
+    level: i64,
+    expanded: i32,
+    name_length: i32,
+    description_length: i32,
+    value_length: i32,
+    state_flags: i32,
+    evidence_hash: i64,
 }
 
 struct TalkbackEvent {
@@ -93,7 +108,7 @@ struct TalkbackSession {
 fn talkback_capabilities() TalkbackCapabilities {
     return TalkbackCapabilities{
         .protocol_major = 0,
-        .protocol_minor = 1,
+        .protocol_minor = 2,
         .semantic_query = 1,
         .id_actions = 1,
         .pixel_fallback = 0,
@@ -236,6 +251,21 @@ fn talkback_record(session: *TalkbackSession, tree_revision: i64, request: Talkb
         .resolved_node_index = 0 - 1,
         .result_count = 0,
         .emitted_action = 0,
+        .resolved_role = SemanticRole.group,
+        .action_mask = 0,
+        .has_bounds = 0,
+        .bounds = rect(0, 0, 0, 0),
+        .row_count = 0 - 1,
+        .column_count = 0 - 1,
+        .row_index = 0 - 1,
+        .column_index = 0 - 1,
+        .level = 0,
+        .expanded = 0 - 1,
+        .name_length = 0,
+        .description_length = 0,
+        .value_length = 0,
+        .state_flags = 0,
+        .evidence_hash = 0,
     };
 }
 
@@ -293,6 +323,27 @@ fn talkback_dispatch(session: *TalkbackSession, tree: SemanticsTree, viewport: R
     let response: TalkbackResponse = talkback_record(session, tree.revision, request, TalkbackStatus.accepted);
     response.resolved_node_index = node_index;
     response.result_count = 1;
+    response.resolved_role = tree.nodes.data[node_index].role;
+    response.action_mask = tree.nodes.data[node_index].action_mask;
+    response.has_bounds = tree.nodes.data[node_index].has_bounds;
+    response.bounds = tree.nodes.data[node_index].bounds;
+    response.row_count = tree.nodes.data[node_index].row_count;
+    response.column_count = tree.nodes.data[node_index].column_count;
+    response.row_index = tree.nodes.data[node_index].row_index;
+    response.column_index = tree.nodes.data[node_index].column_index;
+    response.level = tree.nodes.data[node_index].level;
+    response.expanded = tree.nodes.data[node_index].expanded;
+    response.name_length = tree.nodes.data[node_index].name.len;
+    response.description_length = tree.nodes.data[node_index].description.len;
+    response.value_length = tree.nodes.data[node_index].value.len;
+    response.state_flags = tree.nodes.data[node_index].disabled;
+    if (tree.nodes.data[node_index].selected != 0) {
+        response.state_flags = response.state_flags | 2;
+    }
+    if (tree.nodes.data[node_index].hidden != 0) {
+        response.state_flags = response.state_flags | 4;
+    }
+    response.evidence_hash = semantic_node_evidence_hash(tree.nodes.data[node_index]);
     if (required_action != 0) { response.emitted_action = 1; }
     return response;
 }
