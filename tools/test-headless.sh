@@ -38,6 +38,8 @@ cd "$root"
 "$tmp/talkback-contract"
 "$znc" tests/render_resources_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/render-resources-contract"
 "$tmp/render-resources-contract"
+"$znc" tests/path_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/path-contract"
+"$tmp/path-contract"
 "$znc" tests/display_list_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/display-list-contract"
 "$tmp/display-list-contract"
 "$znc" tests/display_list_codec_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/display-list-codec-contract"
@@ -51,4 +53,4 @@ cd "$root"
 "$znc" tests/motion_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/motion-contract"
 "$tmp/motion-contract"
 
-printf 'headless test: PASS (state, reconciliation, intrinsic measurement, constraints, Flex, Grid, Overlay, scroll, virtual list, Table, Tree, recycling, collection semantics, Talkback, owned render resources, display lists, CPU raster, input, replay, and motion)\n'
+printf 'headless test: PASS (state, reconciliation, intrinsic measurement, constraints, Flex, Grid, Overlay, scroll, virtual list, Table, Tree, recycling, collection semantics, Talkback, owned render resources, canonical paths, display lists, CPU raster, input, replay, and motion)\n'

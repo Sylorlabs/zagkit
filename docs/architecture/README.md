@@ -31,6 +31,7 @@ Detailed experimental contracts:
 - [intrinsic measurement and invalidation reasons](measurement.md)
 - [Flex placement and adaptive spacing](flex.md)
 - [motion scheduler and tracks](motion.md)
+- [canonical vector paths](paths.md)
 
 The first experimental compiled slice now fixes the initial Zag shapes for
 `NodeKey`, `State<T>`, `Binding<T>`, `Action`, `Environment`, `ViewContext`,
@@ -72,15 +73,16 @@ detects mutation outside the builder contract before rendering. Owned resource
 payloads participate in sealing and identity; damage and GPU transports remain
 open.
 
-The [render resource ownership layer](render-resources.md) copies opaque
-typed payloads behind positive stable IDs, canonicalizes insertion order,
+The [render resource ownership layer](render-resources.md) copies typed payloads
+behind positive stable IDs, canonicalizes insertion order,
 enforces configurable byte and count ceilings, requires exact replacement
-revisions, and verifies sealed byte-level identity. Display lists own the store
-and validate each resource reference by kind; this still does not claim path,
-SVG, PNG, font, image, or glyph decoding.
+revisions, and verifies sealed byte-level identity. Display lists own the store.
+Path resources additionally require the bounded canonical
+[ZKPATH01 contract](paths.md) and are validated once before operation references
+seal. SVG, PNG, font, image, and glyph decoding remain unavailable.
 
-Display-list replay uses the versioned little-endian `ZKDL` version 2 codec. Decoding is
-bounded to one million operations, reconstructs operations only through the
+Display-list replay uses the versioned little-endian `ZKDL` version 2 codec.
+Decoding is bounded to one million operations, reconstructs operations through the
 same validation path as live building, requires balanced seal state, verifies
 the stored content identity and revision, and rejects trailing bytes so one
 scene has one canonical encoding. A bounded variable-length resource section

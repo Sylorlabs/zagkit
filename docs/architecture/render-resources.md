@@ -3,10 +3,11 @@
 Status: experimental headless primitive
 
 `RenderResourceStore` is the ownership and identity boundary for bytes that
-will later feed Zagkit paths, decoded images, glyph runs, effects, fonts, SVG,
-and PNG. It is not a decoder and does not make an opaque payload renderable.
+feed Zagkit paths, decoded images, glyph runs, effects, fonts, SVG, and PNG. It
+is not itself a decoder and does not make an opaque payload renderable.
 SVG parsing, PNG parsing and color management, font validation, glyph shaping,
-path schemas, and decoded rendering remain separate open contracts.
+and decoded rendering remain separate open contracts. Canonical path payloads
+are the first typed schema layered over this store; see [paths](paths.md).
 
 ## Identity and metadata
 
@@ -52,7 +53,7 @@ canonical resource section before operations and reconstructs it through the
 same bounded validation path; decoding and re-encoding are byte identical.
 
 The current executable contract still does not decode SVG or PNG, validate font
-tables, interpret path or glyph payload schemas, rasterize paths or images,
-cache platform uploads, or implement memory-pressure eviction. Those
+tables, interpret glyph payload schemas, rasterize paths or images, cache
+platform uploads, or implement memory-pressure eviction. Those
 capabilities remain unavailable until their own malformed-input, rendering,
 replacement, and cleanup suites pass.

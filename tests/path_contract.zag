@@ -1,0 +1,197 @@
+@import("../src/render/path.zag")
+
+struct TestState { passed: i32, failed: i32 }
+
+fn expect(state: *TestState, condition: i32, name: []u8) void {
+    if (condition != 0) {
+        state.*.passed = state.*.passed + 1;
+        _zag_print("ok  "); _zag_println(name);
+    } else {
+        state.*.failed = state.*.failed + 1;
+        _zag_print("FAIL "); _zag_println(name);
+    }
+}
+
+fn bytes_equal(a: ArrayList[u8], b: ArrayList[u8]) i32 {
+    if (a.len != b.len) { return 0; }
+    let i: i32 = 0;
+    while (i < a.len) {
+        if (a.data[i] != b.data[i]) { return 0; }
+        i = i + 1;
+    }
+    return 1;
+}
+
+fn complete_path(fill_rule: PathFillRule) PathData {
+    let path: PathData = path_make(fill_rule);
+    _ = path_move_to(&path, path_point(0 - unit_scale(), 2 * unit_scale()));
+    _ = path_line_to(&path, path_point(3 * unit_scale(), 2 * unit_scale()));
+    _ = path_quad_to(&path, path_point(4 * unit_scale(), 3 * unit_scale()),
+        path_point(3 * unit_scale(), 4 * unit_scale()));
+    _ = path_cubic_to(&path,
+        path_point(2 * unit_scale(), 5 * unit_scale()),
+        path_point(0, 5 * unit_scale()),
+        path_point(0 - unit_scale(), 4 * unit_scale()));
+    _ = path_close(&path);
+    _ = path_move_to(&path, path_point(0, 0));
+    _ = path_line_to(&path, path_point(unit_scale(), unit_scale()));
+    _ = path_seal(&path);
+    return path;
+}
+
+fn builder_contract(state: *TestState) void {
+    let path: PathData = path_make(PathFillRule.non_zero);
+    expect(state, path_line_to(&path, path_point(1, 1)) == PathError.invalid_sequence &&
+        path.commands.len == 0, "line commands require an open contour");
+    expect(state, path_close(&path) == PathError.invalid_sequence && path.commands.len == 0,
+        "close commands require an open contour");
+    expect(state, path_move_to(&path, path_point(0, 0)) == PathError.none &&
+        path_line_to(&path, path_point(unit_scale(), 0)) == PathError.none &&
+        path_close(&path) == PathError.none,
+        "move line and close build a canonical contour");
+    expect(state, path_line_to(&path, path_point(0, unit_scale())) == PathError.invalid_sequence,
+        "closed contours require a new move before geometry");
+    expect(state, path_move_to(&path, path_point(unbounded_extent() + 1, 0)) ==
+        PathError.invalid_geometry, "coordinates outside the shared fixed-point domain fail before ownership changes");
+    expect(state, path_seal(&path) == PathError.none && path_verify(path) == PathError.none,
+        "valid paths seal with deterministic immutable identity");
+    expect(state, path_move_to(&path, path_point(1, 1)) == PathError.sealed,
+        "sealed paths reject builder mutation");
+    let original: i64 = path.commands.data[1].point_1.x;
+    path.commands.data[1].point_1.x = original + 1;
+    expect(state, path_verify(path) == PathError.content_mutated,
+        "raw command mutation is detected by immutable verification");
+    path.commands.data[1].point_1.x = original;
+    expect(state, path_verify(path) == PathError.none,
+        "restoring exact command bytes restores path identity");
+    path_free(&path);
+
+    let empty: PathData = path_make(PathFillRule.even_odd);
+    expect(state, path_seal(&empty) == PathError.empty && empty.sealed == 0,
+        "empty paths cannot claim renderable identity");
+    path_free(&empty);
+}
+
+fn codec_contract(state: *TestState) void {
+    let source: PathData = complete_path(PathFillRule.even_odd);
+    let encoded: PathEncodeResult = path_encode(source);
+    expect(state, encoded.error == PathError.none && encoded.bytes.len ==
+        path_codec_header_size() as i32 + source.commands.len * path_codec_command_size() as i32,
+        "canonical path encoding has one bounded fixed-width record per command");
+    expect(state, encoded.bytes.data[0] == 90 && encoded.bytes.data[1] == 75 &&
+        encoded.bytes.data[6] == 48 && encoded.bytes.data[7] == 49,
+        "path bytes carry the ZKPATH01 magic");
+    let decoded: PathDecodeResult = path_decode(encoded.bytes.data[0..encoded.bytes.len]);
+    expect(state, decoded.error == PathError.none && decoded.path.sealed == 1 &&
+        decoded.path.fill_rule == PathFillRule.even_odd,
+        "valid bytes decode to the requested fill rule and a sealed path");
+    expect(state, decoded.path.commands.len == source.commands.len &&
+        decoded.path.commands.data[0].point_1.x == 0 - unit_scale() &&
+        decoded.path.commands.data[3].verb == PathVerb.cubic_to,
+        "round trip preserves signed coordinates and every curve verb");
+    expect(state, decoded.path.content_hash == source.content_hash,
+        "round trip preserves deterministic path identity");
+    let encoded_again: PathEncodeResult = path_encode(decoded.path);
+    expect(state, bytes_equal(encoded.bytes, encoded_again.bytes) != 0,
+        "decode and re-encode are byte identical");
+    path_encode_free(&encoded_again);
+    path_free(&decoded.path);
+    path_encode_free(&encoded);
+    path_free(&source);
+}
+
+fn malformed_contract(state: *TestState) void {
+    let source: PathData = complete_path(PathFillRule.non_zero);
+    let encoded: PathEncodeResult = path_encode(source);
+
+    let saved_magic: u8 = encoded.bytes.data[0];
+    encoded.bytes.data[0] = 0;
+    let bad_magic: PathDecodeResult = path_decode(encoded.bytes.data[0..encoded.bytes.len]);
+    expect(state, bad_magic.error == PathError.bad_magic && bad_magic.error_offset == 0,
+        "bad path magic fails at byte zero");
+    path_free(&bad_magic.path); encoded.bytes.data[0] = saved_magic;
+
+    let saved_version: u8 = encoded.bytes.data[8];
+    encoded.bytes.data[8] = 2;
+    let bad_version: PathDecodeResult = path_decode(encoded.bytes.data[0..encoded.bytes.len]);
+    expect(state, bad_version.error == PathError.unsupported_version && bad_version.error_offset == 8,
+        "unknown path versions fail visibly");
+    path_free(&bad_version.path); encoded.bytes.data[8] = saved_version;
+
+    let saved_fill: u8 = encoded.bytes.data[16];
+    encoded.bytes.data[16] = 2;
+    let bad_fill: PathDecodeResult = path_decode(encoded.bytes.data[0..encoded.bytes.len]);
+    expect(state, bad_fill.error == PathError.invalid_fill_rule && bad_fill.error_offset == 16,
+        "unknown fill rules fail before command allocation");
+    path_free(&bad_fill.path); encoded.bytes.data[16] = saved_fill;
+
+    let first_command: i32 = path_codec_header_size() as i32;
+    let saved_verb: u8 = encoded.bytes.data[first_command];
+    encoded.bytes.data[first_command] = 9;
+    let bad_verb: PathDecodeResult = path_decode(encoded.bytes.data[0..encoded.bytes.len]);
+    expect(state, bad_verb.error == PathError.invalid_verb &&
+        bad_verb.error_offset == first_command as i64,
+        "unknown path verbs fail at the exact command record");
+    path_free(&bad_verb.path); encoded.bytes.data[first_command] = saved_verb;
+
+    let unused_coordinate: i32 = first_command + 24;
+    let saved_unused: u8 = encoded.bytes.data[unused_coordinate];
+    encoded.bytes.data[unused_coordinate] = 1;
+    let noncanonical: PathDecodeResult = path_decode(encoded.bytes.data[0..encoded.bytes.len]);
+    expect(state, noncanonical.error == PathError.invalid_geometry &&
+        noncanonical.error_offset == first_command as i64,
+        "unused coordinate fields must be canonical zeroes");
+    path_free(&noncanonical.path); encoded.bytes.data[unused_coordinate] = saved_unused;
+
+    let saved_hash: u8 = encoded.bytes.data[32];
+    encoded.bytes.data[32] = saved_hash + 1;
+    let bad_hash: PathDecodeResult = path_decode(encoded.bytes.data[0..encoded.bytes.len]);
+    expect(state, bad_hash.error == PathError.hash_mismatch && bad_hash.error_offset == 32,
+        "path payload tampering fails deterministic identity verification");
+    path_free(&bad_hash.path); encoded.bytes.data[32] = saved_hash;
+
+    let truncated: PathDecodeResult = path_decode(encoded.bytes.data[0..encoded.bytes.len - 1]);
+    expect(state, truncated.error == PathError.truncated &&
+        truncated.error_offset == encoded.bytes.len as i64 - 1,
+        "truncated command data reports the observed length");
+    path_free(&truncated.path);
+
+    push[u8](&encoded.bytes, 0);
+    let trailing: PathDecodeResult = path_decode(encoded.bytes.data[0..encoded.bytes.len]);
+    expect(state, trailing.error == PathError.trailing_data,
+        "trailing path bytes fail canonical decoding");
+    path_free(&trailing.path);
+
+    path_encode_free(&encoded);
+    path_free(&source);
+}
+
+fn deterministic_sweep(state: *TestState) void {
+    let expected: i64 = 0;
+    let stable: i32 = 1;
+    let i: i32 = 0;
+    while (i < 100) {
+        let path: PathData = complete_path(PathFillRule.non_zero);
+        if (i == 0) { expected = path.content_hash; }
+        if (path.content_hash != expected || path_verify(path) != PathError.none) { stable = 0; }
+        path_free(&path);
+        i = i + 1;
+    }
+    expect(state, stable, "100-build sweep preserves canonical path identity");
+}
+
+fn main() i32 {
+    let state: TestState = TestState{ .passed = 0, .failed = 0 };
+    builder_contract(&state);
+    codec_contract(&state);
+    malformed_contract(&state);
+    deterministic_sweep(&state);
+    let passed_text: []u8 = _zag_i64_to_str(state.passed as i64);
+    let failed_text: []u8 = _zag_i64_to_str(state.failed as i64);
+    _zag_print("Path contract: pass="); _zag_print(passed_text);
+    _zag_print(" fail="); _zag_println(failed_text);
+    _zag_str_free(passed_text);
+    _zag_str_free(failed_text);
+    if (state.failed == 0) { return 0; }
+    return 1;
+}

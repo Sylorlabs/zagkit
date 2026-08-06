@@ -2,6 +2,7 @@
 @import("../core/geometry.zag")
 @import("../core/view_contract.zag")
 @import("resources.zag")
+@import("path.zag")
 
 enum DisplayOpKind {
     save,
@@ -258,7 +259,20 @@ fn display_resource_reference_valid(list: DisplayList, op: DisplayOp) i32 {
     if (expected < 0) { return 1; }
     let index: i32 = render_resource_find_index(list.resources, op.resource_id);
     if (index < 0) { return 0; }
-    return (list.resources.resources.data[index].kind as i64 == expected) as i32;
+    let resource: RenderResource = list.resources.resources.data[index];
+    if ((resource.kind as i64) != expected) { return 0; }
+    if (op.kind == DisplayOpKind.draw_path) {
+        return (resource.format_tag == path_resource_format_tag()) as i32;
+    }
+    return 1;
+}
+
+fn display_resource_payload_valid(resource: RenderResource) i32 {
+    if (resource.kind == RenderResourceKind.path) {
+        return (resource.format_tag == path_resource_format_tag() &&
+            path_payload_valid(resource.payload.data[0..resource.payload.len]) != 0) as i32;
+    }
+    return 1;
 }
 
 fn display_op_requires_bounds(kind: DisplayOpKind) i32 {
@@ -317,6 +331,14 @@ fn display_list_seal(list: *DisplayList) DisplayError {
     if (list.*.sealed != 0) { return DisplayError.none; }
     if (list.*.stack_depth != 0) { return display_fail(list, DisplayError.unbalanced_stack); }
     if (list.*.layer_depth != 0) { return display_fail(list, DisplayError.unbalanced_layers); }
+    let resource_index: i32 = 0;
+    while (resource_index < list.*.resources.resources.len) {
+        if (display_resource_payload_valid(
+            list.*.resources.resources.data[resource_index]) == 0) {
+            return display_fail_at(list, DisplayError.invalid_resource, 0 - 1);
+        }
+        resource_index = resource_index + 1;
+    }
     let i: i32 = 0;
     while (i < list.*.ops.len) {
         if (display_resource_reference_valid(list.*, list.*.ops.data[i]) == 0) {
@@ -339,6 +361,14 @@ fn display_list_verify(list: DisplayList) DisplayError {
     if (list.sealed == 0) { return DisplayError.not_sealed; }
     if (render_resource_store_verify(list.resources) != RenderResourceError.none) {
         return DisplayError.content_mutated;
+    }
+    let resource_index: i32 = 0;
+    while (resource_index < list.resources.resources.len) {
+        if (display_resource_payload_valid(
+            list.resources.resources.data[resource_index]) == 0) {
+            return DisplayError.content_mutated;
+        }
+        resource_index = resource_index + 1;
     }
     let hash: i64 = display_mix(17, list.resources.content_hash);
     let stack_depth: i32 = 0;

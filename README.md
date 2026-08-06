@@ -43,7 +43,7 @@ is normative in [DEPENDENCIES.md](DEPENDENCIES.md).
 | Product and architecture contract | accepted | [RFC index](docs/rfcs/README.md) |
 | Compiler dependency | pinned, prerequisites incomplete | [toolchain lock](contracts/toolchain.json) |
 | Platform shells | unavailable | [support matrix](SUPPORT.md) |
-| Headless core | experimental state, reconciliation, intrinsic measurement, geometry, Flex, Grid, Overlay, scroll, virtual collections, collection semantics, Talkback, display lists, CPU raster, input, replay, and motion | [headless test](tools/test-headless.sh) |
+| Headless core | experimental state, reconciliation, intrinsic measurement, geometry, Flex, Grid, Overlay, scroll, virtual collections, collection semantics, Talkback, canonical paths, display lists, CPU raster, input, replay, and motion | [headless test](tools/test-headless.sh) |
 | Components and visual language | inventory only, visual review pending | [component inventory](contracts/components.json) |
 | Flex and Zagkit Talkback | Flex foundation and in-process ID-first Talkback dispatch executing; native transport remains unavailable | [Talkback contract](docs/automation/talkback.md) |
 | Benchmarks | scene specifications only, no results | [benchmark contract](benchmarks/README.md) |
@@ -136,12 +136,17 @@ and verification detects out-of-contract raw mutation against deterministic
 content identity. An integrated experimental resource store owns opaque typed
 payload bytes with stable IDs, canonical order, bounded allocation, exact
 replacement revisions, sealing, and mutation verification. Display-list seal
-requires every reference to resolve the exact resource kind. The version 2
+requires every reference to resolve the exact resource kind. Path resources use
+a bounded immutable command builder and canonical `ZKPATH01` version 1 payload;
+fill rules, moves, lines, quadratic and cubic curves, contour closure, sequence,
+geometry, identity, truncation, and trailing bytes are validated before use.
+The version 2
 binary codec round-trips resource metadata, payloads, revisions, allocation
 policy, and operations byte-identically and rejects malformed, truncated,
-noncanonical, unknown-version, and hash-mismatched input. Payload interpretation,
-damage, complete CPU rasterization, GPU transport, schema evolution, and fuzz
-coverage remain open.
+noncanonical, unknown-version, and hash-mismatched input. Path flattening and
+rasterization, other payload interpretation, damage, complete CPU rasterization,
+GPU transport, schema evolution, and fuzz coverage remain open. See the
+[path contract](docs/architecture/paths.md).
 
 The first CPU-oracle subset rasterizes fixed-point rectangle fills with exact
 clip and axis-aligned transform state, area-based fractional edge coverage, and

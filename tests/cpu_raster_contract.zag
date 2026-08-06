@@ -16,6 +16,18 @@ fn pixel(surface: CpuSurface, x: i32, y: i32, channel: i32) i64 {
     return surface.pixels.data[(y * surface.width + x) * 4 + channel] as i64;
 }
 
+fn cpu_path_payload() PathEncodeResult {
+    let path: PathData = path_make(PathFillRule.non_zero);
+    _ = path_move_to(&path, path_point(0, 0));
+    _ = path_line_to(&path, path_point(unit_scale(), 0));
+    _ = path_line_to(&path, path_point(0, unit_scale()));
+    _ = path_close(&path);
+    _ = path_seal(&path);
+    let encoded: PathEncodeResult = path_encode(path);
+    path_free(&path);
+    return encoded;
+}
+
 fn fill_scene(bounds: Rect, paint: Paint) DisplayList {
     let list: DisplayList = display_list_make();
     let op: DisplayOp = display_op(DisplayOpKind.fill_rect, node_key(1));
@@ -101,8 +113,11 @@ fn failure_contract(state: *TestState) void {
     display_list_free(&unsealed);
 
     let unsupported: DisplayList = display_list_make();
+    let path_payload: PathEncodeResult = cpu_path_payload();
     _ = display_list_add_resource(&unsupported,
-        render_resource_spec(8, RenderResourceKind.path, "PATH", 1));
+        render_resource_spec(8, RenderResourceKind.path,
+            path_payload.bytes.data[0..path_payload.bytes.len], path_resource_format_tag()));
+    path_encode_free(&path_payload);
     let path: DisplayOp = display_op(DisplayOpKind.draw_path, node_key(1));
     path.resource_id = 8;
     _ = display_list_push(&unsupported, path);

@@ -40,6 +40,10 @@ include a generated capability record and exact Zag compiler revision.
   exact replacement revisions, copied payloads, byte accounting, sealing,
   mutation detection, typed display-list reference validation, and explicit
   decoder boundaries.
+- A canonical bounded `ZKPATH01` vector-path builder and codec with non-zero or
+  even-odd fill rules, line and curve commands, immutable identity, typed
+  display-resource validation, malformed-input offsets, and byte-identical
+  round trips.
 - An experimental immutable display list for explicit paints, resources, clips,
   transforms, layers, and effects with deterministic content identity.
 - A versioned canonical display-list codec with bounded validated decoding and

@@ -230,6 +230,11 @@ fn display_list_decode(bytes: ArrayList[u8]) DisplayDecodeResult {
             return display_decode_fail(list, DisplayCodecError.invalid_resource, offset);
         }
         let added_index: i32 = render_resource_find_index(list.resources, spec.id);
+        if (display_resource_payload_valid(
+            list.resources.resources.data[added_index]) == 0) {
+            return display_decode_fail(list, DisplayCodecError.invalid_payload,
+                payload_start as i64);
+        }
         list.resources.resources.data[added_index].revision = stored_resource_revision;
         list.resources.resources.data[added_index].content_hash =
             render_resource_hash(list.resources.resources.data[added_index]);
