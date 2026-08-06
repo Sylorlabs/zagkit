@@ -36,7 +36,16 @@ owned path payload once, then validates operation references by stable ID,
 resource kind, and format. This avoids both opaque-path acceptance and repeated
 decode work when one path is drawn many times.
 
-This contract does not yet flatten curves, compute analytic curve extrema,
-rasterize fills or strokes, apply dashes, perform boolean path operations, or
-decode SVG path syntax. Those remain unavailable until their deterministic,
-malformed-input, golden, and cleanup suites pass.
+The CPU oracle closes open contours for filling, flattens quadratic and cubic
+commands into 16 deterministic line segments, applies the retained positive
+axis-aligned transform and clip, evaluates non-zero or even-odd winding, and
+uses an 8 by 8 subpixel grid for symmetric coverage. It rejects transformed
+coordinates, edge counts, or pixel-edge-sample work beyond explicit bounds
+before touching pixels. The replay conformance scene exercises this real path
+route.
+
+Fixed-subdivision flattening is an experimental correctness step, not the final
+curve-quality contract. Scale-adaptive or analytic curve coverage, exact curve
+extrema, strokes, joins, caps, dashes, boolean path operations, and SVG path
+syntax remain unavailable until their deterministic, malformed-input, golden,
+fidelity, and cleanup suites pass.

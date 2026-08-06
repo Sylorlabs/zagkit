@@ -50,7 +50,9 @@ include a generated capability record and exact Zag compiler revision.
   byte-identical replay round trips, upgraded to ZKDL version 2 with owned
   resource metadata, payload, allocation-policy, and revision serialization.
 - The first deterministic CPU-oracle subset for fixed-point fills, clipping,
-  axis-aligned transforms, fractional coverage, and source-over alpha.
+  axis-aligned transforms, fractional coverage, and source-over alpha, extended
+  with bounded canonical path fills, quadratic and cubic flattening, non-zero
+  and even-odd winding, 8 by 8 coverage, and fail-before-pixel work ceilings.
 - Strict executable headless contracts in CI using the exact pinned Zag
   revision rather than an ambient compiler.
 - Transformed hit testing and deterministic pointer routing with clipping,

@@ -16,16 +16,37 @@ fn pixel(surface: CpuSurface, x: i32, y: i32, channel: i32) i64 {
     return surface.pixels.data[(y * surface.width + x) * 4 + channel] as i64;
 }
 
-fn cpu_path_payload() PathEncodeResult {
-    let path: PathData = path_make(PathFillRule.non_zero);
+fn path_scene(path: PathData, paint: Paint) DisplayList {
+    let list: DisplayList = display_list_make();
+    let payload: PathEncodeResult = path_encode(path);
+    _ = display_list_add_resource(&list,
+        render_resource_spec(8, RenderResourceKind.path,
+            payload.bytes.data[0..payload.bytes.len], path_resource_format_tag()));
+    path_encode_free(&payload);
+    let draw: DisplayOp = display_op(DisplayOpKind.draw_path, node_key(8));
+    draw.resource_id = 8;
+    draw.paint = paint;
+    _ = display_list_push(&list, draw);
+    _ = display_list_seal(&list);
+    return list;
+}
+
+fn square_path(fill_rule: PathFillRule, include_inner: i32) PathData {
+    let path: PathData = path_make(fill_rule);
     _ = path_move_to(&path, path_point(0, 0));
-    _ = path_line_to(&path, path_point(unit_scale(), 0));
-    _ = path_line_to(&path, path_point(0, unit_scale()));
+    _ = path_line_to(&path, path_point(4 * unit_scale(), 0));
+    _ = path_line_to(&path, path_point(4 * unit_scale(), 4 * unit_scale()));
+    _ = path_line_to(&path, path_point(0, 4 * unit_scale()));
     _ = path_close(&path);
+    if (include_inner != 0) {
+        _ = path_move_to(&path, path_point(unit_scale(), unit_scale()));
+        _ = path_line_to(&path, path_point(3 * unit_scale(), unit_scale()));
+        _ = path_line_to(&path, path_point(3 * unit_scale(), 3 * unit_scale()));
+        _ = path_line_to(&path, path_point(unit_scale(), 3 * unit_scale()));
+        _ = path_close(&path);
+    }
     _ = path_seal(&path);
-    let encoded: PathEncodeResult = path_encode(path);
-    path_free(&path);
-    return encoded;
+    return path;
 }
 
 fn fill_scene(bounds: Rect, paint: Paint) DisplayList {
@@ -105,6 +126,128 @@ fn deterministic_contract(state: *TestState) void {
     display_list_free(&list);
 }
 
+fn path_fill_contract(state: *TestState) void {
+    let triangle: PathData = path_make(PathFillRule.non_zero);
+    _ = path_move_to(&triangle, path_point(0, 0));
+    _ = path_line_to(&triangle, path_point(2 * unit_scale(), 0));
+    _ = path_line_to(&triangle, path_point(0, 2 * unit_scale()));
+    _ = path_close(&triangle);
+    _ = path_seal(&triangle);
+    let triangle_list: DisplayList = path_scene(triangle,
+        paint_rgba16(65535, 0, 0, 65535));
+    let triangle_result: CpuRasterResult = cpu_rasterize(triangle_list, 3, 3);
+    expect(state, triangle_result.error == CpuRasterError.none &&
+        triangle_result.rendered_ops == 1 && triangle_result.pixels_touched == 3,
+        "canonical line paths rasterize as one deterministic display operation");
+    expect(state, pixel(triangle_result.surface, 0, 0, 3) == 255 &&
+        pixel(triangle_result.surface, 1, 0, 3) == 112 &&
+        pixel(triangle_result.surface, 0, 1, 3) == 112 &&
+        pixel(triangle_result.surface, 1, 1, 3) == 0,
+        "8 by 8 path sampling produces exact symmetric diagonal coverage");
+    cpu_raster_free(&triangle_result);
+    display_list_free(&triangle_list);
+    path_free(&triangle);
+
+    let even_odd: PathData = square_path(PathFillRule.even_odd, 1);
+    let even_odd_list: DisplayList = path_scene(even_odd,
+        paint_rgba16(0, 65535, 0, 65535));
+    let even_odd_result: CpuRasterResult = cpu_rasterize(even_odd_list, 4, 4);
+    expect(state, pixel(even_odd_result.surface, 0, 0, 1) == 255 &&
+        pixel(even_odd_result.surface, 2, 2, 3) == 0,
+        "even-odd fill removes nested contours regardless of matching orientation");
+
+    let non_zero: PathData = square_path(PathFillRule.non_zero, 1);
+    let non_zero_list: DisplayList = path_scene(non_zero,
+        paint_rgba16(0, 0, 65535, 65535));
+    let non_zero_result: CpuRasterResult = cpu_rasterize(non_zero_list, 4, 4);
+    expect(state, pixel(non_zero_result.surface, 2, 2, 2) == 255,
+        "non-zero fill retains nested contours with matching winding");
+    cpu_raster_free(&non_zero_result);
+    display_list_free(&non_zero_list);
+    path_free(&non_zero);
+    cpu_raster_free(&even_odd_result);
+    display_list_free(&even_odd_list);
+    path_free(&even_odd);
+
+    let curves: PathData = path_make(PathFillRule.non_zero);
+    _ = path_move_to(&curves, path_point(0, 3 * unit_scale()));
+    _ = path_quad_to(&curves, path_point(2 * unit_scale(), 0),
+        path_point(4 * unit_scale(), 3 * unit_scale()));
+    _ = path_cubic_to(&curves, path_point(3 * unit_scale(), 4 * unit_scale()),
+        path_point(unit_scale(), 4 * unit_scale()), path_point(0, 3 * unit_scale()));
+    _ = path_close(&curves);
+    _ = path_seal(&curves);
+    let curves_list: DisplayList = path_scene(curves,
+        paint_rgba16(40000, 30000, 20000, 65535));
+    let first: CpuRasterResult = cpu_rasterize(curves_list, 5, 5);
+    let second: CpuRasterResult = cpu_rasterize(curves_list, 5, 5);
+    expect(state, first.error == CpuRasterError.none && first.pixels_touched > 0 &&
+        cpu_surface_hash(first.surface) == cpu_surface_hash(second.surface),
+        "quadratic and cubic flattening produces stable nonempty CPU output");
+    cpu_raster_free(&second);
+    cpu_raster_free(&first);
+    display_list_free(&curves_list);
+    path_free(&curves);
+}
+
+fn path_work_limit_contract(state: *TestState) void {
+    let path: PathData = path_make(PathFillRule.non_zero);
+    _ = path_move_to(&path, path_point(0, 0));
+    let i: i32 = 0;
+    while (i < 100) {
+        let y: i64 = 0;
+        if (i % 2 != 0) { y = 100 * unit_scale(); }
+        _ = path_line_to(&path, path_point((i as i64) * unit_scale(), y));
+        i = i + 1;
+    }
+    _ = path_line_to(&path, path_point(100 * unit_scale(), 100 * unit_scale()));
+    _ = path_line_to(&path, path_point(0, 100 * unit_scale()));
+    _ = path_close(&path);
+    _ = path_seal(&path);
+    let list: DisplayList = path_scene(path, paint_rgba16(65535, 65535, 65535, 65535));
+    let result: CpuRasterResult = cpu_rasterize(list, 100, 100);
+    expect(state, result.error == CpuRasterError.work_limit && result.error_op == 0 &&
+        result.pixels_touched == 0,
+        "path raster work exceeding the deterministic budget fails before touching pixels");
+    cpu_raster_free(&result);
+    display_list_free(&list);
+    path_free(&path);
+}
+
+fn path_clip_transform_contract(state: *TestState) void {
+    let path: PathData = square_path(PathFillRule.non_zero, 0);
+    let payload: PathEncodeResult = path_encode(path);
+    let list: DisplayList = display_list_make();
+    _ = display_list_add_resource(&list,
+        render_resource_spec(12, RenderResourceKind.path,
+            payload.bytes.data[0..payload.bytes.len], path_resource_format_tag()));
+    path_encode_free(&payload);
+    _ = display_list_push(&list, display_op(DisplayOpKind.save, node_key(12)));
+    let clip: DisplayOp = display_op(DisplayOpKind.clip_rect, node_key(12));
+    clip.bounds = rect(2 * unit_scale(), 0, unit_scale(), 3 * unit_scale());
+    _ = display_list_push(&list, clip);
+    let transform: DisplayOp = display_op(DisplayOpKind.concat_transform, node_key(12));
+    transform.transform.translate_x = unit_scale();
+    _ = display_list_push(&list, transform);
+    let draw: DisplayOp = display_op(DisplayOpKind.draw_path, node_key(12));
+    draw.resource_id = 12;
+    draw.paint = paint_rgba16(65535, 65535, 0, 65535);
+    _ = display_list_push(&list, draw);
+    _ = display_list_push(&list, display_op(DisplayOpKind.restore, node_key(12)));
+    _ = display_list_seal(&list);
+    let result: CpuRasterResult = cpu_rasterize(list, 5, 3);
+    expect(state, result.error == CpuRasterError.none && result.rendered_ops == 5 &&
+        result.pixels_touched == 3,
+        "path rendering participates in the retained transform and clip stack");
+    expect(state, pixel(result.surface, 1, 1, 3) == 0 &&
+        pixel(result.surface, 2, 1, 0) == 255 && pixel(result.surface, 2, 1, 1) == 255 &&
+        pixel(result.surface, 3, 1, 3) == 0,
+        "transformed path coverage is clipped at subpixel sample positions");
+    cpu_raster_free(&result);
+    display_list_free(&list);
+    path_free(&path);
+}
+
 fn failure_contract(state: *TestState) void {
     let unsealed: DisplayList = display_list_make();
     let unsealed_result: CpuRasterResult = cpu_rasterize(unsealed, 2, 2);
@@ -113,17 +256,14 @@ fn failure_contract(state: *TestState) void {
     display_list_free(&unsealed);
 
     let unsupported: DisplayList = display_list_make();
-    let path_payload: PathEncodeResult = cpu_path_payload();
-    _ = display_list_add_resource(&unsupported,
-        render_resource_spec(8, RenderResourceKind.path,
-            path_payload.bytes.data[0..path_payload.bytes.len], path_resource_format_tag()));
-    path_encode_free(&path_payload);
-    let path: DisplayOp = display_op(DisplayOpKind.draw_path, node_key(1));
-    path.resource_id = 8;
-    _ = display_list_push(&unsupported, path);
+    let stroke: DisplayOp = display_op(DisplayOpKind.stroke_rect, node_key(1));
+    stroke.bounds = rect(0, 0, unit_scale(), unit_scale());
+    _ = display_list_push(&unsupported, stroke);
     _ = display_list_seal(&unsupported);
     let unsupported_result: CpuRasterResult = cpu_rasterize(unsupported, 2, 2);
-    expect(state, unsupported_result.error == CpuRasterError.unsupported_operation && unsupported_result.error_op == 0, "unimplemented path rasterization fails closed at the exact operation");
+    expect(state, unsupported_result.error == CpuRasterError.unsupported_operation &&
+        unsupported_result.error_op == 0,
+        "unimplemented stroke rasterization fails closed at the exact operation");
     cpu_raster_free(&unsupported_result);
     display_list_free(&unsupported);
 
@@ -146,6 +286,9 @@ fn main() i32 {
     coverage_and_blend_contract(&state);
     clip_and_transform_contract(&state);
     deterministic_contract(&state);
+    path_fill_contract(&state);
+    path_work_limit_contract(&state);
+    path_clip_transform_contract(&state);
     failure_contract(&state);
     let passed_text: []u8 = _zag_i64_to_str(state.passed as i64);
     let failed_text: []u8 = _zag_i64_to_str(state.failed as i64);

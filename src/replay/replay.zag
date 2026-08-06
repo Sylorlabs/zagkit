@@ -614,6 +614,34 @@ fn replay_build_scene(state_value: i64, backend_generation: i64) ReplayResult {
         semantics_tree_free(&semantics);
         return replay_result_error(ReplayError.scene_error, 0 - 1, 0);
     }
+    let replay_path: PathData = path_make(PathFillRule.non_zero);
+    _ = path_move_to(&replay_path, path_point(unit_scale(), unit_scale()));
+    _ = path_line_to(&replay_path,
+        path_point((5 + magnitude) * unit_scale(), unit_scale()));
+    _ = path_quad_to(&replay_path, path_point(3 * unit_scale(), 5 * unit_scale()),
+        path_point(unit_scale(), unit_scale()));
+    _ = path_close(&replay_path);
+    if (path_seal(&replay_path) != PathError.none) {
+        path_free(&replay_path);
+        display_list_free(&list);
+        flex_wrap_free(&layout);
+        semantics_tree_free(&semantics);
+        return replay_result_error(ReplayError.scene_error, 0 - 1, 0);
+    }
+    let replay_path_payload: PathEncodeResult = path_encode(replay_path);
+    path_free(&replay_path);
+    let replay_path_error: RenderResourceError = display_list_add_resource(&list,
+        render_resource_spec(901, RenderResourceKind.path,
+            replay_path_payload.bytes.data[0..replay_path_payload.bytes.len],
+            path_resource_format_tag())
+    );
+    path_encode_free(&replay_path_payload);
+    if (replay_path_error != RenderResourceError.none) {
+        display_list_free(&list);
+        flex_wrap_free(&layout);
+        semantics_tree_free(&semantics);
+        return replay_result_error(ReplayError.scene_error, 0 - 1, 0);
+    }
     let first_op: DisplayOp = display_op(DisplayOpKind.fill_rect, node_key(101));
     first_op.bounds = layout.placements.data[0].frame;
     let blue: i64 = (backend_generation % 8) * 4096;
@@ -636,7 +664,16 @@ fn replay_build_scene(state_value: i64, backend_generation: i64) ReplayResult {
     let third_op: DisplayOp = display_op(DisplayOpKind.fill_rect, node_key(103));
     third_op.bounds = layout.placements.data[2].frame;
     third_op.paint = paint_rgba16(12288, 40960, 24576 + magnitude * 4096, 65535);
-    if (display_list_push(&list, third_op) != DisplayError.none ||
+    if (display_list_push(&list, third_op) != DisplayError.none) {
+        display_list_free(&list);
+        flex_wrap_free(&layout);
+        semantics_tree_free(&semantics);
+        return replay_result_error(ReplayError.scene_error, 0 - 1, 0);
+    }
+    let path_op: DisplayOp = display_op(DisplayOpKind.draw_path, node_key(104));
+    path_op.resource_id = 901;
+    path_op.paint = paint_rgba16(57344, 49152, 8192, 32768);
+    if (display_list_push(&list, path_op) != DisplayError.none ||
         display_list_seal(&list) != DisplayError.none) {
         display_list_free(&list);
         flex_wrap_free(&layout);
