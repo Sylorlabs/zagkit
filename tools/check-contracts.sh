@@ -211,7 +211,13 @@ jq -e '
   .current_runtime_truth."native-transport" == "unavailable"
 ' contracts/talkback-protocol.json >/dev/null || fail "Zagkit Talkback protocol contract is incomplete"
 
-if [ -d ../zag/.git ]; then
+if [ -d .toolchain/zag/.git ]; then
+    git -C .toolchain/zag cat-file -e "$compiler_commit^{commit}" 2>/dev/null \
+        || fail "CI Zag checkout does not contain the pinned commit"
+    [ "$(git -C .toolchain/zag rev-parse HEAD)" = "$compiler_commit" ] \
+        || fail "CI Zag checkout HEAD does not equal the pinned commit"
+    printf 'contract check: verified pinned Zag commit in CI checkout\n'
+elif [ -d ../zag/.git ]; then
     git -C ../zag cat-file -e "$compiler_commit^{commit}" 2>/dev/null \
         || fail "neighboring Zag repository does not contain the pinned commit"
     printf 'contract check: verified pinned Zag commit in neighboring checkout\n'
@@ -227,7 +233,7 @@ for source_root in src packages platform; do
     fi
 done
 
-find . -path './.git' -prune -o -name '*.md' -type f -print | sort |
+find . \( -path './.git' -o -path './.toolchain' \) -prune -o -name '*.md' -type f -print | sort |
 while IFS= read -r markdown_file; do
     markdown_base=$(dirname "$markdown_file")
     grep -oE '\]\([^)]+\)' "$markdown_file" |
