@@ -16,6 +16,8 @@ to executable evidence.
   inventory, compiler pin, and upstream Zag prerequisite ledger.
 - Executable contract validation in CI.
 - Explicit visual direction and accessibility review gate.
+- CI-checked master goal checklist covering Flex, Zagkit Talkback, visual and
+  asset fidelity, and the complete PrismStudio overhaul.
 
 This milestone creates no runtime support. Its completion cannot promote any
 platform capability.
@@ -42,6 +44,12 @@ animation clocks, input routing, hit testing, snapshots, and deterministic
 replay without a window system. Exit requires unit, property, fuzz,
 differential, golden, and replay gates.
 
+Flex is the common placement and spacing system. Zagkit Talkback is built over
+retained node and semantic identity with ID-first interaction and observable,
+scale-aware pixel fallback. Fonts, semantic colors, SVG, PNG, lighting, soft
+shadows, and adaptive liquid-glass materials are renderer and asset-pipeline
+requirements, including designed reduced-effects variants.
+
 ## 3. Linux preview
 
 **Status: not started.**
@@ -52,15 +60,23 @@ public GPU transport. Exit requires live native execution and fail closed
 capability reporting on Ubuntu LTS and current Fedora baselines for x86-64 and
 ARM64 where the compiler target exists.
 
+Linux is the first polish reference: modern density-independent output, exact
+spacing, crisp curves and assets, coherent motion and glass, native
+accessibility, Talkback automation, recovery, screenshots at all declared
+scales, and packaging must have no known severity-one or severity-two defects.
+
 ## 4. PrismStudio dogfood
 
 **Status: not started.**
 
-Migrate PrismStudio as the first complex consumer. Preserve CAD workflows,
-direct manipulation, tables, menus, keyboard control, viewport behavior,
-performance evidence, and its explicit physical GPU safety boundary. The
-component gallery remains a conformance surface; PrismStudio is the product
-proof.
+Replace the complete visible PrismStudio UI with Zagkit as the first complex
+consumer. Preserve and modernize every CAD workflow, direct manipulation path,
+table, tree, menu, keyboard command, dialog, viewport behavior, performance
+contract, and explicit physical GPU safety boundary. Apply the selected Zagkit
+direction, Flex spacing, production fonts and colors, SVG and PNG assets,
+lighting, soft shadows, motion, and liquid-glass materials. Every actionable
+node receives a stable Talkback ID. Native screenshot comparisons are required
+alongside semantics, AT-SPI, interaction, recovery, and performance evidence.
 
 ## 5. Desktop parity
 

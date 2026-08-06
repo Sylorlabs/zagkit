@@ -19,6 +19,8 @@
 | Upstream prerequisites | contracts/upstream-zag.json | required entry and evidence validation |
 | Visual direction pause | docs/design/visual-direction.md | blocked gate validation |
 | CI contract gate | tools/check-contracts.sh | local and GitHub Actions execution |
+| Durable goal checklist | GOAL.md | stable ID, evidence, and exit-condition validation |
+| Expanded toolkit contract | RFC 0006 | Flex, Talkback, visual fidelity, and PrismStudio validation |
 
 ## Zag audit boundary
 

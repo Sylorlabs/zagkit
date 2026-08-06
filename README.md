@@ -5,6 +5,10 @@ being designed for one adaptive product codebase across Linux, macOS, Windows,
 iOS, and Android, with precise text, fluid interaction, built in semantics, and
 inspectable runtime truth.
 
+The durable, CI-checked execution plan is the [master goal checklist](GOAL.md).
+It includes the Flex placement system, Zagkit Talkback native automation,
+modern materials and asset fidelity, and a complete PrismStudio UI replacement.
+
 This repository is at **0.1.0-experimental.0**. It currently contains the
 accepted product contract and executable Milestone 0 checks. It does not yet
 contain a usable renderer, window shell, component library, or supported
@@ -37,6 +41,7 @@ is normative in [DEPENDENCIES.md](DEPENDENCIES.md).
 | Platform shells | unavailable | [support matrix](SUPPORT.md) |
 | Headless core | not implemented | [roadmap](ROADMAP.md) |
 | Components and visual language | inventory only, visual review pending | [component inventory](contracts/components.json) |
+| Flex and Zagkit Talkback | contract accepted, not implemented | [RFC 0006](docs/rfcs/0006-flex-talkback-visual-fidelity-and-prismstudio.md) |
 | Benchmarks | scene specifications only, no results | [benchmark contract](benchmarks/README.md) |
 
 Run the repository contract gate with:
@@ -54,7 +59,7 @@ inventory, benchmark scene coverage, and the 1.0 block.
 1. Advance reusable compiler, ABI, concurrency, package, and platform features
    in [Zag](https://github.com/Sylorlabs/zag), each with native executable proof.
 2. Build Zagkit's deterministic headless core.
-3. Ship an honest Linux preview, then prove the architecture in PrismStudio.
+3. Ship a polished Linux reference, then completely rebuild PrismStudio's UI on Zagkit.
 4. Reach desktop parity on macOS and Windows.
 5. Reach mobile parity on iOS and Android.
 6. Call the shared product 1.0 only after all five families pass the same gate.

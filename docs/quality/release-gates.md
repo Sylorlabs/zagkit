@@ -28,6 +28,24 @@ GPU output is compared to CPU output with versioned tolerance rules by display
 list operation, pixel format, color space, and device. An unexplained mismatch
 fails. Updating a golden requires a reviewed intent record.
 
+Native screenshot comparisons cover crisp typography, curves, SVG, PNG,
+lighting, shadows, and transparent materials at every declared scale. Each
+comparison records viewport, state, backend, color space, scale, fonts, theme,
+contrast, direction, text scale, motion, and transparency preferences.
+Screenshots remain necessary visual evidence, not complete product evidence.
+
+## Flex and Zagkit Talkback
+
+Flex conformance covers gap, padding, alignment, distribution, baseline, wrap,
+intrinsic size, constraints, grid, overlay, breakpoints, safe areas, density,
+RTL, and large text. Every layout change reports its exact state read and rule.
+
+Zagkit Talkback conformance drives canonical applications by stable ID and
+checks discovery, query, action, wait, assertion, screenshot, timeline,
+capability, snapshot, and replay behavior. Pixel fallback is separately
+reported, scale-aware, and forbidden where a required actionable semantic node
+should exist. This automation never replaces native assistive-technology runs.
+
 ## Live platform suite
 
 Each promoted target runs resize, suspend and resume, background and foreground,
@@ -80,3 +98,8 @@ known unsupported features, and untested hardware.
 | Beta | intended API plus native accessibility, text input, recovery, performance, and packaging evidence |
 | Stable | complete common gates, supported version policy, reproducible signed artifacts, and support process |
 | 1.0 | Stable gate on all five required platform families plus PrismStudio and mobile reference proof |
+
+The PrismStudio proof is a complete UI replacement on Zagkit, not a sample
+screen or partial shell migration. Linux polish additionally requires zero open
+severity-one or severity-two visual, spacing, text, input, accessibility,
+automation, recovery, performance, or packaging defects.

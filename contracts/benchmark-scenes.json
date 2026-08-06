@@ -111,6 +111,42 @@
       "canonical_interaction": "Animate clipped transformed layers with paths, glyphs, images, opacity, blur, and shadows.",
       "stresses": ["display-list", "clipping", "transforms", "layers", "effects", "rasterization"],
       "assertions": ["deterministic-golden", "cpu-oracle", "gpu-tolerance", "bounded-resources", "damage-correctness"]
+    },
+    {
+      "id": "material-fidelity",
+      "name": "Lighting, shadow, and liquid-glass fidelity",
+      "milestone": 2,
+      "status": "specification",
+      "canonical_interaction": "Move, overlap, resize, interrupt, and scroll translucent materials across changing light and content.",
+      "stresses": ["backdrop", "blur", "refraction", "lighting", "shadows", "color-management", "animation"],
+      "assertions": ["crisp-all-scales", "text-legibility", "reduced-transparency-substitution", "cpu-oracle", "gpu-tolerance", "no-two-frame-stall"]
+    },
+    {
+      "id": "asset-fidelity",
+      "name": "Font, SVG, and PNG fidelity",
+      "milestone": 2,
+      "status": "specification",
+      "canonical_interaction": "Zoom and rescale international text, SVG icons, and color-managed PNG images through every declared density.",
+      "stresses": ["font-rasterization", "svg", "png", "color-space", "alpha", "scaling", "malformed-assets"],
+      "assertions": ["no-pixelation", "color-profile-correctness", "bounded-decoding", "deterministic-golden", "semantic-labels"]
+    },
+    {
+      "id": "talkback-native-automation",
+      "name": "Zagkit Talkback native automation",
+      "milestone": 2,
+      "status": "specification",
+      "canonical_interaction": "Discover, query, click, type, scroll, drag, wait, assert, capture, and replay a multi-window app by stable node ID.",
+      "stresses": ["stable-ids", "semantics", "virtualization", "reload", "multi-window", "timeouts", "pixel-fallback"],
+      "assertions": ["id-first-actions", "structured-failures", "fallback-observability", "deterministic-replay", "capability-truth"]
+    },
+    {
+      "id": "prismstudio-complete-ui",
+      "name": "Complete PrismStudio Zagkit experience",
+      "milestone": 4,
+      "status": "specification",
+      "canonical_interaction": "Complete representative CAD editing, inspection, menu, dialog, navigation, and recovery workflows in the fully redesigned native application.",
+      "stresses": ["flex", "talkback", "materials", "assets", "viewport", "tables", "accessibility", "recovery"],
+      "assertions": ["no-legacy-ui-path", "id-driven-workflows", "matched-screenshot-set", "at-spi", "keyboard-equivalence", "no-rough-edges"]
     }
   ]
 }

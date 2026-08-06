@@ -21,7 +21,7 @@ require_json() {
 command -v jq >/dev/null 2>&1 || fail "jq is required to validate repository contracts"
 
 for path in \
-    LICENSE README.md CHANGELOG.md CONTRIBUTING.md GOVERNANCE.md VERSIONING.md \
+    LICENSE README.md GOAL.md CHANGELOG.md CONTRIBUTING.md GOVERNANCE.md VERSIONING.md \
     SUPPORT.md SECURITY.md DEPENDENCIES.md ROADMAP.md zag.mod \
     docs/design/visual-direction.md docs/quality/release-gates.md \
     docs/architecture/README.md docs/milestones/0000-product-contract.md \
@@ -35,9 +35,28 @@ for path in \
     docs/rfcs/0002-declarative-core-and-rendering.md \
     docs/rfcs/0003-text-semantics-and-input.md \
     docs/rfcs/0004-platform-seams-and-backend-truth.md \
-    docs/rfcs/0005-quality-and-release-contract.md; do
+    docs/rfcs/0005-quality-and-release-contract.md \
+    docs/rfcs/0006-flex-talkback-visual-fidelity-and-prismstudio.md; do
     require_file "$path"
     grep -q 'Status: Accepted' "$path" || fail "$path is not accepted"
+done
+
+grep -q 'Goal status: \*\*Active\*\*' GOAL.md || fail "master goal is not active"
+checkbox_count=$(grep -Ec '^- \[[ x]\] `[A-Z0-9][A-Z0-9-]+` ' GOAL.md || true)
+[ "$checkbox_count" -ge 80 ] || fail "master goal checklist lost required coverage"
+checklist_ids=$(grep -E '^- \[[ x]\] `[A-Z0-9][A-Z0-9-]+` ' GOAL.md | sed -E 's/^- \[[ x]\] `([^`]+)`.*/\1/')
+unique_checklist_ids=$(printf '%s\n' "$checklist_ids" | sort -u | wc -l | tr -d ' ')
+[ "$unique_checklist_ids" -eq "$checkbox_count" ] || fail "master goal checklist IDs are not unique"
+if grep -E '^- \[x\] ' GOAL.md | grep -vq ' — Evidence: '; then
+    fail "checked goal item is missing Evidence"
+fi
+if grep -E '^- \[ \] ' GOAL.md | grep -vq ' — Exit: '; then
+    fail "unchecked goal item is missing an Exit condition"
+fi
+for id in G1-SOURCE-FIRST G2-FLEX G3-FONTS G3-SVG G3-PNG G3-GLASS \
+    G4-TALKBACK-IDS G4-TALKBACK-PIXELS G5-LINUX-POLISH G6-SHELL \
+    G6-SCREENSHOTS G6-POLISH G7-ONE-POINT-ZERO; do
+    printf '%s\n' "$checklist_ids" | grep -qx "$id" || fail "master goal is missing $id"
 done
 
 for path in contracts/toolchain.json contracts/platforms.json \

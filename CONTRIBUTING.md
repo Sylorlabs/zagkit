@@ -9,9 +9,11 @@ architecture and support claims in this repository.
    the [accepted RFCs](docs/rfcs/README.md).
 2. Check [the upstream ledger](contracts/upstream-zag.json). A reusable compiler,
    ABI, concurrency, package, or platform defect belongs in Zag first.
-3. Check the visual direction gate. Visual component production cannot begin
+3. Read the [active master goal checklist](GOAL.md) and name the stable IDs the
+   change advances. Never remove or check unrelated items.
+4. Check the visual direction gate. Visual component production cannot begin
    until [the design review](docs/design/visual-direction.md) is accepted.
-4. Add or update the smallest contract, test, benchmark, or conformance scene
+5. Add or update the smallest contract, test, benchmark, or conformance scene
    that can prove the change.
 
 ## Change requirements
@@ -29,6 +31,10 @@ architecture and support claims in this repository.
 - Tests must include cleanup and negative behavior where resources, malformed
   input, callbacks, device loss, or platform boundaries are involved.
 - Keep unrelated worktree changes out of the commit.
+- Give every actionable component and application node a stable Zagkit Talkback
+  ID; pixel fallback must be explicit, observable, and justified.
+- Use Flex semantic spacing and placement rules. Unexplained screen-local
+  offsets are defects, not polish.
 
 An upstream fix is complete only when it is committed separately in
 `/home/micah/Desktop/Sylorlabs/zag`, carries source and native executable
