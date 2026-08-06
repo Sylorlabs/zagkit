@@ -108,6 +108,11 @@ the same suite before validating repository metadata. The committed upstream
 seed is bootstrap authority, not evidence that it already contains later
 compiler-source fixes.
 
+CI allows 30 minutes for a cold fixed-point rebuild and caches only `znc` and
+`zagd` under the exact operating system and Zag source SHA. A source-revision
+change cannot reuse an older compiler cache; warm runs still execute every
+strict Zagkit contract.
+
 ## Build order
 
 1. Advance reusable compiler, ABI, concurrency, package, and platform features

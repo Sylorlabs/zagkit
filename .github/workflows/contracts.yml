@@ -11,7 +11,7 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - name: Check out source
         uses: actions/checkout@v6
@@ -24,12 +24,24 @@ jobs:
           repository: Sylorlabs/zag
           ref: ${{ steps.toolchain.outputs.zag_sha }}
           path: .toolchain/zag
+      - name: Restore fixed-point Zag compiler
+        id: zag-cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            .toolchain/zag/zag-poc/znc
+            .toolchain/zag/zag-poc/zagd
+          key: zag-fixed-${{ runner.os }}-${{ steps.toolchain.outputs.zag_sha }}
+      - name: Bootstrap pinned Zag source
+        if: steps.zag-cache.outputs.cache-hit != 'true'
+        run: |
+          chmod +x .toolchain/zag/zag-poc/znc .toolchain/zag/zag-poc/bootstrap.sh
+          ZAG_BOOTSTRAP_MEMORY_GUARD=off .toolchain/zag/zag-poc/bootstrap.sh
       - name: Run strict headless contracts
         env:
           ZNC: ${{ github.workspace }}/.toolchain/zag/zag-poc/znc
         run: |
-          chmod +x "$ZNC" .toolchain/zag/zag-poc/bootstrap.sh
-          ZAG_BOOTSTRAP_MEMORY_GUARD=off .toolchain/zag/zag-poc/bootstrap.sh
+          chmod +x "$ZNC"
           ./tools/test-headless.sh
       - name: Validate product contracts
         run: ./tools/check-contracts.sh

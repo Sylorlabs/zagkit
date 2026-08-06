@@ -36,8 +36,10 @@ grep -q 'branches: \[main\]' .github/workflows/contracts.yml \
     || fail "CI no longer limits duplicate push validation to main"
 grep -q 'contracts/toolchain.json' .github/workflows/contracts.yml \
     || fail "CI no longer resolves its Zag revision from the toolchain contract"
-grep -q 'ZAG_BOOTSTRAP_MEMORY_GUARD=off .toolchain/zag/zag-poc/bootstrap.sh' .github/workflows/contracts.yml \
+grep -q 'Bootstrap pinned Zag source' .github/workflows/contracts.yml \
     || fail "CI no longer self-hosts the pinned Zag source before testing"
+grep -q 'zag-fixed-${{ runner.os }}-${{ steps.toolchain.outputs.zag_sha }}' .github/workflows/contracts.yml \
+    || fail "CI no longer caches fixed-point Zag by exact source revision"
 grep -q -- '--analyze-strict' tools/test-headless.sh \
     || fail "headless tests no longer enforce strict Zag analysis"
 
