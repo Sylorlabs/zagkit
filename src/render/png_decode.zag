@@ -78,7 +78,9 @@ struct PngTransferCurve {
 }
 
 struct PngIccLut {
-    grid_points: i32,
+    red_grid_points: i32,
+    green_grid_points: i32,
+    blue_grid_points: i32,
     input_entries: i32,
     output_entries: i32,
     input_tables: ArrayList[i32],
@@ -88,6 +90,8 @@ struct PngIccLut {
 }
 
 struct PngIccLutSample { x: i64, y: i64, z: i64 }
+
+struct PngIccCurveTableResult { table: ArrayList[i32], valid: i32 }
 
 struct PngIccProfileResult {
     transform: PngColorTransform,
@@ -489,7 +493,8 @@ fn png_transfer_curve_free(curve: *PngTransferCurve) void {
 
 fn png_icc_lut_invalid() PngIccLut {
     return PngIccLut{
-        .grid_points = 0, .input_entries = 0, .output_entries = 0,
+        .red_grid_points = 0, .green_grid_points = 0, .blue_grid_points = 0,
+        .input_entries = 0, .output_entries = 0,
         .input_tables = ArrayList[i32]{
             .data = null as *i32, .len = 0, .cap = 0,
         },
@@ -602,6 +607,84 @@ fn png_icc_curve(bytes: []u8, tag: PngIccTag) PngTransferCurve {
     return curve;
 }
 
+fn png_icc_curve_size(bytes: []u8, offset: i32, limit: i32) i32 {
+    if (offset < 0 || limit - offset < 12 ||
+        png_read_u32_be(bytes, offset + 4) != 0) { return 0; }
+    if (png_data_is(bytes, offset, "curv") != 0) {
+        let count: i64 = png_read_u32_be(bytes, offset + 8);
+        if (count > 4096 || 12 + count * 2 > (limit - offset) as i64) {
+            return 0;
+        }
+        return (12 + count * 2) as i32;
+    }
+    if (png_data_is(bytes, offset, "para") != 0) {
+        let function_type: i32 = png_read_u16_be(bytes, offset + 8);
+        let parameter_count: i32 = 0;
+        if (function_type == 0) { parameter_count = 1; }
+        else if (function_type == 1) { parameter_count = 3; }
+        else if (function_type == 2) { parameter_count = 4; }
+        else if (function_type == 3) { parameter_count = 5; }
+        else if (function_type == 4) { parameter_count = 7; }
+        else { return 0; }
+        if (png_read_u16_be(bytes, offset + 10) != 0 ||
+            12 + parameter_count * 4 > limit - offset) { return 0; }
+        return 12 + parameter_count * 4;
+    }
+    return 0;
+}
+
+fn png_icc_curve_tables(bytes: []u8, base: i32, start: i32,
+    limit: i32) PngIccCurveTableResult {
+    let result: PngIccCurveTableResult = PngIccCurveTableResult{
+        .table = make[i32](768), .valid = 0,
+    };
+    let cursor: i32 = start;
+    let channel: i32 = 0;
+    while (channel < 3) {
+        let size: i32 = png_icc_curve_size(bytes, base + cursor, base + limit);
+        if (size == 0) { free[i32](&result.table); return result; }
+        let curve: PngTransferCurve = png_icc_curve(bytes, PngIccTag{
+            .offset = base + cursor, .size = size, .found = 1, .valid = 1,
+        });
+        if (curve.valid == 0) {
+            png_transfer_curve_free(&curve);
+            free[i32](&result.table); return result;
+        }
+        let sample: i32 = 0;
+        while (sample < 256) {
+            let q30: i64 = png_transfer_sample_to_linear_q30(
+                sample as u8, 0, curve
+            );
+            push[i32](&result.table,
+                ((q30 * 65535 + 536870912) / 1073741824) as i32);
+            sample = sample + 1;
+        }
+        png_transfer_curve_free(&curve);
+        let aligned: i32 = (size + 3) & (0 - 4);
+        let padding: i32 = size;
+        while (padding < aligned) {
+            if (cursor + padding >= limit ||
+                bytes[base + cursor + padding] != 0) {
+                free[i32](&result.table); return result;
+            }
+            padding = padding + 1;
+        }
+        cursor = cursor + aligned;
+        channel = channel + 1;
+    }
+    if (cursor != limit) { free[i32](&result.table); return result; }
+    result.valid = 1; return result;
+}
+
+fn png_icc_element_limit(start: i32, first: i32, second: i32,
+    third: i32, tag_size: i32) i32 {
+    let limit: i32 = tag_size;
+    if (first > start && first < limit) { limit = first; }
+    if (second > start && second < limit) { limit = second; }
+    if (third > start && third < limit) { limit = third; }
+    return limit;
+}
+
 fn png_icc_lut16(bytes: []u8, tag: PngIccTag) PngIccLut {
     let lut: PngIccLut = png_icc_lut_invalid();
     if (tag.valid == 0 || tag.found == 0 || tag.size < 52 ||
@@ -651,11 +734,113 @@ fn png_icc_lut16(bytes: []u8, tag: PngIccTag) PngIccLut {
         push[i32](&lut.output_tables, png_read_u16_be(bytes, cursor));
         cursor = cursor + 2; index = index + 1;
     }
-    lut.grid_points = grid;
+    lut.red_grid_points = grid;
+    lut.green_grid_points = grid;
+    lut.blue_grid_points = grid;
     lut.input_entries = input_entries;
     lut.output_entries = output_entries;
     lut.valid = 1;
     return lut;
+}
+
+fn png_icc_lut_atob(bytes: []u8, tag: PngIccTag) PngIccLut {
+    let lut: PngIccLut = png_icc_lut_invalid();
+    if (tag.valid == 0 || tag.found == 0 || tag.size < 32 ||
+        png_data_is(bytes, tag.offset, "mAB ") == 0 ||
+        png_read_u32_be(bytes, tag.offset + 4) != 0 ||
+        bytes[tag.offset + 8] != 3 || bytes[tag.offset + 9] != 3 ||
+        bytes[tag.offset + 10] != 0 || bytes[tag.offset + 11] != 0) {
+        return lut;
+    }
+    let b_offset: i32 = png_read_u32_be(bytes, tag.offset + 12) as i32;
+    let matrix_offset: i32 = png_read_u32_be(bytes, tag.offset + 16) as i32;
+    let m_offset: i32 = png_read_u32_be(bytes, tag.offset + 20) as i32;
+    let clut_offset: i32 = png_read_u32_be(bytes, tag.offset + 24) as i32;
+    let a_offset: i32 = png_read_u32_be(bytes, tag.offset + 28) as i32;
+    if (a_offset < 32 || b_offset < 32 || clut_offset < 32 ||
+        a_offset % 4 != 0 || b_offset % 4 != 0 || clut_offset % 4 != 0 ||
+        a_offset >= tag.size || b_offset >= tag.size ||
+        clut_offset >= tag.size || clut_offset == a_offset ||
+        clut_offset == b_offset || matrix_offset != 0 || m_offset != 0) {
+        return lut;
+    }
+    let a_limit: i32 = png_icc_element_limit(
+        a_offset, b_offset, clut_offset, 0, tag.size
+    );
+    let b_limit: i32 = png_icc_element_limit(
+        b_offset, a_offset, clut_offset, 0, tag.size
+    );
+    let clut_limit: i32 = png_icc_element_limit(
+        clut_offset, a_offset, b_offset, 0, tag.size
+    );
+    let a_curves: PngIccCurveTableResult = png_icc_curve_tables(
+        bytes, tag.offset, a_offset, a_limit
+    );
+    if (a_curves.valid == 0) { return lut; }
+    let b_curves: PngIccCurveTableResult = png_icc_curve_tables(
+        bytes, tag.offset, b_offset, b_limit
+    );
+    if (b_curves.valid == 0) {
+        free[i32](&a_curves.table); return lut;
+    }
+    if (clut_limit - clut_offset < 20) {
+        free[i32](&a_curves.table); free[i32](&b_curves.table); return lut;
+    }
+    let red_grid: i32 = bytes[tag.offset + clut_offset] as i32;
+    let green_grid: i32 = bytes[tag.offset + clut_offset + 1] as i32;
+    let blue_grid: i32 = bytes[tag.offset + clut_offset + 2] as i32;
+    if (red_grid < 2 || red_grid > 33 || green_grid < 2 || green_grid > 33 ||
+        blue_grid < 2 || blue_grid > 33) {
+        free[i32](&a_curves.table); free[i32](&b_curves.table); return lut;
+    }
+    let unused: i32 = 3;
+    while (unused < 16) {
+        if (bytes[tag.offset + clut_offset + unused] != 0) {
+            free[i32](&a_curves.table); free[i32](&b_curves.table); return lut;
+        }
+        unused = unused + 1;
+    }
+    let precision: i32 = bytes[tag.offset + clut_offset + 16] as i32;
+    if ((precision != 1 && precision != 2) ||
+        bytes[tag.offset + clut_offset + 17] != 0 ||
+        bytes[tag.offset + clut_offset + 18] != 0 ||
+        bytes[tag.offset + clut_offset + 19] != 0) {
+        free[i32](&a_curves.table); free[i32](&b_curves.table); return lut;
+    }
+    let entries64: i64 = (red_grid as i64) * (green_grid as i64) *
+        (blue_grid as i64) * 3;
+    let data_end: i32 = clut_offset + 20 + (entries64 as i32) * precision;
+    let aligned_end: i32 = (data_end + 3) & (0 - 4);
+    if (entries64 > 107811 || aligned_end != clut_limit) {
+        free[i32](&a_curves.table); free[i32](&b_curves.table); return lut;
+    }
+    let padding: i32 = data_end;
+    while (padding < aligned_end) {
+        if (bytes[tag.offset + padding] != 0) {
+            free[i32](&a_curves.table); free[i32](&b_curves.table); return lut;
+        }
+        padding = padding + 1;
+    }
+    lut.clut = make[i32](entries64 as i32);
+    let cursor: i32 = tag.offset + clut_offset + 20;
+    let index: i32 = 0;
+    while (index < entries64 as i32) {
+        if (precision == 1) {
+            push[i32](&lut.clut, (bytes[cursor] as i32) * 257);
+            cursor = cursor + 1;
+        } else {
+            push[i32](&lut.clut, png_read_u16_be(bytes, cursor));
+            cursor = cursor + 2;
+        }
+        index = index + 1;
+    }
+    lut.input_tables = a_curves.table;
+    lut.output_tables = b_curves.table;
+    lut.input_entries = 256; lut.output_entries = 256;
+    lut.red_grid_points = red_grid;
+    lut.green_grid_points = green_grid;
+    lut.blue_grid_points = blue_grid;
+    lut.valid = 1; return lut;
 }
 
 fn png_icc_matrix_profile(bytes: []u8) PngIccProfileResult {
@@ -693,6 +878,9 @@ fn png_icc_matrix_profile(bytes: []u8) PngIccProfileResult {
     if (lut_tag.found != 0) {
         if (png_read_u32_be(bytes, 64) != 0) { return result; }
         let lut: PngIccLut = png_icc_lut16(bytes, lut_tag);
+        if (png_data_is(bytes, lut_tag.offset, "mAB ") != 0) {
+            lut = png_icc_lut_atob(bytes, lut_tag);
+        }
         if (lut.valid == 0) { return result; }
         let target: PngMatrixF64 = PngMatrixF64{
             .m00 = 0.4360747, .m01 = 0.3850649, .m02 = 0.1430804,
@@ -1267,26 +1455,25 @@ fn png_icc_table_sample(table: ArrayList[i32], channel: i32,
 
 fn png_icc_clut_value(lut: PngIccLut, red: i32, green: i32,
     blue: i32, channel: i32) i64 {
-    let index: i32 = ((red * lut.grid_points + green) * lut.grid_points +
-        blue) * 3 + channel;
+    let index: i32 = ((red * lut.green_grid_points + green) *
+        lut.blue_grid_points + blue) * 3 + channel;
     return lut.clut.data[index] as i64;
 }
 
 fn png_icc_clut_channel(lut: PngIccLut, red: i64, green: i64,
     blue: i64, channel: i32) i64 {
-    let scale: i64 = (lut.grid_points - 1) as i64;
-    let red_scaled: i64 = red * scale;
-    let green_scaled: i64 = green * scale;
-    let blue_scaled: i64 = blue * scale;
+    let red_scaled: i64 = red * ((lut.red_grid_points - 1) as i64);
+    let green_scaled: i64 = green * ((lut.green_grid_points - 1) as i64);
+    let blue_scaled: i64 = blue * ((lut.blue_grid_points - 1) as i64);
     let red_lower: i32 = (red_scaled / 65535) as i32;
     let green_lower: i32 = (green_scaled / 65535) as i32;
     let blue_lower: i32 = (blue_scaled / 65535) as i32;
     let red_upper: i32 = red_lower +
-        (red_lower + 1 < lut.grid_points) as i32;
+        (red_lower + 1 < lut.red_grid_points) as i32;
     let green_upper: i32 = green_lower +
-        (green_lower + 1 < lut.grid_points) as i32;
+        (green_lower + 1 < lut.green_grid_points) as i32;
     let blue_upper: i32 = blue_lower +
-        (blue_lower + 1 < lut.grid_points) as i32;
+        (blue_lower + 1 < lut.blue_grid_points) as i32;
     let blue00: i64 = png_icc_lerp_u16(
         png_icc_clut_value(lut, red_lower, green_lower, blue_lower, channel),
         png_icc_clut_value(lut, red_lower, green_lower, blue_upper, channel),

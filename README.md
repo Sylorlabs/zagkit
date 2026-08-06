@@ -189,10 +189,14 @@ v2/v4 RGB matrix profiles in XYZ PCS with shared identity, gamma, or ICC
 parametric curve types 0 through 4 or sampled curves of up to 4,096 entries per
 channel. It also executes bounded RGB-to-XYZ `A2B0` `lut16Type` profiles with
 owned input tables, a trilinearly interpolated 3D CLUT, and output tables.
+The first `lutAToBType` path executes the permitted A-curves, CLUT, B-curves
+combination with independent embedded curves, per-axis grid sizes, and 8-bit or
+16-bit CLUT precision.
 Malformed wrappers and profile or table bounds fail explicitly. A deterministic
-60,000-input PNG/ICC validation harness plus 4,096 general, sampled-profile, and
-LUT16 cleanup cycles passes on both architectures. `lutAToBType`, Lab PCS, and
-coverage-guided sanitizer evidence remain open, so the `G3-PNG`
+60,000-input PNG/ICC validation harness plus 4,096 general, sampled-profile,
+LUT16, and `lutAToBType` cleanup cycles passes on both architectures. The
+`lutAToBType` matrix combinations, Lab PCS, and coverage-guided sanitizer
+evidence remain open, so the `G3-PNG`
 completion box remains deliberately unchecked. See the
 [image and PNG ingestion contract](docs/architecture/images.md).
 

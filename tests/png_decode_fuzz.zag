@@ -133,16 +133,21 @@ fn icc_profile_contract(state: *FuzzState) void {
                     profile.blue_curve.kind < 1 ||
                     profile.blue_curve.kind > 6)) ||
                 (profile.lut.valid != 0 && (
-                    profile.lut.grid_points < 2 ||
-                    profile.lut.grid_points > 33 ||
+                    profile.lut.red_grid_points < 2 ||
+                    profile.lut.red_grid_points > 33 ||
+                    profile.lut.green_grid_points < 2 ||
+                    profile.lut.green_grid_points > 33 ||
+                    profile.lut.blue_grid_points < 2 ||
+                    profile.lut.blue_grid_points > 33 ||
                     profile.lut.input_entries < 2 ||
                     profile.lut.input_entries > 4096 ||
                     profile.lut.output_entries < 2 ||
                     profile.lut.output_entries > 4096 ||
                     profile.lut.input_tables.len !=
                         profile.lut.input_entries * 3 ||
-                    profile.lut.clut.len != profile.lut.grid_points *
-                        profile.lut.grid_points * profile.lut.grid_points * 3 ||
+                    profile.lut.clut.len != profile.lut.red_grid_points *
+                        profile.lut.green_grid_points *
+                        profile.lut.blue_grid_points * 3 ||
                     profile.lut.output_tables.len !=
                         profile.lut.output_entries * 3))))) {
             valid = 0;

@@ -91,6 +91,16 @@ matrix in that declared order. This supports high-precision LUT16 profiles
 without assigning an implementation-specific meaning to ambiguous 8-bit
 PCSXYZ LUTs.
 
+The first `lutAToBType` subset accepts the specification's A-curves, CLUT,
+B-curves combination. Each of the three A and B curves is independently parsed
+as an embedded identity, gamma, sampled, or parametric curve and normalized to
+an owned 256-entry table. The CLUT permits independent 2-to-33-point red, green,
+and blue axes and either 8-bit or 16-bit data. Offsets must be aligned, bounded
+by the exact element boundary, and padded with canonical zeroes; only the
+specification-permitted sharing of complete curve sets may overlap. The B-only
+and M-curves, matrix, B-curves combinations remain explicit
+unsupported paths until their distinct execution stages have contracts.
+
 An understood `iCCP` profile takes precedence over compatibility `sRGB`, `gAMA`,
 and `cHRM` chunks. The result records declared rather than assumed profile truth.
 
@@ -106,7 +116,8 @@ headless scale evidence, not native compositor or monitor evidence.
 The strict deterministic fuzz gate decodes 20,000 arbitrary byte streams,
 20,000 structured mutations of a valid PNG, 20,000 arbitrary decompressed ICC
 profiles, every strict seed prefix, 4,096 general decode/free repetitions, and
-4,096 sampled-profile plus 4,096 LUT16 parse/decode/free repetitions on both
+4,096 sampled-profile, 4,096 LUT16, and 4,096 `lutAToBType`
+parse/decode/free repetitions on both
 x86-64 and ARM64. Every result must preserve success or failure ownership
 invariants. Coverage-guided sanitizer campaigns
 and a larger published malformed corpus remain additional required evidence.
@@ -114,10 +125,11 @@ and a larger published malformed corpus remain additional required evidence.
 Dimension, encoded-data, decompressed-scanline, output-pixel, palette-index,
 filter, color-matrix, ICC inflate, ICC tag-table, and arithmetic limits fail
 before out-of-bounds access. Monochrome profiles, device-link profiles, Lab PCS,
-`lutAToBType`, and ambiguous `lut8Type` with PCSXYZ, plus unsupported `cICP`
-metadata, fail as unsupported color profiles. Unknown interlace methods fail
-before decompression. These paths keep `G3-PNG` open until the remaining ICC
-transform families and coverage-guided malformed-input evidence land.
+the remaining `lutAToBType` combinations, and ambiguous `lut8Type` with PCSXYZ,
+plus unsupported `cICP` metadata, fail as unsupported color profiles. Unknown
+interlace methods fail before decompression. These paths keep `G3-PNG` open until
+the remaining ICC transform families and coverage-guided malformed-input
+evidence land.
 
 Linear-light filtering, wide-gamut output surfaces, mipmapping,
 high-quality downsampling, image tiling, and GPU upload caches also remain
