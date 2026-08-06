@@ -185,11 +185,12 @@ and 3x on both compiled architectures. Non-sRGB gamma transfer curves and
 arbitrary valid `cHRM` primaries now convert deterministically to sRGB, including
 Bradford white-point adaptation; eight full transfer ramps and Display P3/D50
 fixtures match independent references. Bounded `iCCP` ingestion executes ICC
-v2/v4 RGB matrix profiles in XYZ PCS with shared identity, gamma, or type-0
-parametric curves; malformed wrappers, profile bounds, unsupported sampled
-curves, and LUT profiles fail explicitly. A deterministic 60,000-input PNG/ICC
-validation harness plus 4,096 repeated cleanup cycles passes on both architectures. General
-ICC curve/LUT execution and coverage-guided sanitizer evidence remain open, so the `G3-PNG`
+v2/v4 RGB matrix profiles in XYZ PCS with shared identity, gamma, or ICC
+parametric curve types 0 through 4. Malformed wrappers and profile bounds fail;
+sampled curves, differing per-channel curves, and LUT profiles remain explicit
+unsupported paths. A deterministic 60,000-input PNG/ICC validation harness plus
+4,096 repeated cleanup cycles passes on both architectures. Sampled/per-channel
+ICC, LUT execution, and coverage-guided sanitizer evidence remain open, so the `G3-PNG`
 completion box remains deliberately unchecked. See the
 [image and PNG ingestion contract](docs/architecture/images.md).
 

@@ -223,10 +223,10 @@ fn fixture_icc_xyz(bytes: *ArrayList[u8], offset: i32,
 }
 
 fn fixture_matrix_icc(kind: i32) ArrayList[u8] {
-    let bytes: ArrayList[u8] = make[u8](280);
+    let bytes: ArrayList[u8] = make[u8](320);
     let i: i32 = 0;
-    while (i < 280) { push[u8](&bytes, 0); i = i + 1; }
-    fixture_write_u32_be(&bytes, 0, 280);
+    while (i < 320) { push[u8](&bytes, 0); i = i + 1; }
+    fixture_write_u32_be(&bytes, 0, 320);
     bytes.data[8] = 4;
     fixture_write_signature(&bytes, 12, "mntr");
     fixture_write_signature(&bytes, 16, "RGB ");
@@ -268,7 +268,40 @@ fn fixture_matrix_icc(kind: i32) ArrayList[u8] {
         fixture_write_u32_be(&bytes, 276, 65536);
     }
     if (kind == 10) { fixture_write_signature(&bytes, 144, "rXYZ"); }
-    if (kind == 11) { fixture_write_u32_be(&bytes, 0, 279); }
+    if (kind == 11) { fixture_write_u32_be(&bytes, 0, 319); }
+    if (kind == 13) {
+        fixture_write_u32_be(&bytes, 176, 32);
+        fixture_write_u32_be(&bytes, 188, 32);
+        fixture_write_u32_be(&bytes, 200, 32);
+        fixture_write_signature(&bytes, 264, "para");
+        bytes.data[273] = 3;
+        fixture_write_u32_be(&bytes, 276, 157286);
+        fixture_write_u32_be(&bytes, 280, 62119);
+        fixture_write_u32_be(&bytes, 284, 3417);
+        fixture_write_u32_be(&bytes, 288, 5072);
+        fixture_write_u32_be(&bytes, 292, 2651);
+    }
+    if (kind == 14 || kind == 15 || kind == 16) {
+        let curve_size: i32 = 24;
+        let function_type: i32 = 1;
+        if (kind == 15) { curve_size = 28; function_type = 2; }
+        if (kind == 16) { curve_size = 40; function_type = 4; }
+        fixture_write_u32_be(&bytes, 176, curve_size);
+        fixture_write_u32_be(&bytes, 188, curve_size);
+        fixture_write_u32_be(&bytes, 200, curve_size);
+        fixture_write_signature(&bytes, 264, "para");
+        bytes.data[273] = function_type as u8;
+        fixture_write_u32_be(&bytes, 276, 65536);
+        fixture_write_u32_be(&bytes, 280, 65536);
+        fixture_write_u32_be(&bytes, 284, 0);
+        if (kind == 15) { fixture_write_u32_be(&bytes, 288, 0); }
+        if (kind == 16) {
+            fixture_write_u32_be(&bytes, 288, 65536);
+            fixture_write_u32_be(&bytes, 292, 32768);
+            fixture_write_u32_be(&bytes, 296, 0);
+            fixture_write_u32_be(&bytes, 300, 0);
+        }
+    }
     return bytes;
 }
 
@@ -711,6 +744,44 @@ fn color_profile_contract(state: *TestState) void {
         "ICC parametric gamma curves execute through the same linear pipeline");
     png_decode_free(&parametric_icc);
     png_encode_free(&parametric_icc_fixture);
+
+    let srgb_curve_fixture: PngEncodeResult = fixture_profile_png(
+        0, 0, 0, 0, 13
+    );
+    let srgb_curve: PngDecodeResult = png_decode(
+        srgb_curve_fixture.bytes.data[0..srgb_curve_fixture.bytes.len]
+    );
+    expect(state, srgb_curve.error == PngDecodeError.none &&
+        srgb_curve.profile_assumed == 0 && srgb_curve.pixels.data[0] == 17 &&
+        srgb_curve.pixels.data[1] == 34 && srgb_curve.pixels.data[2] == 51,
+        "ICC type-3 sRGB parametric curves execute both piecewise branches");
+    png_decode_free(&srgb_curve); png_encode_free(&srgb_curve_fixture);
+
+    let type1_fixture: PngEncodeResult = fixture_profile_png(0, 0, 0, 0, 14);
+    let type1_curve: PngDecodeResult = png_decode(
+        type1_fixture.bytes.data[0..type1_fixture.bytes.len]
+    );
+    let type2_fixture: PngEncodeResult = fixture_profile_png(0, 0, 0, 0, 15);
+    let type2_curve: PngDecodeResult = png_decode(
+        type2_fixture.bytes.data[0..type2_fixture.bytes.len]
+    );
+    let type4_fixture: PngEncodeResult = fixture_profile_png(0, 0, 0, 0, 16);
+    let type4_curve: PngDecodeResult = png_decode(
+        type4_fixture.bytes.data[0..type4_fixture.bytes.len]
+    );
+    expect(state, type1_curve.error == PngDecodeError.none &&
+        type2_curve.error == PngDecodeError.none &&
+        type4_curve.error == PngDecodeError.none &&
+        type1_curve.pixels.data[0] == 73 && type1_curve.pixels.data[1] == 102 &&
+        type1_curve.pixels.data[2] == 124 &&
+        type2_curve.pixels.data[0] == 73 && type2_curve.pixels.data[1] == 102 &&
+        type2_curve.pixels.data[2] == 124 &&
+        type4_curve.pixels.data[0] == 73 && type4_curve.pixels.data[1] == 102 &&
+        type4_curve.pixels.data[2] == 124,
+        "ICC parametric curve types 1 2 and 4 execute their declared equations");
+    png_decode_free(&type1_curve); png_encode_free(&type1_fixture);
+    png_decode_free(&type2_curve); png_encode_free(&type2_fixture);
+    png_decode_free(&type4_curve); png_encode_free(&type4_fixture);
 
     let cicp_fixture: PngEncodeResult = fixture_profile_png(0, 0, 0, 0, 9);
     let cicp: PngDecodeResult = png_decode(

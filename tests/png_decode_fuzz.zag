@@ -121,7 +121,8 @@ fn icc_profile_contract(state: *FuzzState) void {
         );
         if ((profile.valid != 0 && profile.valid != 1) ||
             (profile.valid != 0 && (profile.transform.valid == 0 ||
-                profile.transform.active == 0 || profile.source_gamma <= 0))) {
+                profile.transform.active == 0 || profile.curve.valid == 0 ||
+                profile.curve.kind < 1 || profile.curve.kind > 5))) {
             valid = 0;
         }
         free[u8](&bytes); case_index = case_index + 1;
