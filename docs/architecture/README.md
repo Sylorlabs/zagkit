@@ -28,6 +28,7 @@ Normative decisions:
 
 Detailed experimental contracts:
 
+- [Flex placement and adaptive spacing](flex.md)
 - [motion scheduler and tracks](motion.md)
 
 The first experimental compiled slice now fixes the initial Zag shapes for
@@ -38,6 +39,12 @@ preserves retained identity through reorder and fails visibly on duplicate
 keys. Ownership, threading, serialization, typed environment values,
 cancellation and replay serialization are still open contracts rather than
 stable API.
+
+Flex extends fixed-point constraints with deterministic single-line and wrapped
+row or column placement. Its primitive spacing scale adapts to density, safe
+areas, text scale, breakpoints, and physical RTL without changing logical ID
+order. Wrapped output retains line ranges, exact placement identity, and
+fail-visible overflow or malformed input. See [flex.md](flex.md).
 
 The parallel experimental `SemanticsTree` retains owned names and values plus
 roles, actions, focus order, live regions, ranges, selection, and text

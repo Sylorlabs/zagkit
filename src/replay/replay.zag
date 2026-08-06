@@ -2,6 +2,7 @@
 @import("../core/state.zag")
 @import("../input/router.zag")
 @import("../layout/flex.zag")
+@import("../layout/flex_wrap.zag")
 @import("../semantics/semantics.zag")
 @import("../render/cpu_raster.zag")
 @import("../motion/motion.zag")
@@ -68,6 +69,7 @@ struct ReplayResult {
     motion_status: MotionStatus,
     semantics_hash: i64,
     layout_hash: i64,
+    layout_lines: i32,
     display_hash: i64,
     cpu_hash: i64,
     output_hash: i64,
@@ -240,6 +242,7 @@ fn replay_result_error(error: ReplayError, event_index: i32, applied: i64) Repla
         .motion_status = MotionStatus.settled,
         .semantics_hash = 0,
         .layout_hash = 0,
+        .layout_lines = 0,
         .display_hash = 0,
         .cpu_hash = 0,
         .output_hash = 0,
@@ -319,24 +322,6 @@ fn replay_input_hash(router: InputRouter) i64 {
     return display_mix(hash, router.focus.generation);
 }
 
-fn replay_layout_hash(layout: FlexResult) i64 {
-    let hash: i64 = display_mix(display_mix(17, layout.container.width), layout.container.height);
-    hash = display_mix(hash, layout.overflow);
-    hash = display_mix(hash, layout.duplicate_ids as i64);
-    let i: i32 = 0;
-    while (i < layout.placements.len) {
-        let placement: FlexPlacement = layout.placements.data[i];
-        hash = display_mix(hash, placement.id);
-        hash = display_mix(hash, placement.frame.x);
-        hash = display_mix(hash, placement.frame.y);
-        hash = display_mix(hash, placement.frame.width);
-        hash = display_mix(hash, placement.frame.height);
-        hash = display_mix(hash, placement.baseline);
-        i = i + 1;
-    }
-    return hash;
-}
-
 fn replay_runtime_free(router: *InputRouter, tree: *HitTree, motion: *MotionScheduler) void {
     input_router_free(router);
     hit_tree_free(tree);
@@ -367,22 +352,29 @@ fn replay_build_scene(state_value: i64, backend_generation: i64) ReplayResult {
 
     let magnitude: i64 = state_value % 3;
     if (magnitude < 0) { magnitude = 0 - magnitude; }
-    let items: ArrayList[FlexItem] = make[FlexItem](2);
+    let items: ArrayList[FlexItem] = make[FlexItem](3);
     let first: FlexItem = flex_item(101, (2 + magnitude) * unit_scale(), 4 * unit_scale());
     first.shrink = 0;
     push[FlexItem](&items, first);
     let second: FlexItem = flex_item(102, 2 * unit_scale(), 4 * unit_scale());
     second.shrink = 0;
     push[FlexItem](&items, second);
+    let third: FlexItem = flex_item(103, 2 * unit_scale(), 2 * unit_scale());
+    third.shrink = 0;
+    push[FlexItem](&items, third);
     let style: FlexStyle = flex_style(FlexAxis.row, unit_scale(), insets_all(0));
-    let layout: FlexResult = flex_layout(items, tight_constraints(8 * unit_scale(), 4 * unit_scale()), style);
+    let wrap_style: FlexWrapStyle = flex_wrap_style(style, unit_scale());
+    let layout: FlexWrapResult = flex_wrap_layout(
+        items, tight_constraints(8 * unit_scale(), 6 * unit_scale()), wrap_style
+    );
     free[FlexItem](&items);
-    if (layout.duplicate_ids != 0 || layout.placements.len != 2) {
-        flex_free(&layout);
+    if (layout.error != FlexWrapError.none || layout.duplicate_ids != 0 || layout.placements.len != 3) {
+        flex_wrap_free(&layout);
         semantics_tree_free(&semantics);
         return replay_result_error(ReplayError.scene_error, 0 - 1, 0);
     }
-    result.layout_hash = replay_layout_hash(layout);
+    result.layout_hash = layout.layout_hash;
+    result.layout_lines = layout.lines.len;
 
     let list: DisplayList = display_list_make();
     let first_op: DisplayOp = display_op(DisplayOpKind.fill_rect, node_key(101));
@@ -391,27 +383,36 @@ fn replay_build_scene(state_value: i64, backend_generation: i64) ReplayResult {
     first_op.paint = paint_rgba16(8192 + magnitude * 8192, 24576, 32768 + blue, 65535);
     if (display_list_push(&list, first_op) != DisplayError.none) {
         display_list_free(&list);
-        flex_free(&layout);
+        flex_wrap_free(&layout);
         semantics_tree_free(&semantics);
         return replay_result_error(ReplayError.scene_error, 0 - 1, 0);
     }
     let second_op: DisplayOp = display_op(DisplayOpKind.fill_rect, node_key(102));
     second_op.bounds = layout.placements.data[1].frame;
     second_op.paint = paint_rgba16(49152, 16384 + magnitude * 4096, 12288, 65535);
-    if (display_list_push(&list, second_op) != DisplayError.none ||
+    if (display_list_push(&list, second_op) != DisplayError.none) {
+        display_list_free(&list);
+        flex_wrap_free(&layout);
+        semantics_tree_free(&semantics);
+        return replay_result_error(ReplayError.scene_error, 0 - 1, 0);
+    }
+    let third_op: DisplayOp = display_op(DisplayOpKind.fill_rect, node_key(103));
+    third_op.bounds = layout.placements.data[2].frame;
+    third_op.paint = paint_rgba16(12288, 40960, 24576 + magnitude * 4096, 65535);
+    if (display_list_push(&list, third_op) != DisplayError.none ||
         display_list_seal(&list) != DisplayError.none) {
         display_list_free(&list);
-        flex_free(&layout);
+        flex_wrap_free(&layout);
         semantics_tree_free(&semantics);
         return replay_result_error(ReplayError.scene_error, 0 - 1, 0);
     }
     result.display_hash = list.content_hash;
 
-    let raster: CpuRasterResult = cpu_rasterize(list, 8, 4);
+    let raster: CpuRasterResult = cpu_rasterize(list, 8, 6);
     if (raster.error != CpuRasterError.none) {
         cpu_raster_free(&raster);
         display_list_free(&list);
-        flex_free(&layout);
+        flex_wrap_free(&layout);
         semantics_tree_free(&semantics);
         return replay_result_error(ReplayError.scene_error, 0 - 1, 0);
     }
@@ -419,7 +420,7 @@ fn replay_build_scene(state_value: i64, backend_generation: i64) ReplayResult {
 
     cpu_raster_free(&raster);
     display_list_free(&list);
-    flex_free(&layout);
+    flex_wrap_free(&layout);
     semantics_tree_free(&semantics);
     return result;
 }

@@ -108,6 +108,32 @@ fn safety_contracts(state: *TestState) void {
     expect(state, result.duplicate_ids == 1, "duplicate stable IDs fail visibly");
     expect(state, result.overflow == 20, "min-size overflow is explicit");
     flex_free(&result); free[FlexItem](&items);
+
+    let malformed: ArrayList[FlexItem] = make[FlexItem](2);
+    push[FlexItem](&malformed, item(1, 10, 10));
+    push[FlexItem](&malformed, item(0, 10, 10));
+    let bad_item: FlexResult = flex_layout(
+        malformed, tight_constraints(20, 10), flex_style(FlexAxis.row, 0, insets_all(0))
+    );
+    expect(state, bad_item.error == FlexError.invalid_item && bad_item.error_index == 1 &&
+        bad_item.placements.len == 0,
+        "malformed single-line items fail at the exact index before placement");
+    flex_free(&bad_item);
+
+    malformed.data[1].id = 2;
+    malformed.data[0].basis = unbounded_extent();
+    malformed.data[1].basis = unbounded_extent();
+    let arithmetic: FlexResult = flex_layout(
+        malformed,
+        Constraints{
+            .min_width = 0, .max_width = unbounded_extent(),
+            .min_height = 0, .max_height = unbounded_extent(),
+        },
+        flex_style(FlexAxis.row, 0, insets_all(0))
+    );
+    expect(state, arithmetic.error == FlexError.arithmetic_overflow && arithmetic.error_index == 1,
+        "single-line intrinsic totals fail visibly before signed overflow");
+    flex_free(&arithmetic); free[FlexItem](&malformed);
 }
 
 fn property_sweep(state: *TestState) void {

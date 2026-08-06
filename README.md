@@ -59,10 +59,22 @@ inventory, benchmark scene coverage, and the 1.0 block.
 The compiled headless contract currently provides revisioned `State<T>`,
 action-producing `Binding<T>`, inherited integer environment values, exact
 per-node state-read records, fail-visible keyed reconciliation, deterministic
-fixed-point geometry, and single-line Flex. These APIs are experimental. Typed
+fixed-point geometry, and single-line or wrapped Flex. These APIs are
+experimental. Typed
 environment values, reconciliation cancellation, child ownership, replay
-serialization, intrinsic measurement, wrapping, grid, overlay, and breakpoints
+serialization, intrinsic measurement, grid, overlay, and breakpoint policies
 remain open; the corresponding Milestone 2 checklist items are not complete.
+
+Flex now also provides an experimental primitive spacing scale, compact,
+standard, and touch density resolution, physical safe-area composition,
+text-scale-aware compact/medium/expanded breakpoints, and deterministic row or
+column wrapping. Wrapped lines preserve logical stable-ID order while resolving
+physical RTL placement, per-line growth and shrinkage, baseline-safe extents,
+line alignment, overflow truth, and layout identity. These are headless
+placement primitives rather than the still-unselected visual design language.
+Grid, overlay, intrinsic measurement, exact invalidation rules, and the full
+adaptive matrix remain open, so `G2-FLEX` and `G2-FLEX-RTL` are not complete.
+See the [Flex contract](docs/architecture/flex.md).
 
 The semantics slice owns copied names and values, stable keys, explicit action
 capabilities, deterministic focus order, live-region state, ranges, selection,

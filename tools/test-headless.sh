@@ -16,6 +16,8 @@ trap cleanup EXIT
 cd "$root"
 "$znc" tests/flex_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/flex-contract"
 "$tmp/flex-contract"
+"$znc" tests/flex_adaptive_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/flex-adaptive-contract"
+"$tmp/flex-adaptive-contract"
 "$znc" tests/state_reconcile_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/state-reconcile-contract"
 "$tmp/state-reconcile-contract"
 "$znc" tests/semantics_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/semantics-contract"

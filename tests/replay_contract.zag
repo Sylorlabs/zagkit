@@ -39,6 +39,7 @@ fn results_equal(a: ReplayResult, b: ReplayResult) i32 {
         a.motion_value == b.motion_value && a.motion_velocity == b.motion_velocity &&
         a.motion_status == b.motion_status &&
         a.semantics_hash == b.semantics_hash && a.layout_hash == b.layout_hash &&
+        a.layout_lines == b.layout_lines &&
         a.display_hash == b.display_hash && a.cpu_hash == b.cpu_hash &&
         a.output_hash == b.output_hash) as i32;
 }
@@ -62,6 +63,8 @@ fn deterministic_contract(state: *TestState) void {
     expect(state, first.motion_value > 0 && first.motion_velocity > 0 &&
         first.motion_status == MotionStatus.running,
         "replayed clock samples advance interruptible motion state");
+    expect(state, first.layout_lines == 2,
+        "replayed state regenerates the expected wrapped Flex line structure");
     expect(state, results_equal(first, second) == 1,
         "two executions of the same sealed tape are bit-identical");
     replay_tape_free(&tape);
@@ -154,6 +157,8 @@ fn differential_contract(state: *TestState) void {
     expect(state, a.output_hash != b.output_hash && a.motion_hash != b.motion_hash && a.semantics_hash != b.semantics_hash &&
         a.layout_hash != b.layout_hash && a.display_hash != b.display_hash && a.cpu_hash != b.cpu_hash,
         "state changes propagate through motion semantics Flex display and CPU output");
+    expect(state, a.layout_lines != b.layout_lines,
+        "state replay crosses Flex wrapping boundaries deterministically");
     expect(state, a.input_hash != c.input_hash && a.motion_hash == c.motion_hash && a.semantics_hash == c.semantics_hash &&
         a.layout_hash == c.layout_hash && a.display_hash == c.display_hash && a.cpu_hash == c.cpu_hash &&
         a.output_hash != c.output_hash,

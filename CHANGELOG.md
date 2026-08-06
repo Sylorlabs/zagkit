@@ -17,6 +17,10 @@ include a generated capability record and exact Zag compiler revision.
 - Experimental keyed reconciliation with stable reorder identity and
   fail-visible duplicate-key handling.
 - Deterministic fixed-point geometry, constraints, and single-line Flex.
+- Experimental adaptive Flex primitives with tokenized density-aware spacing,
+  physical safe areas, text-scale-aware breakpoints, deterministic row and
+  column wrapping, RTL line bands, baseline-safe extents, per-line growth,
+  typed overflow, malformed-input rejection, and layout identity.
 - An experimental owned semantics tree with roles, actions, focus order,
   live regions, ranges, selection, text navigation, and stable generated IDs.
 - The first in-process Zagkit Talkback dispatcher and machine-readable protocol

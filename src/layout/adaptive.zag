@@ -1,0 +1,116 @@
+@import("flex.zag")
+
+enum FlexSpacingToken { none, micro, tiny, small, medium, large, xlarge, xxlarge }
+enum FlexDensity { compact, standard, touch }
+enum FlexBreakpoint { compact, medium, expanded }
+
+struct FlexAdaptiveContext {
+    viewport: Size,
+    safe_area: Insets,
+    density: FlexDensity,
+    text_scale: i64,
+    direction: LayoutDirection,
+}
+
+fn flex_adaptive_context(viewport: Size) FlexAdaptiveContext {
+    return FlexAdaptiveContext{
+        .viewport = viewport,
+        .safe_area = insets_all(0),
+        .density = FlexDensity.standard,
+        .text_scale = unit_scale(),
+        .direction = LayoutDirection.ltr,
+    };
+}
+
+fn flex_spacing_base(token: FlexSpacingToken) i64 {
+    return switch (token) {
+        .none => 0,
+        .micro => 2 * unit_scale(),
+        .tiny => 4 * unit_scale(),
+        .small => 8 * unit_scale(),
+        .medium => 12 * unit_scale(),
+        .large => 16 * unit_scale(),
+        .xlarge => 24 * unit_scale(),
+        .xxlarge => 32 * unit_scale(),
+    };
+}
+
+fn flex_spacing(token: FlexSpacingToken, density: FlexDensity) i64 {
+    let value: i64 = flex_spacing_base(token);
+    return switch (density) {
+        .compact => (value * 3) / 4,
+        .standard => value,
+        .touch => (value * 5) / 4,
+    };
+}
+
+fn flex_safe_extent(value: i64) i64 {
+    if (value < 0) { return 0; }
+    if (value > unbounded_extent() / 4) { return unbounded_extent() / 4; }
+    return value;
+}
+
+fn flex_safe_insets(raw: Insets) Insets {
+    let value: Insets = raw;
+    value.top = flex_safe_extent(value.top);
+    value.right = flex_safe_extent(value.right);
+    value.bottom = flex_safe_extent(value.bottom);
+    value.left = flex_safe_extent(value.left);
+    return value;
+}
+
+fn flex_insets_add(a: Insets, b: Insets) Insets {
+    return Insets{
+        .top = flex_safe_extent(a.top + b.top),
+        .right = flex_safe_extent(a.right + b.right),
+        .bottom = flex_safe_extent(a.bottom + b.bottom),
+        .left = flex_safe_extent(a.left + b.left),
+    };
+}
+
+fn flex_content_size(context: FlexAdaptiveContext) Size {
+    let safe: Insets = flex_safe_insets(context.safe_area);
+    let viewport_width: i64 = context.viewport.width;
+    let viewport_height: i64 = context.viewport.height;
+    if (viewport_width < 0) { viewport_width = 0; }
+    if (viewport_height < 0) { viewport_height = 0; }
+    if (viewport_width > unbounded_extent()) { viewport_width = unbounded_extent(); }
+    if (viewport_height > unbounded_extent()) { viewport_height = unbounded_extent(); }
+    let width: i64 = viewport_width - safe.left - safe.right;
+    let height: i64 = viewport_height - safe.top - safe.bottom;
+    if (width < 0) { width = 0; }
+    if (height < 0) { height = 0; }
+    return size(width, height);
+}
+
+fn flex_effective_text_scale(context: FlexAdaptiveContext) i64 {
+    let scale: i64 = context.text_scale;
+    if (scale < unit_scale()) { scale = unit_scale(); }
+    if (scale > unit_scale() * 4) { scale = unit_scale() * 4; }
+    return scale;
+}
+
+fn flex_breakpoint(context: FlexAdaptiveContext) FlexBreakpoint {
+    let content: Size = flex_content_size(context);
+    let effective_width: i64 = (content.width * unit_scale()) / flex_effective_text_scale(context);
+    if (effective_width < 600 * unit_scale()) { return FlexBreakpoint.compact; }
+    if (effective_width < 1024 * unit_scale()) { return FlexBreakpoint.medium; }
+    return FlexBreakpoint.expanded;
+}
+
+fn flex_adaptive_style(
+    axis: FlexAxis,
+    gap: FlexSpacingToken,
+    padding: FlexSpacingToken,
+    context: FlexAdaptiveContext,
+    include_safe_area: i32,
+) FlexStyle {
+    let pad: i64 = flex_spacing(padding, context.density);
+    let insets: Insets = insets_all(pad);
+    if (include_safe_area != 0) {
+        insets = flex_insets_add(insets, flex_safe_insets(context.safe_area));
+    }
+    let style: FlexStyle = flex_style(axis, flex_spacing(gap, context.density), insets);
+    style.direction = context.direction;
+    return style;
+}
