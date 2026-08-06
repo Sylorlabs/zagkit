@@ -1,0 +1,175 @@
+@import("../src/replay/replay.zag")
+
+struct TestState { passed: i32, failed: i32 }
+
+fn expect(state: *TestState, condition: i32, name: []u8) void {
+    if (condition != 0) {
+        state.*.passed = state.*.passed + 1;
+        _zag_print("ok  "); _zag_println(name);
+    } else {
+        state.*.failed = state.*.failed + 1;
+        _zag_print("FAIL "); _zag_println(name);
+    }
+}
+
+fn complete_tape(final_value: i64, pointer_x: i64) ReplayTape {
+    let tape: ReplayTape = replay_tape_make();
+    _ = replay_tape_push(&tape, replay_backend_activate_event(7));
+    _ = replay_tape_push(&tape, replay_clock_event(0));
+    _ = replay_tape_push(&tape, replay_state_event(1, 0, 1));
+    _ = replay_tape_push(&tape, replay_pointer_event(9, PointerPhase.down, pointer_x, unit_scale()));
+    _ = replay_tape_push(&tape, replay_pointer_event(9, PointerPhase.move, pointer_x + unit_scale(), unit_scale()));
+    _ = replay_tape_push(&tape, replay_pointer_event(9, PointerPhase.up, pointer_x + unit_scale(), unit_scale()));
+    _ = replay_tape_push(&tape, replay_clock_event(10));
+    _ = replay_tape_push(&tape, replay_state_event(1, 1, final_value));
+    _ = replay_tape_push(&tape, replay_backend_loss_event(7));
+    _ = replay_tape_push(&tape, replay_backend_recover_event(7));
+    _ = replay_tape_push(&tape, replay_clock_event(20));
+    _ = replay_tape_seal(&tape);
+    return tape;
+}
+
+fn results_equal(a: ReplayResult, b: ReplayResult) i32 {
+    return (a.error == b.error && a.error_event == b.error_event &&
+        a.events_applied == b.events_applied && a.state_value == b.state_value &&
+        a.state_revision == b.state_revision && a.clock == b.clock &&
+        a.backend_id == b.backend_id && a.backend_generation == b.backend_generation &&
+        a.backend_state == b.backend_state && a.input_hash == b.input_hash &&
+        a.semantics_hash == b.semantics_hash && a.layout_hash == b.layout_hash &&
+        a.display_hash == b.display_hash && a.cpu_hash == b.cpu_hash &&
+        a.output_hash == b.output_hash) as i32;
+}
+
+fn deterministic_contract(state: *TestState) void {
+    let tape: ReplayTape = complete_tape(2, unit_scale());
+    let first: ReplayResult = replay_execute(tape);
+    let second: ReplayResult = replay_execute(tape);
+    expect(state, replay_tape_verify(tape) == ReplayError.none && tape.events.len == 11,
+        "sealed tape preserves one canonical ordered event stream");
+    expect(state, first.error == ReplayError.none && first.events_applied == 11,
+        "complete tape applies every event without hidden skips");
+    expect(state, first.state_value == 2 && first.state_revision == 2 && first.clock == 20,
+        "state revisions and monotonic clock replay exactly");
+    expect(state, first.backend_id == 7 && first.backend_generation == 2 &&
+        first.backend_state == ReplayBackendState.active,
+        "backend activation loss and recovery remain observable in final truth");
+    expect(state, first.input_hash != 0 && first.semantics_hash != 0 && first.layout_hash != 0 &&
+        first.display_hash != 0 && first.cpu_hash != 0 && first.output_hash != 0,
+        "replay regenerates input semantics layout display and CPU identities");
+    expect(state, results_equal(first, second) == 1,
+        "two executions of the same sealed tape are bit-identical");
+    replay_tape_free(&tape);
+}
+
+fn mutation_contract(state: *TestState) void {
+    let tape: ReplayTape = complete_tape(2, unit_scale());
+    tape.events.data[2].c = 99;
+    let mutated: ReplayResult = replay_execute(tape);
+    expect(state, replay_tape_verify(tape) == ReplayError.content_mutated &&
+        mutated.error == ReplayError.content_mutated && mutated.events_applied == 0,
+        "sealed tape mutation fails before any event is applied");
+    replay_tape_free(&tape);
+
+    let open: ReplayTape = replay_tape_make();
+    _ = replay_tape_push(&open, replay_clock_event(1));
+    expect(state, replay_execute(open).error == ReplayError.not_sealed,
+        "unsealed tapes cannot masquerade as replay evidence");
+    _ = replay_tape_seal(&open);
+    expect(state, replay_tape_push(&open, replay_clock_event(2)) == ReplayError.sealed && open.events.len == 1,
+        "sealed tapes reject appended events without mutation");
+    replay_tape_free(&open);
+
+    let invalid: ReplayTape = replay_tape_make();
+    expect(state, replay_tape_push(&invalid, replay_clock_event(0 - 1)) == ReplayError.invalid_event &&
+        invalid.events.len == 0 && invalid.revision == 0,
+        "invalid events fail before tape revision or hash changes");
+    let noncanonical: ReplayEvent = replay_clock_event(1);
+    noncanonical.b = 1;
+    expect(state, replay_tape_push(&invalid, noncanonical) == ReplayError.invalid_event && invalid.events.len == 0,
+        "unused event fields must stay zero for one canonical tape representation");
+    replay_tape_free(&invalid);
+}
+
+fn state_and_clock_failure_contract(state: *TestState) void {
+    let stale: ReplayTape = replay_tape_make();
+    _ = replay_tape_push(&stale, replay_clock_event(1));
+    _ = replay_tape_push(&stale, replay_state_event(1, 4, 3));
+    _ = replay_tape_seal(&stale);
+    let stale_result: ReplayResult = replay_execute(stale);
+    expect(state, stale_result.error == ReplayError.stale_state_revision &&
+        stale_result.error_event == 1 && stale_result.events_applied == 1,
+        "stale state revisions fail at the exact ordered event");
+    replay_tape_free(&stale);
+
+    let regressed: ReplayTape = replay_tape_make();
+    _ = replay_tape_push(&regressed, replay_clock_event(10));
+    _ = replay_tape_push(&regressed, replay_clock_event(9));
+    _ = replay_tape_seal(&regressed);
+    let clock_result: ReplayResult = replay_execute(regressed);
+    expect(state, clock_result.error == ReplayError.clock_regression &&
+        clock_result.error_event == 1 && clock_result.events_applied == 1,
+        "clock regression fails at the exact ordered event");
+    replay_tape_free(&regressed);
+}
+
+fn backend_failure_contract(state: *TestState) void {
+    let loss: ReplayTape = replay_tape_make();
+    _ = replay_tape_push(&loss, replay_backend_loss_event(7));
+    _ = replay_tape_seal(&loss);
+    expect(state, replay_execute(loss).error == ReplayError.backend_transition,
+        "device loss without an active backend fails closed");
+    replay_tape_free(&loss);
+
+    let recover: ReplayTape = replay_tape_make();
+    _ = replay_tape_push(&recover, replay_backend_activate_event(7));
+    _ = replay_tape_push(&recover, replay_backend_recover_event(7));
+    _ = replay_tape_seal(&recover);
+    let recover_result: ReplayResult = replay_execute(recover);
+    expect(state, recover_result.error == ReplayError.backend_transition && recover_result.error_event == 1,
+        "recovery without a recorded loss fails closed");
+    replay_tape_free(&recover);
+
+    let wrong: ReplayTape = replay_tape_make();
+    _ = replay_tape_push(&wrong, replay_backend_activate_event(7));
+    _ = replay_tape_push(&wrong, replay_backend_loss_event(8));
+    _ = replay_tape_seal(&wrong);
+    expect(state, replay_execute(wrong).error == ReplayError.backend_transition,
+        "backend identity cannot silently change during loss");
+    replay_tape_free(&wrong);
+}
+
+fn differential_contract(state: *TestState) void {
+    let baseline: ReplayTape = complete_tape(2, unit_scale());
+    let changed_state: ReplayTape = complete_tape(3, unit_scale());
+    let changed_pointer: ReplayTape = complete_tape(2, 6 * unit_scale());
+    let a: ReplayResult = replay_execute(baseline);
+    let b: ReplayResult = replay_execute(changed_state);
+    let c: ReplayResult = replay_execute(changed_pointer);
+    expect(state, a.output_hash != b.output_hash && a.semantics_hash != b.semantics_hash &&
+        a.layout_hash != b.layout_hash && a.display_hash != b.display_hash && a.cpu_hash != b.cpu_hash,
+        "state changes propagate through semantics Flex display and CPU output");
+    expect(state, a.input_hash != c.input_hash && a.semantics_hash == c.semantics_hash &&
+        a.layout_hash == c.layout_hash && a.display_hash == c.display_hash && a.cpu_hash == c.cpu_hash &&
+        a.output_hash != c.output_hash,
+        "pointer differences change input identity without contaminating scene generation");
+    replay_tape_free(&baseline);
+    replay_tape_free(&changed_state);
+    replay_tape_free(&changed_pointer);
+}
+
+fn main() i32 {
+    let state: TestState = TestState{ .passed = 0, .failed = 0 };
+    deterministic_contract(&state);
+    mutation_contract(&state);
+    state_and_clock_failure_contract(&state);
+    backend_failure_contract(&state);
+    differential_contract(&state);
+    let passed_text: []u8 = _zag_i64_to_str(state.passed as i64);
+    let failed_text: []u8 = _zag_i64_to_str(state.failed as i64);
+    _zag_print("Replay contract: pass="); _zag_print(passed_text);
+    _zag_print(" fail="); _zag_println(failed_text);
+    _zag_str_free(passed_text);
+    _zag_str_free(failed_text);
+    if (state.failed == 0) { return 0; }
+    return 1;
+}

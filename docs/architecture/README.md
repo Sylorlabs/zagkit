@@ -32,7 +32,7 @@ The first experimental compiled slice now fixes the initial Zag shapes for
 invalidation reports the exact read and revision edge; keyed reconciliation
 preserves retained identity through reorder and fails visibly on duplicate
 keys. Ownership, threading, serialization, typed environment values,
-cancellation, and deterministic replay are still open contracts rather than
+cancellation and replay serialization are still open contracts rather than
 stable API.
 
 The parallel experimental `SemanticsTree` retains owned names and values plus
@@ -64,4 +64,13 @@ The experimental input router consumes a parallel retained `HitTree`. It uses
 integer affine inversion for local coordinates, resolves local clips and
 z-order deterministically, and keeps pointer capture and focus explicit.
 Accepted, missed, captured, cancelled, and invalid events share one ordered
-evidence stream; platform input adaptation and replay remain open.
+evidence stream; platform input adaptation remains open.
+
+The first deterministic replay executor consumes an immutable ordered tape of
+state revisions, pointer events, monotonic clock samples, backend activation,
+loss, and recovery. It rejects stale or impossible transitions at their exact
+event index, then rebuilds a conformance scene through the real semantics,
+Flex, display-list, and CPU-oracle paths. A repeated tape must produce identical
+subsystem and aggregate hashes. A general application callback contract,
+versioned tape codec, resource capture, and platform lifecycle integration are
+still open.

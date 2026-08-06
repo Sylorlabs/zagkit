@@ -31,6 +31,9 @@ include a generated capability record and exact Zag compiler revision.
   revision rather than an ambient compiler.
 - Transformed hit testing and deterministic pointer routing with clipping,
   z-order, capture, focus, stale-target recovery, and ordered evidence.
+- A sealed deterministic replay tape and conformance executor covering exact
+  state revisions, pointer input, monotonic time, backend activation, loss,
+  recovery, and regenerated semantics, Flex, display-list, and CPU identities.
 
 ## 0.1.0-experimental.0 (unreleased)
 

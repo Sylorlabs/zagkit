@@ -24,7 +24,7 @@
       "public_channel": "experimental",
       "capabilities": [
         {"id":"platform_shell","state":"unavailable","reason":"Wayland and X11 shells are not implemented.","evidence":[]},
-        {"id":"cpu_renderer","state":"unavailable","reason":"The deterministic CPU renderer is not implemented.","evidence":[]},
+        {"id":"cpu_renderer","state":"unavailable","reason":"A headless rectangle CPU-oracle subset exists, but full display-list coverage and Linux surface presentation are not implemented.","evidence":["tests/cpu_raster_contract.zag","tests/replay_contract.zag"]},
         {"id":"gpu_transport","state":"unavailable","reason":"No Zagkit Linux GPU transport exists or has device evidence.","evidence":[]},
         {"id":"text_input","state":"unavailable","reason":"No Linux IME bridge or editing engine exists.","evidence":[]},
         {"id":"accessibility","state":"unavailable","reason":"No AT-SPI adapter exists or has assistive technology evidence.","evidence":[]},
@@ -43,7 +43,7 @@
       "public_channel": "experimental",
       "capabilities": [
         {"id":"platform_shell","state":"unavailable","reason":"The AppKit shell and Darwin target are not implemented.","evidence":[]},
-        {"id":"cpu_renderer","state":"unavailable","reason":"The deterministic CPU renderer is not implemented.","evidence":[]},
+        {"id":"cpu_renderer","state":"unavailable","reason":"A platform-independent headless rectangle CPU-oracle subset exists, but full display-list coverage and macOS presentation are not implemented.","evidence":["tests/cpu_raster_contract.zag","tests/replay_contract.zag"]},
         {"id":"gpu_transport","state":"unavailable","reason":"No Zagkit Metal transport exists or has device evidence.","evidence":[]},
         {"id":"text_input","state":"unavailable","reason":"No NSTextInputClient bridge or editing engine exists.","evidence":[]},
         {"id":"accessibility","state":"unavailable","reason":"No NSAccessibility adapter exists or has VoiceOver evidence.","evidence":[]},
@@ -62,7 +62,7 @@
       "public_channel": "experimental",
       "capabilities": [
         {"id":"platform_shell","state":"unavailable","reason":"The Win32 shell and Windows target are not implemented.","evidence":[]},
-        {"id":"cpu_renderer","state":"unavailable","reason":"The deterministic CPU renderer is not implemented.","evidence":[]},
+        {"id":"cpu_renderer","state":"unavailable","reason":"A platform-independent headless rectangle CPU-oracle subset exists, but full display-list coverage and Windows presentation are not implemented.","evidence":["tests/cpu_raster_contract.zag","tests/replay_contract.zag"]},
         {"id":"gpu_transport","state":"unavailable","reason":"No Zagkit D3D12 transport exists or has device evidence.","evidence":[]},
         {"id":"text_input","state":"unavailable","reason":"No Core Text input bridge or editing engine exists.","evidence":[]},
         {"id":"accessibility","state":"unavailable","reason":"No UI Automation adapter exists or has Narrator evidence.","evidence":[]},
@@ -81,7 +81,7 @@
       "public_channel": "experimental",
       "capabilities": [
         {"id":"platform_shell","state":"unavailable","reason":"The UIKit shell and iOS target are not implemented.","evidence":[]},
-        {"id":"cpu_renderer","state":"unavailable","reason":"The deterministic CPU renderer is not implemented.","evidence":[]},
+        {"id":"cpu_renderer","state":"unavailable","reason":"A platform-independent headless rectangle CPU-oracle subset exists, but full display-list coverage and iOS presentation are not implemented.","evidence":["tests/cpu_raster_contract.zag","tests/replay_contract.zag"]},
         {"id":"gpu_transport","state":"unavailable","reason":"No Zagkit mobile Metal transport exists or has device evidence.","evidence":[]},
         {"id":"text_input","state":"unavailable","reason":"No UIKit text input bridge or editing engine exists.","evidence":[]},
         {"id":"accessibility","state":"unavailable","reason":"No UIKit accessibility adapter exists or has mobile VoiceOver evidence.","evidence":[]},
@@ -100,7 +100,7 @@
       "public_channel": "experimental",
       "capabilities": [
         {"id":"platform_shell","state":"unavailable","reason":"The Android shell and target are not implemented.","evidence":[]},
-        {"id":"cpu_renderer","state":"unavailable","reason":"The deterministic CPU renderer is not implemented.","evidence":[]},
+        {"id":"cpu_renderer","state":"unavailable","reason":"A platform-independent headless rectangle CPU-oracle subset exists, but full display-list coverage and Android presentation are not implemented.","evidence":["tests/cpu_raster_contract.zag","tests/replay_contract.zag"]},
         {"id":"gpu_transport","state":"unavailable","reason":"No Zagkit Android GPU transport exists or has device evidence.","evidence":[]},
         {"id":"text_input","state":"unavailable","reason":"No Android IME bridge or editing engine exists.","evidence":[]},
         {"id":"accessibility","state":"unavailable","reason":"No Android accessibility adapter exists or has TalkBack evidence.","evidence":[]},

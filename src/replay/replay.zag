@@ -1,0 +1,500 @@
+@import("std:list")
+@import("../core/state.zag")
+@import("../input/router.zag")
+@import("../layout/flex.zag")
+@import("../semantics/semantics.zag")
+@import("../render/cpu_raster.zag")
+
+enum ReplayEventKind {
+    state_i64,
+    pointer,
+    clock,
+    backend_activate,
+    backend_loss,
+    backend_recover,
+}
+
+enum ReplayBackendState { unavailable, active, lost }
+
+enum ReplayError {
+    none,
+    sealed,
+    not_sealed,
+    content_mutated,
+    invalid_event,
+    stale_state_revision,
+    clock_regression,
+    backend_transition,
+    input_rejected,
+    scene_error,
+}
+
+struct ReplayEvent {
+    sequence: i64,
+    kind: ReplayEventKind,
+    a: i64,
+    b: i64,
+    c: i64,
+    d: i64,
+    e: i64,
+    f: i64,
+}
+
+struct ReplayTape {
+    events: ArrayList[ReplayEvent],
+    sealed: i32,
+    revision: i64,
+    content_hash: i64,
+    last_error: ReplayError,
+    error_index: i32,
+}
+
+struct ReplayResult {
+    error: ReplayError,
+    error_event: i32,
+    events_applied: i64,
+    state_value: i64,
+    state_revision: i64,
+    clock: i64,
+    backend_id: i64,
+    backend_generation: i64,
+    backend_state: ReplayBackendState,
+    input_hash: i64,
+    semantics_hash: i64,
+    layout_hash: i64,
+    display_hash: i64,
+    cpu_hash: i64,
+    output_hash: i64,
+}
+
+fn replay_event(kind: ReplayEventKind) ReplayEvent {
+    return ReplayEvent{
+        .sequence = 0,
+        .kind = kind,
+        .a = 0,
+        .b = 0,
+        .c = 0,
+        .d = 0,
+        .e = 0,
+        .f = 0,
+    };
+}
+
+fn replay_state_event(state_id: i64, expected_revision: i64, value: i64) ReplayEvent {
+    let event: ReplayEvent = replay_event(ReplayEventKind.state_i64);
+    event.a = state_id;
+    event.b = expected_revision;
+    event.c = value;
+    return event;
+}
+
+fn replay_pointer_event(pointer_id: i64, phase: PointerPhase, x: i64, y: i64) ReplayEvent {
+    let event: ReplayEvent = replay_event(ReplayEventKind.pointer);
+    event.a = pointer_id;
+    event.b = phase as i64;
+    event.c = x;
+    event.d = y;
+    return event;
+}
+
+fn replay_clock_event(time: i64) ReplayEvent {
+    let event: ReplayEvent = replay_event(ReplayEventKind.clock);
+    event.a = time;
+    return event;
+}
+
+fn replay_backend_activate_event(backend_id: i64) ReplayEvent {
+    let event: ReplayEvent = replay_event(ReplayEventKind.backend_activate);
+    event.a = backend_id;
+    return event;
+}
+
+fn replay_backend_loss_event(backend_id: i64) ReplayEvent {
+    let event: ReplayEvent = replay_event(ReplayEventKind.backend_loss);
+    event.a = backend_id;
+    return event;
+}
+
+fn replay_backend_recover_event(backend_id: i64) ReplayEvent {
+    let event: ReplayEvent = replay_event(ReplayEventKind.backend_recover);
+    event.a = backend_id;
+    return event;
+}
+
+fn replay_tape_make() ReplayTape {
+    return ReplayTape{
+        .events = make[ReplayEvent](32),
+        .sealed = 0,
+        .revision = 0,
+        .content_hash = 17,
+        .last_error = ReplayError.none,
+        .error_index = 0 - 1,
+    };
+}
+
+fn replay_tape_free(tape: *ReplayTape) void {
+    free[ReplayEvent](&tape.*.events);
+}
+
+fn replay_hash_event(hash: i64, event: ReplayEvent) i64 {
+    let result: i64 = display_mix(hash, event.sequence);
+    result = display_mix(result, event.kind as i64);
+    result = display_mix(result, event.a);
+    result = display_mix(result, event.b);
+    result = display_mix(result, event.c);
+    result = display_mix(result, event.d);
+    result = display_mix(result, event.e);
+    return display_mix(result, event.f);
+}
+
+fn replay_event_valid(event: ReplayEvent) i32 {
+    if (event.kind == ReplayEventKind.state_i64) {
+        return (event.a > 0 && event.b >= 0 && event.c >= -1000000 && event.c <= 1000000 &&
+            event.d == 0 && event.e == 0 && event.f == 0) as i32;
+    }
+    if (event.kind == ReplayEventKind.pointer) {
+        return (event.a >= 0 && event.b >= PointerPhase.down as i64 && event.b <= PointerPhase.wheel as i64 &&
+            event.c >= -1000000000 && event.c <= 1000000000 &&
+            event.d >= -1000000000 && event.d <= 1000000000 && event.e == 0 && event.f == 0) as i32;
+    }
+    if (event.kind == ReplayEventKind.clock) {
+        return (event.a >= 0 && event.b == 0 && event.c == 0 && event.d == 0 &&
+            event.e == 0 && event.f == 0) as i32;
+    }
+    if (event.kind == ReplayEventKind.backend_activate ||
+        event.kind == ReplayEventKind.backend_loss ||
+        event.kind == ReplayEventKind.backend_recover) {
+        return (event.a > 0 && event.b == 0 && event.c == 0 && event.d == 0 &&
+            event.e == 0 && event.f == 0) as i32;
+    }
+    return 0;
+}
+
+fn replay_tape_fail(tape: *ReplayTape, error: ReplayError) ReplayError {
+    tape.*.last_error = error;
+    tape.*.error_index = tape.*.events.len;
+    return error;
+}
+
+fn replay_tape_push(tape: *ReplayTape, raw_event: ReplayEvent) ReplayError {
+    if (tape.*.sealed != 0) { return replay_tape_fail(tape, ReplayError.sealed); }
+    if (tape.*.events.len >= 1000000 || replay_event_valid(raw_event) == 0) {
+        return replay_tape_fail(tape, ReplayError.invalid_event);
+    }
+    let event: ReplayEvent = raw_event;
+    event.sequence = tape.*.revision + 1;
+    push[ReplayEvent](&tape.*.events, event);
+    tape.*.revision = tape.*.revision + 1;
+    tape.*.content_hash = replay_hash_event(tape.*.content_hash, event);
+    tape.*.last_error = ReplayError.none;
+    tape.*.error_index = 0 - 1;
+    return ReplayError.none;
+}
+
+fn replay_tape_seal(tape: *ReplayTape) ReplayError {
+    if (tape.*.sealed != 0) { return ReplayError.none; }
+    tape.*.sealed = 1;
+    tape.*.last_error = ReplayError.none;
+    tape.*.error_index = 0 - 1;
+    return ReplayError.none;
+}
+
+fn replay_tape_verify(tape: ReplayTape) ReplayError {
+    if (tape.sealed == 0) { return ReplayError.not_sealed; }
+    if (tape.revision != tape.events.len as i64) { return ReplayError.content_mutated; }
+    let hash: i64 = 17;
+    let i: i32 = 0;
+    while (i < tape.events.len) {
+        let event: ReplayEvent = tape.events.data[i];
+        if (event.sequence != (i as i64) + 1 || replay_event_valid(event) == 0) {
+            return ReplayError.content_mutated;
+        }
+        hash = replay_hash_event(hash, event);
+        i = i + 1;
+    }
+    if (hash != tape.content_hash) { return ReplayError.content_mutated; }
+    return ReplayError.none;
+}
+
+fn replay_result_error(error: ReplayError, event_index: i32, applied: i64) ReplayResult {
+    return ReplayResult{
+        .error = error,
+        .error_event = event_index,
+        .events_applied = applied,
+        .state_value = 0,
+        .state_revision = 0,
+        .clock = 0,
+        .backend_id = 0,
+        .backend_generation = 0,
+        .backend_state = ReplayBackendState.unavailable,
+        .input_hash = 0,
+        .semantics_hash = 0,
+        .layout_hash = 0,
+        .display_hash = 0,
+        .cpu_hash = 0,
+        .output_hash = 0,
+    };
+}
+
+fn replay_hit_tree() HitTree {
+    let tree: HitTree = hit_tree_make();
+    let root: HitNode = hit_node(node_key(100), hit_root_key(), rect(0, 0, 8 * unit_scale(), 4 * unit_scale()));
+    root.z_order = 0;
+    _ = hit_tree_add(&tree, root);
+    let button: HitNode = hit_node(node_key(101), node_key(100), rect(0, 0, 4 * unit_scale(), 4 * unit_scale()));
+    button.z_order = 1;
+    button.focusable = 1;
+    _ = hit_tree_add(&tree, button);
+    return tree;
+}
+
+fn replay_hash_text(hash: i64, text: ArrayList[u8]) i64 {
+    let result: i64 = display_mix(hash, text.len as i64);
+    let i: i32 = 0;
+    while (i < text.len) {
+        result = display_mix(result, text.data[i] as i64);
+        i = i + 1;
+    }
+    return result;
+}
+
+fn replay_semantics_hash(tree: SemanticsTree) i64 {
+    let hash: i64 = display_mix(17, tree.revision);
+    let i: i32 = 0;
+    while (i < tree.nodes.len) {
+        let node: SemanticsNode = tree.nodes.data[i];
+        hash = display_mix(hash, node.id.value);
+        hash = display_mix(hash, node.id.generation);
+        hash = display_mix(hash, node.parent.value);
+        hash = display_mix(hash, node.parent.generation);
+        hash = display_mix(hash, node.role as i64);
+        hash = replay_hash_text(hash, node.name);
+        hash = replay_hash_text(hash, node.value);
+        hash = display_mix(hash, node.action_mask);
+        hash = display_mix(hash, node.focus_order);
+        hash = display_mix(hash, node.disabled as i64);
+        hash = display_mix(hash, node.selected as i64);
+        hash = display_mix(hash, node.hidden as i64);
+        hash = display_mix(hash, node.live_region as i64);
+        hash = display_mix(hash, node.has_range as i64);
+        hash = display_mix(hash, node.range_min);
+        hash = display_mix(hash, node.range_max);
+        hash = display_mix(hash, node.range_value);
+        hash = display_mix(hash, node.range_step);
+        hash = display_mix(hash, node.text_length);
+        hash = display_mix(hash, node.selection_start);
+        hash = display_mix(hash, node.selection_end);
+        i = i + 1;
+    }
+    return hash;
+}
+
+fn replay_input_hash(router: InputRouter) i64 {
+    let hash: i64 = display_mix(17, router.events.len as i64);
+    let i: i32 = 0;
+    while (i < router.events.len) {
+        let event: RoutedEvent = router.events.data[i];
+        hash = display_mix(hash, event.sequence);
+        hash = display_mix(hash, event.pointer_id);
+        hash = display_mix(hash, event.phase as i64);
+        hash = display_mix(hash, event.target.value);
+        hash = display_mix(hash, event.target.generation);
+        hash = display_mix(hash, event.local_x);
+        hash = display_mix(hash, event.local_y);
+        hash = display_mix(hash, event.captured as i64);
+        hash = display_mix(hash, event.status as i64);
+        i = i + 1;
+    }
+    hash = display_mix(hash, router.focus.value);
+    return display_mix(hash, router.focus.generation);
+}
+
+fn replay_layout_hash(layout: FlexResult) i64 {
+    let hash: i64 = display_mix(display_mix(17, layout.container.width), layout.container.height);
+    hash = display_mix(hash, layout.overflow);
+    hash = display_mix(hash, layout.duplicate_ids as i64);
+    let i: i32 = 0;
+    while (i < layout.placements.len) {
+        let placement: FlexPlacement = layout.placements.data[i];
+        hash = display_mix(hash, placement.id);
+        hash = display_mix(hash, placement.frame.x);
+        hash = display_mix(hash, placement.frame.y);
+        hash = display_mix(hash, placement.frame.width);
+        hash = display_mix(hash, placement.frame.height);
+        hash = display_mix(hash, placement.baseline);
+        i = i + 1;
+    }
+    return hash;
+}
+
+fn replay_build_scene(state_value: i64, backend_generation: i64) ReplayResult {
+    let result: ReplayResult = replay_result_error(ReplayError.none, 0 - 1, 0);
+
+    let semantics: SemanticsTree = semantics_tree_make();
+    let root_spec: SemanticsSpec = semantics_spec(node_key(100), semantic_root_key(), SemanticRole.application, "Replay scene");
+    if (semantics_add(&semantics, root_spec) != SemanticsError.none) {
+        semantics_tree_free(&semantics);
+        return replay_result_error(ReplayError.scene_error, 0 - 1, 0);
+    }
+    let value_text: []u8 = "even";
+    if (state_value % 2 != 0) { value_text = "odd"; }
+    let button_spec: SemanticsSpec = semantics_spec(node_key(101), node_key(100), SemanticRole.button, "Counter");
+    button_spec.value = value_text;
+    button_spec.action_mask = semantic_actions(SemanticAction.activate);
+    button_spec.focus_order = 1;
+    button_spec.selected = ((state_value % 2) != 0) as i32;
+    if (semantics_add(&semantics, button_spec) != SemanticsError.none) {
+        semantics_tree_free(&semantics);
+        return replay_result_error(ReplayError.scene_error, 0 - 1, 0);
+    }
+    result.semantics_hash = replay_semantics_hash(semantics);
+
+    let magnitude: i64 = state_value % 3;
+    if (magnitude < 0) { magnitude = 0 - magnitude; }
+    let items: ArrayList[FlexItem] = make[FlexItem](2);
+    let first: FlexItem = flex_item(101, (2 + magnitude) * unit_scale(), 4 * unit_scale());
+    first.shrink = 0;
+    push[FlexItem](&items, first);
+    let second: FlexItem = flex_item(102, 2 * unit_scale(), 4 * unit_scale());
+    second.shrink = 0;
+    push[FlexItem](&items, second);
+    let style: FlexStyle = flex_style(FlexAxis.row, unit_scale(), insets_all(0));
+    let layout: FlexResult = flex_layout(items, tight_constraints(8 * unit_scale(), 4 * unit_scale()), style);
+    free[FlexItem](&items);
+    if (layout.duplicate_ids != 0 || layout.placements.len != 2) {
+        flex_free(&layout);
+        semantics_tree_free(&semantics);
+        return replay_result_error(ReplayError.scene_error, 0 - 1, 0);
+    }
+    result.layout_hash = replay_layout_hash(layout);
+
+    let list: DisplayList = display_list_make();
+    let first_op: DisplayOp = display_op(DisplayOpKind.fill_rect, node_key(101));
+    first_op.bounds = layout.placements.data[0].frame;
+    let blue: i64 = (backend_generation % 8) * 4096;
+    first_op.paint = paint_rgba16(8192 + magnitude * 8192, 24576, 32768 + blue, 65535);
+    if (display_list_push(&list, first_op) != DisplayError.none) {
+        display_list_free(&list);
+        flex_free(&layout);
+        semantics_tree_free(&semantics);
+        return replay_result_error(ReplayError.scene_error, 0 - 1, 0);
+    }
+    let second_op: DisplayOp = display_op(DisplayOpKind.fill_rect, node_key(102));
+    second_op.bounds = layout.placements.data[1].frame;
+    second_op.paint = paint_rgba16(49152, 16384 + magnitude * 4096, 12288, 65535);
+    if (display_list_push(&list, second_op) != DisplayError.none ||
+        display_list_seal(&list) != DisplayError.none) {
+        display_list_free(&list);
+        flex_free(&layout);
+        semantics_tree_free(&semantics);
+        return replay_result_error(ReplayError.scene_error, 0 - 1, 0);
+    }
+    result.display_hash = list.content_hash;
+
+    let raster: CpuRasterResult = cpu_rasterize(list, 8, 4);
+    if (raster.error != CpuRasterError.none) {
+        cpu_raster_free(&raster);
+        display_list_free(&list);
+        flex_free(&layout);
+        semantics_tree_free(&semantics);
+        return replay_result_error(ReplayError.scene_error, 0 - 1, 0);
+    }
+    result.cpu_hash = cpu_surface_hash(raster.surface);
+
+    cpu_raster_free(&raster);
+    display_list_free(&list);
+    flex_free(&layout);
+    semantics_tree_free(&semantics);
+    return result;
+}
+
+fn replay_execute(tape: ReplayTape) ReplayResult {
+    let verified: ReplayError = replay_tape_verify(tape);
+    if (verified != ReplayError.none) { return replay_result_error(verified, 0 - 1, 0); }
+
+    let state: State[i64] = state_make[i64](1, 0);
+    let tree: HitTree = replay_hit_tree();
+    let router: InputRouter = input_router_make();
+    let clock: i64 = 0;
+    let backend_id: i64 = 0;
+    let backend_generation: i64 = 0;
+    let backend_state: ReplayBackendState = ReplayBackendState.unavailable;
+    let i: i32 = 0;
+    while (i < tape.events.len) {
+        let event: ReplayEvent = tape.events.data[i];
+        if (event.kind == ReplayEventKind.state_i64) {
+            if (event.a != state.id || event.b != state.revision) {
+                input_router_free(&router); hit_tree_free(&tree);
+                return replay_result_error(ReplayError.stale_state_revision, i, i as i64);
+            }
+            _ = state_set[i64](&state, event.c);
+        } else if (event.kind == ReplayEventKind.pointer) {
+            let phase: PointerPhase = event.b as PointerPhase;
+            let routed: RouteResult = input_route_pointer(&router, tree, pointer_event(event.a, phase, event.c, event.d));
+            if (routed.status != RouteStatus.accepted) {
+                input_router_free(&router); hit_tree_free(&tree);
+                return replay_result_error(ReplayError.input_rejected, i, i as i64);
+            }
+        } else if (event.kind == ReplayEventKind.clock) {
+            if (event.a < clock) {
+                input_router_free(&router); hit_tree_free(&tree);
+                return replay_result_error(ReplayError.clock_regression, i, i as i64);
+            }
+            clock = event.a;
+        } else if (event.kind == ReplayEventKind.backend_activate) {
+            if (backend_state != ReplayBackendState.unavailable) {
+                input_router_free(&router); hit_tree_free(&tree);
+                return replay_result_error(ReplayError.backend_transition, i, i as i64);
+            }
+            backend_id = event.a;
+            backend_generation = backend_generation + 1;
+            backend_state = ReplayBackendState.active;
+        } else if (event.kind == ReplayEventKind.backend_loss) {
+            if (backend_state != ReplayBackendState.active || event.a != backend_id) {
+                input_router_free(&router); hit_tree_free(&tree);
+                return replay_result_error(ReplayError.backend_transition, i, i as i64);
+            }
+            backend_state = ReplayBackendState.lost;
+        } else if (event.kind == ReplayEventKind.backend_recover) {
+            if (backend_state != ReplayBackendState.lost || event.a != backend_id) {
+                input_router_free(&router); hit_tree_free(&tree);
+                return replay_result_error(ReplayError.backend_transition, i, i as i64);
+            }
+            backend_generation = backend_generation + 1;
+            backend_state = ReplayBackendState.active;
+        }
+        i = i + 1;
+    }
+
+    let scene: ReplayResult = replay_build_scene(state.value, backend_generation);
+    if (scene.error != ReplayError.none) {
+        input_router_free(&router); hit_tree_free(&tree);
+        return scene;
+    }
+    let result: ReplayResult = scene;
+    result.error = ReplayError.none;
+    result.error_event = 0 - 1;
+    result.events_applied = tape.events.len as i64;
+    result.state_value = state.value;
+    result.state_revision = state.revision;
+    result.clock = clock;
+    result.backend_id = backend_id;
+    result.backend_generation = backend_generation;
+    result.backend_state = backend_state;
+    result.input_hash = replay_input_hash(router);
+    let hash: i64 = display_mix(17, result.state_value);
+    hash = display_mix(hash, result.state_revision);
+    hash = display_mix(hash, result.clock);
+    hash = display_mix(hash, result.backend_id);
+    hash = display_mix(hash, result.backend_generation);
+    hash = display_mix(hash, result.backend_state as i64);
+    hash = display_mix(hash, result.input_hash);
+    hash = display_mix(hash, result.semantics_hash);
+    hash = display_mix(hash, result.layout_hash);
+    hash = display_mix(hash, result.display_hash);
+    result.output_hash = display_mix(hash, result.cpu_hash);
+
+    input_router_free(&router);
+    hit_tree_free(&tree);
+    return result;
+}
