@@ -204,6 +204,60 @@ fn png_unfilter(filtered: []u8, height: i32, row_bytes: i32,
     };
 }
 
+fn png_adam7_start_x(pass: i32) i32 {
+    if (pass == 1) { return 4; }
+    if (pass == 3) { return 2; }
+    if (pass == 5) { return 1; }
+    return 0;
+}
+
+fn png_adam7_start_y(pass: i32) i32 {
+    if (pass == 2) { return 4; }
+    if (pass == 4) { return 2; }
+    if (pass == 6) { return 1; }
+    return 0;
+}
+
+fn png_adam7_step_x(pass: i32) i32 {
+    if (pass <= 1) { return 8; }
+    if (pass <= 3) { return 4; }
+    if (pass <= 5) { return 2; }
+    return 1;
+}
+
+fn png_adam7_step_y(pass: i32) i32 {
+    if (pass <= 1) { return 8; }
+    if (pass <= 3) { return 8 - ((pass - 2) * 4); }
+    if (pass <= 5) { return 4 - ((pass - 4) * 2); }
+    return 2;
+}
+
+fn png_adam7_extent(size: i32, start: i32, step: i32) i32 {
+    if (size <= start) { return 0; }
+    return (size - start + step - 1) / step;
+}
+
+fn png_adam7_expected_size(width: i32, height: i32,
+    channels: i32, bit_depth: i32) i64 {
+    let total: i64 = 0;
+    let pass: i32 = 0;
+    while (pass < 7) {
+        let pass_width: i32 = png_adam7_extent(
+            width, png_adam7_start_x(pass), png_adam7_step_x(pass)
+        );
+        let pass_height: i32 = png_adam7_extent(
+            height, png_adam7_start_y(pass), png_adam7_step_y(pass)
+        );
+        if (pass_width > 0 && pass_height > 0) {
+            let row_bits: i64 = (pass_width as i64) *
+                (channels as i64) * (bit_depth as i64);
+            total = total + (((row_bits + 7) / 8) + 1) * (pass_height as i64);
+        }
+        pass = pass + 1;
+    }
+    return total;
+}
+
 fn png_sample(row: []u8, sample_index: i32, bit_depth: i32) i32 {
     if (bit_depth == 8) { return row[sample_index] as i32; }
     if (bit_depth == 16) { return png_read_u16_be(row, sample_index * 2); }
@@ -211,6 +265,104 @@ fn png_sample(row: []u8, sample_index: i32, bit_depth: i32) i32 {
     let byte_index: i32 = bit_offset / 8;
     let shift: i32 = 8 - bit_depth - (bit_offset % 8);
     return ((row[byte_index] as i32) >> shift) & ((1 << bit_depth) - 1);
+}
+
+fn png_write_packed_sample(row: []u8, sample_index: i32,
+    bit_depth: i32, sample: i32) void {
+    let bit_offset: i32 = sample_index * bit_depth;
+    let byte_index: i32 = bit_offset / 8;
+    let shift: i32 = 8 - bit_depth - (bit_offset % 8);
+    row[byte_index] = row[byte_index] |
+        ((sample << shift) & 255) as u8;
+}
+
+fn png_deinterlace(filtered: []u8, width: i32, height: i32,
+    channels: i32, bit_depth: i32) PngScanlineResult {
+    let full_row_bits: i64 = (width as i64) *
+        (channels as i64) * (bit_depth as i64);
+    let full_row_bytes: i32 = ((full_row_bits + 7) / 8) as i32;
+    let output: ArrayList[u8] = make[u8](full_row_bytes * height);
+    let fill_index: i32 = 0;
+    while (fill_index < full_row_bytes * height) {
+        push[u8](&output, 0); fill_index = fill_index + 1;
+    }
+    let bytes_per_pixel: i32 = ((channels * bit_depth) + 7) / 8;
+    if (bytes_per_pixel < 1) { bytes_per_pixel = 1; }
+    let filtered_offset: i32 = 0;
+    let pass: i32 = 0;
+    while (pass < 7) {
+        let start_x: i32 = png_adam7_start_x(pass);
+        let start_y: i32 = png_adam7_start_y(pass);
+        let step_x: i32 = png_adam7_step_x(pass);
+        let step_y: i32 = png_adam7_step_y(pass);
+        let pass_width: i32 = png_adam7_extent(width, start_x, step_x);
+        let pass_height: i32 = png_adam7_extent(height, start_y, step_y);
+        if (pass_width > 0 && pass_height > 0) {
+            let pass_row_bits: i64 = (pass_width as i64) *
+                (channels as i64) * (bit_depth as i64);
+            let pass_row_bytes: i32 = ((pass_row_bits + 7) / 8) as i32;
+            let pass_filtered_size: i32 = (pass_row_bytes + 1) * pass_height;
+            let scanlines: PngScanlineResult = png_unfilter(
+                filtered[filtered_offset..filtered_offset + pass_filtered_size],
+                pass_height, pass_row_bytes, bytes_per_pixel
+            );
+            if (scanlines.error != PngDecodeError.none) {
+                let error_offset: i64 = filtered_offset as i64 +
+                    scanlines.error_offset;
+                free[u8](&output);
+                return PngScanlineResult{
+                    .bytes = scanlines.bytes, .error = scanlines.error,
+                    .error_offset = error_offset,
+                };
+            }
+            let pass_y: i32 = 0;
+            while (pass_y < pass_height) {
+                let destination_y: i32 = start_y + pass_y * step_y;
+                let source_row: []u8 = scanlines.bytes.data[
+                    pass_y * pass_row_bytes..(pass_y + 1) * pass_row_bytes
+                ];
+                let destination_row: []u8 = output.data[
+                    destination_y * full_row_bytes..
+                    (destination_y + 1) * full_row_bytes
+                ];
+                let pass_x: i32 = 0;
+                while (pass_x < pass_width) {
+                    let destination_x: i32 = start_x + pass_x * step_x;
+                    if (bit_depth < 8) {
+                        png_write_packed_sample(destination_row, destination_x,
+                            bit_depth, png_sample(source_row, pass_x, bit_depth));
+                    } else {
+                        let pixel_bytes: i32 = channels * (bit_depth / 8);
+                        let byte_index: i32 = 0;
+                        while (byte_index < pixel_bytes) {
+                            destination_row[destination_x * pixel_bytes + byte_index] =
+                                source_row[pass_x * pixel_bytes + byte_index];
+                            byte_index = byte_index + 1;
+                        }
+                    }
+                    pass_x = pass_x + 1;
+                }
+                pass_y = pass_y + 1;
+            }
+            free[u8](&scanlines.bytes);
+            filtered_offset = filtered_offset + pass_filtered_size;
+        }
+        pass = pass + 1;
+    }
+    return PngScanlineResult{
+        .bytes = output, .error = PngDecodeError.none, .error_offset = 0 - 1,
+    };
+}
+
+fn png_reconstruct_scanlines(filtered: []u8, width: i32, height: i32,
+    row_bytes: i32, channels: i32, bit_depth: i32,
+    interlace: i32) PngScanlineResult {
+    let bytes_per_pixel: i32 = ((channels * bit_depth) + 7) / 8;
+    if (bytes_per_pixel < 1) { bytes_per_pixel = 1; }
+    if (interlace == 0) {
+        return png_unfilter(filtered, height, row_bytes, bytes_per_pixel);
+    }
+    return png_deinterlace(filtered, width, height, channels, bit_depth);
 }
 
 fn png_sample_u8(sample: i32, bit_depth: i32) u8 {
@@ -314,6 +466,7 @@ fn png_decode(bytes: []u8) PngDecodeResult {
     let height: i32 = 0;
     let bit_depth: i32 = 0;
     let color_type: i32 = 0;
+    let interlace: i32 = 0;
     let saw_header: i32 = 0;
     let saw_palette: i32 = 0;
     let saw_transparency: i32 = 0;
@@ -381,7 +534,8 @@ fn png_decode(bytes: []u8) PngDecodeResult {
                 return png_decode_parse_fail(&idat, &palette, &transparency,
                     PngDecodeError.invalid_header, (data_offset + 10) as i64);
             }
-            if (bytes[data_offset + 12] != 0) {
+            interlace = bytes[data_offset + 12] as i32;
+            if (interlace > 1) {
                 return png_decode_parse_fail(&idat, &palette, &transparency,
                     PngDecodeError.unsupported_interlace, (data_offset + 12) as i64);
             }
@@ -522,6 +676,9 @@ fn png_decode(bytes: []u8) PngDecodeResult {
     let row_bits: i64 = (width as i64) * (channels as i64) * (bit_depth as i64);
     let row_bytes64: i64 = (row_bits + 7) / 8;
     let expected64: i64 = (row_bytes64 + 1) * (height as i64);
+    if (interlace != 0) {
+        expected64 = png_adam7_expected_size(width, height, channels, bit_depth);
+    }
     let pixel_bytes64: i64 = (width as i64) * (height as i64) * 4;
     if (row_bytes64 <= 0 || expected64 <= 0 ||
         pixel_bytes64 > png_decode_pixel_byte_limit() || expected64 > 2147483647) {
@@ -540,11 +697,9 @@ fn png_decode(bytes: []u8) PngDecodeResult {
         zlib_inflate_free(&inflated); free[u8](&palette); free[u8](&transparency);
         return png_decode_fail(PngDecodeError.decompressed_size, inflated.bytes.len as i64);
     }
-    let bytes_per_pixel: i32 = ((channels * bit_depth) + 7) / 8;
-    if (bytes_per_pixel < 1) { bytes_per_pixel = 1; }
-    let scanlines: PngScanlineResult = png_unfilter(
-        inflated.bytes.data[0..inflated.bytes.len], height,
-        row_bytes64 as i32, bytes_per_pixel
+    let scanlines: PngScanlineResult = png_reconstruct_scanlines(
+        inflated.bytes.data[0..inflated.bytes.len], width, height,
+        row_bytes64 as i32, channels, bit_depth, interlace
     );
     zlib_inflate_free(&inflated);
     if (scanlines.error != PngDecodeError.none) {

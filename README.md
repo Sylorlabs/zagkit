@@ -174,12 +174,14 @@ yet claim the complete snapshot runner or screenshot release gate. See the
 Encoded PNG assets now enter the same canonical image boundary through a
 bounded pure-Zag decoder. It validates chunk spelling, order, CRCs, complete
 termination, and exact decompressed size; supports stored, fixed, and dynamic
-DEFLATE; reverses all five PNG filters; and expands legal noninterlaced
-grayscale, RGB, indexed, grayscale-alpha, and RGBA bit depths with PLTE and
-tRNS into owned sRGB RGBA8. Focused contracts pass identically on x86-64 and
-ARM64/qemu, and an independent 240-file corpus covers every accepted color and
-bit-depth family across five zlib strategies. Adam7, arbitrary ICC/chromaticity
-conversion, scale goldens, and broader fuzzing remain open, so the `G3-PNG`
+DEFLATE; reverses all five PNG filters; and expands legal grayscale, RGB,
+indexed, grayscale-alpha, and RGBA bit depths with PLTE and tRNS into owned
+sRGB RGBA8. Both noninterlaced rows and all seven Adam7 passes are supported.
+Focused contracts pass identically on x86-64 and ARM64/qemu, an independent
+240-file corpus covers every accepted color and bit-depth family across five
+zlib strategies, and an independently encoded Adam7 image matches exact source
+pixels. Arbitrary ICC/chromaticity conversion, scale goldens, and broader
+fuzzing remain open, so the `G3-PNG`
 completion box remains deliberately unchecked. See the
 [image and PNG ingestion contract](docs/architecture/images.md).
 

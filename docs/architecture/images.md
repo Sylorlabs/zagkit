@@ -39,11 +39,13 @@ stored/fixed/dynamic DEFLATE inflater with the exact expected scanline byte
 count as its output ceiling.
 
 The decoder reverses None, Sub, Up, Average, and Paeth filters. It accepts the
-legal noninterlaced grayscale, RGB, indexed, grayscale-alpha, and RGBA bit-depth
-combinations, including packed 1/2/4-bit samples, PLTE, and tRNS. Renderer-owned
-output is always straight-alpha sRGB RGBA8. Sixteen-bit samples use their high
-byte as the current deterministic conversion policy; transparency comparisons
-use the original full sample before conversion. Files without explicit color
+legal grayscale, RGB, indexed, grayscale-alpha, and RGBA bit-depth combinations,
+including packed 1/2/4-bit samples, PLTE, and tRNS. Noninterlaced rows and all
+seven bounded Adam7 passes reconstruct into the same canonical pixels.
+Renderer-owned output is always straight-alpha sRGB RGBA8. Sixteen-bit samples
+use their high byte as the current deterministic conversion policy;
+transparency comparisons use the original full sample before conversion. Files
+without explicit color
 metadata use Zagkit's documented sRGB fallback policy; this is an assumption
 recorded by the asset pipeline, not a claim that the source declared sRGB. An
 explicit `sRGB` chunk, or the exact standard sRGB `gAMA` plus `cHRM` pair,
@@ -56,10 +58,9 @@ the decoder can be freed immediately after insertion.
 Dimension, encoded-data, decompressed-scanline, output-pixel, palette-index,
 filter, and arithmetic limits fail before out-of-bounds access. Explicit iCCP,
 non-sRGB chromaticity conversion, and non-sRGB gAMA values fail as unsupported
-color profiles.
-Adam7 interlace also fails explicitly rather than being rendered incorrectly.
-Those unavailable paths keep `G3-PNG` open until profile conversion, Adam7,
-scale suites, and broader malformed-input fuzzing land.
+color profiles. Unknown interlace methods fail before decompression. These
+unavailable paths keep `G3-PNG` open until general profile conversion, scale
+suites, and broader malformed-input fuzzing land.
 
 Linear-light filtering, Display P3 conversion, wide-gamut surfaces, mipmapping,
 high-quality downsampling, image tiling, and GPU upload caches also remain
