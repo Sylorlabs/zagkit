@@ -66,8 +66,8 @@ experimental. A retained intrinsic tree now aggregates leaf, row, column, and
 overlay size ranges, rejects invalid ownership and unstable same-revision
 measurement, resolves constraints with explicit rules and overflow, and records
 exact state-read layout causes. Typed environment values, reconciliation
-cancellation, retained child lifecycle, replay serialization, Table and Tree
-projection, and full breakpoint policy remain open; the corresponding Milestone
+cancellation, general retained child lifecycle, replay serialization, editable
+collection behavior, and full breakpoint policy remain open; the corresponding Milestone
 2 checklist items are not complete. See the
 [measurement contract](docs/architecture/measurement.md).
 
@@ -97,6 +97,15 @@ allocation. The focused proof queries the middle of one million rows with nine
 live placements and fewer than 64 examined records. This is correctness and
 bounded-work evidence, not a 120 Hz hardware result. See the
 [scroll and virtualization contract](docs/architecture/scroll-and-virtualization.md).
+
+Table now composes bounded row and column virtualization with pinned logical
+columns, exact resize consumption, composite stable cell IDs, RTL placement,
+and hard cell residency limits. Tree validates preorder ownership and expansion
+before projecting collapsed descendants into the virtual range. A retained
+recycling store preserves offscreen focus and restores the exact instance and
+generation when its logical ID returns. These identities participate in replay.
+Sorting, selection, editing, drag reordering, component semantics, and native
+interaction remain open.
 
 The semantics slice owns copied names and values, stable keys, explicit action
 capabilities, deterministic focus order, live-region state, ranges, selection,

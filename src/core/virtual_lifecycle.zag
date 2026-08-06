@@ -1,0 +1,264 @@
+@import("std:list")
+
+enum VirtualLifecycleError {
+    none,
+    invalid_capacity,
+    too_many_live_nodes,
+    invalid_id,
+    duplicate_id,
+    unknown_focus,
+    no_recyclable_node,
+}
+
+struct VirtualRetainedEntry {
+    logical_id: i64,
+    instance_id: i64,
+    generation: i64,
+    live: i32,
+    focused: i32,
+    last_seen_revision: i64,
+}
+
+struct VirtualRetainedStore {
+    entries: ArrayList[VirtualRetainedEntry],
+    capacity: i32,
+    next_instance_id: i64,
+    revision: i64,
+    focused_id: i64,
+}
+
+struct VirtualLifecycleResult {
+    inserted: i32,
+    reused: i32,
+    rebound: i32,
+    evicted: i32,
+    live: i32,
+    resident: i32,
+    focus_restored: i32,
+    lifecycle_hash: i64,
+    error: VirtualLifecycleError,
+    error_index: i32,
+}
+
+fn virtual_store_make(capacity: i32) VirtualRetainedStore {
+    let safe_capacity: i32 = capacity;
+    if (safe_capacity < 1 || safe_capacity > 4096) { safe_capacity = 1; }
+    return VirtualRetainedStore{
+        .entries = make[VirtualRetainedEntry](safe_capacity),
+        .capacity = capacity,
+        .next_instance_id = 1,
+        .revision = 0,
+        .focused_id = 0,
+    };
+}
+
+fn virtual_store_free(store: *VirtualRetainedStore) void {
+    free[VirtualRetainedEntry](&store.*.entries);
+}
+
+fn virtual_lifecycle_mix(hash: i64, value: i64) i64 {
+    return (hash * 1099511628211) ^ value;
+}
+
+fn virtual_store_find(store: VirtualRetainedStore, logical_id: i64) i32 {
+    let i: i32 = 0;
+    while (i < store.entries.len) {
+        if (store.entries.data[i].logical_id == logical_id) { return i; }
+        i = i + 1;
+    }
+    return 0 - 1;
+}
+
+fn virtual_ids_contains(ids: ArrayList[i64], logical_id: i64) i32 {
+    let i: i32 = 0;
+    while (i < ids.len) {
+        if (ids.data[i] == logical_id) { return 1; }
+        i = i + 1;
+    }
+    return 0;
+}
+
+fn virtual_store_hash(store: VirtualRetainedStore) i64 {
+    let hash: i64 = virtual_lifecycle_mix(virtual_lifecycle_mix(17, store.capacity as i64), store.revision);
+    hash = virtual_lifecycle_mix(hash, store.next_instance_id);
+    hash = virtual_lifecycle_mix(hash, store.focused_id);
+    hash = virtual_lifecycle_mix(hash, store.entries.len as i64);
+    let i: i32 = 0;
+    while (i < store.entries.len) {
+        let entry: VirtualRetainedEntry = store.entries.data[i];
+        hash = virtual_lifecycle_mix(hash, entry.logical_id);
+        hash = virtual_lifecycle_mix(hash, entry.instance_id);
+        hash = virtual_lifecycle_mix(hash, entry.generation);
+        hash = virtual_lifecycle_mix(hash, entry.live as i64);
+        hash = virtual_lifecycle_mix(hash, entry.focused as i64);
+        hash = virtual_lifecycle_mix(hash, entry.last_seen_revision);
+        i = i + 1;
+    }
+    return hash;
+}
+
+fn virtual_lifecycle_error(store: VirtualRetainedStore, error: VirtualLifecycleError,
+    index: i32) VirtualLifecycleResult {
+    return VirtualLifecycleResult{
+        .inserted = 0, .reused = 0, .rebound = 0, .evicted = 0,
+        .live = 0, .resident = store.entries.len, .focus_restored = 0,
+        .lifecycle_hash = virtual_lifecycle_mix(virtual_store_hash(store), error as i64),
+        .error = error, .error_index = index,
+    };
+}
+
+fn virtual_store_focus(store: *VirtualRetainedStore, logical_id: i64) VirtualLifecycleError {
+    if (logical_id == 0) {
+        if (store.*.focused_id == 0) { return VirtualLifecycleError.none; }
+        let old_index: i32 = virtual_store_find(store.*, store.*.focused_id);
+        if (old_index >= 0) { store.*.entries.data[old_index].focused = 0; }
+        store.*.focused_id = 0;
+        store.*.revision = store.*.revision + 1;
+        return VirtualLifecycleError.none;
+    }
+    let index: i32 = virtual_store_find(store.*, logical_id);
+    if (index < 0) { return VirtualLifecycleError.unknown_focus; }
+    if (store.*.focused_id == logical_id) { return VirtualLifecycleError.none; }
+    let old_index: i32 = virtual_store_find(store.*, store.*.focused_id);
+    if (old_index >= 0) { store.*.entries.data[old_index].focused = 0; }
+    store.*.focused_id = logical_id;
+    store.*.entries.data[index].focused = 1;
+    store.*.revision = store.*.revision + 1;
+    return VirtualLifecycleError.none;
+}
+
+fn virtual_store_reconcile(store: *VirtualRetainedStore,
+    live_ids: ArrayList[i64]) VirtualLifecycleResult {
+    if (store.*.capacity < 1 || store.*.capacity > 4096) {
+        return virtual_lifecycle_error(store.*, VirtualLifecycleError.invalid_capacity, 0 - 1);
+    }
+    if (live_ids.len > store.*.capacity) {
+        return virtual_lifecycle_error(store.*, VirtualLifecycleError.too_many_live_nodes, 0 - 1);
+    }
+    if (store.*.focused_id != 0 && virtual_ids_contains(live_ids, store.*.focused_id) == 0 &&
+        live_ids.len >= store.*.capacity) {
+        return virtual_lifecycle_error(store.*, VirtualLifecycleError.too_many_live_nodes, 0 - 1);
+    }
+    let i: i32 = 0;
+    while (i < live_ids.len) {
+        if (live_ids.data[i] <= 0) {
+            return virtual_lifecycle_error(store.*, VirtualLifecycleError.invalid_id, i);
+        }
+        let j: i32 = 0;
+        while (j < i) {
+            if (live_ids.data[j] == live_ids.data[i]) {
+                return virtual_lifecycle_error(store.*, VirtualLifecycleError.duplicate_id, i);
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+
+    let current_live: i32 = 0;
+    let identical_membership: i32 = 1;
+    i = 0;
+    while (i < store.*.entries.len) {
+        if (store.*.entries.data[i].live != 0) {
+            current_live = current_live + 1;
+            if (virtual_ids_contains(live_ids, store.*.entries.data[i].logical_id) == 0) {
+                identical_membership = 0;
+            }
+        }
+        i = i + 1;
+    }
+    if (current_live != live_ids.len) { identical_membership = 0; }
+    if (identical_membership != 0) {
+        return VirtualLifecycleResult{
+            .inserted = 0, .reused = live_ids.len, .rebound = 0, .evicted = 0,
+            .live = live_ids.len, .resident = store.*.entries.len,
+            .focus_restored = 0, .lifecycle_hash = virtual_store_hash(store.*),
+            .error = VirtualLifecycleError.none, .error_index = 0 - 1,
+        };
+    }
+
+    let was_live: ArrayList[i32] = make[i32](store.*.entries.len);
+    let evicted: i32 = 0;
+    i = 0;
+    while (i < store.*.entries.len) {
+        push[i32](&was_live, store.*.entries.data[i].live);
+        if (store.*.entries.data[i].live != 0 &&
+            virtual_ids_contains(live_ids, store.*.entries.data[i].logical_id) == 0) {
+            evicted = evicted + 1;
+        }
+        store.*.entries.data[i].live = 0;
+        i = i + 1;
+    }
+
+    let inserted: i32 = 0;
+    let reused: i32 = 0;
+    let rebound: i32 = 0;
+    let focus_restored: i32 = 0;
+    let next_revision: i64 = store.*.revision + 1;
+    i = 0;
+    while (i < live_ids.len) {
+        let logical_id: i64 = live_ids.data[i];
+        let found: i32 = virtual_store_find(store.*, logical_id);
+        if (found >= 0) {
+            if (store.*.entries.data[found].focused != 0 && was_live.data[found] == 0) {
+                focus_restored = focus_restored + 1;
+            }
+            store.*.entries.data[found].live = 1;
+            store.*.entries.data[found].last_seen_revision = next_revision;
+            reused = reused + 1;
+        } else if (store.*.entries.len < store.*.capacity) {
+            let instance_id: i64 = store.*.next_instance_id;
+            store.*.next_instance_id = store.*.next_instance_id + 1;
+            push[VirtualRetainedEntry](&store.*.entries, VirtualRetainedEntry{
+                .logical_id = logical_id, .instance_id = instance_id, .generation = 0,
+                .live = 1, .focused = 0, .last_seen_revision = next_revision,
+            });
+            inserted = inserted + 1;
+        } else {
+            let candidate: i32 = 0 - 1;
+            let oldest: i64 = 0;
+            let j: i32 = 0;
+            while (j < store.*.entries.len) {
+                let entry: VirtualRetainedEntry = store.*.entries.data[j];
+                if (entry.live == 0 && entry.focused == 0 &&
+                    virtual_ids_contains(live_ids, entry.logical_id) == 0 &&
+                    (candidate < 0 || entry.last_seen_revision < oldest)) {
+                    candidate = j;
+                    oldest = entry.last_seen_revision;
+                }
+                j = j + 1;
+            }
+            if (candidate < 0) {
+                i = 0;
+                while (i < store.*.entries.len) {
+                    store.*.entries.data[i].live = was_live.data[i];
+                    i = i + 1;
+                }
+                free[i32](&was_live);
+                return virtual_lifecycle_error(store.*, VirtualLifecycleError.no_recyclable_node, i);
+            }
+            store.*.entries.data[candidate].logical_id = logical_id;
+            store.*.entries.data[candidate].generation = store.*.entries.data[candidate].generation + 1;
+            store.*.entries.data[candidate].live = 1;
+            store.*.entries.data[candidate].last_seen_revision = next_revision;
+            rebound = rebound + 1;
+        }
+        i = i + 1;
+    }
+
+    let membership_changed: i32 = (inserted > 0 || rebound > 0 || evicted > 0) as i32;
+    i = 0;
+    while (i < was_live.len) {
+        if (was_live.data[i] == 0 && store.*.entries.data[i].live != 0) {
+            membership_changed = 1;
+        }
+        i = i + 1;
+    }
+    if (membership_changed != 0) { store.*.revision = next_revision; }
+    free[i32](&was_live);
+    return VirtualLifecycleResult{
+        .inserted = inserted, .reused = reused, .rebound = rebound, .evicted = evicted,
+        .live = live_ids.len, .resident = store.*.entries.len,
+        .focus_restored = focus_restored, .lifecycle_hash = virtual_store_hash(store.*),
+        .error = VirtualLifecycleError.none, .error_index = 0 - 1,
+    };
+}

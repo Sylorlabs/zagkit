@@ -110,7 +110,8 @@ The following remain before `G2-CONSTRAINTS` can complete:
 - serialized measurement and invalidation evidence;
 - property and fuzz coverage across the complete component layout matrix.
 
-Table and Tree projection, recycled retained-node lifecycle, and platform-driven
-adaptive conformance remain separate Flex and virtualization work. Grid,
-Overlay, Scroll, and Virtual List now have experimental placement contracts;
-their existence does not complete the full component layout matrix.
+Editable Table and Tree behavior, general retained-node lifecycle, and
+platform-driven adaptive conformance remain separate Flex and virtualization
+work. Grid, Overlay, Scroll, Virtual List, Table projection, Tree projection,
+and bounded recycling now have experimental contracts; their existence does
+not complete the full component layout matrix.

@@ -7,6 +7,9 @@
 @import("../layout/overlay.zag")
 @import("../layout/scroll.zag")
 @import("../layout/virtual_list.zag")
+@import("../layout/virtual_table.zag")
+@import("../layout/virtual_tree.zag")
+@import("../core/virtual_lifecycle.zag")
 @import("../semantics/semantics.zag")
 @import("../render/cpu_raster.zag")
 @import("../motion/motion.zag")
@@ -334,6 +337,68 @@ fn replay_runtime_free(router: *InputRouter, tree: *HitTree, motion: *MotionSche
     motion_scheduler_free(motion);
 }
 
+fn replay_virtual_collections_hash(magnitude: i64) i64 {
+    let overrides: ArrayList[VirtualExtentOverride] = make[VirtualExtentOverride](1);
+    let rows: VirtualListModel = virtual_model(100, 3000, unit_scale(), 0, magnitude, overrides);
+    let columns: ArrayList[VirtualTableColumn] = make[VirtualTableColumn](2);
+    let pinned: VirtualTableColumn = virtual_table_column(
+        1, 3 * unit_scale(), 2 * unit_scale(), 4 * unit_scale()
+    );
+    pinned.pinned = 1;
+    push[VirtualTableColumn](&columns, pinned);
+    push[VirtualTableColumn](&columns, virtual_table_column(
+        2, 3 * unit_scale(), 2 * unit_scale(), 4 * unit_scale()
+    ));
+    let table: VirtualTableResult = virtual_table_layout(
+        virtual_table_model(77, rows, columns, magnitude),
+        size(8 * unit_scale(), 6 * unit_scale()), magnitude * unit_scale(), 0,
+        virtual_table_style(unit_scale(), unit_scale(), insets_all(0))
+    );
+    free[VirtualTableColumn](&columns); free[VirtualExtentOverride](&overrides);
+    if (table.error != VirtualTableError.none) {
+        virtual_table_free(&table);
+        return 0;
+    }
+
+    let source: ArrayList[VirtualTreeNode] = make[VirtualTreeNode](2);
+    push[VirtualTreeNode](&source, virtual_tree_node(
+        4000, 0, 0, 1, (magnitude != 0) as i32, unit_scale(), magnitude
+    ));
+    push[VirtualTreeNode](&source, virtual_tree_node(
+        4001, 4000, 1, 0, 0, unit_scale(), magnitude
+    ));
+    let projection: VirtualTreeProjection = virtual_tree_project(source, magnitude);
+    free[VirtualTreeNode](&source);
+    if (projection.error != VirtualTreeError.none) {
+        virtual_tree_projection_free(&projection); virtual_table_free(&table);
+        return 0;
+    }
+    let tree: VirtualTreeResult = virtual_tree_layout(
+        projection, size(8 * unit_scale(), 6 * unit_scale()), 0,
+        virtual_tree_style(unit_scale(), 0, unit_scale(), insets_all(0))
+    );
+    if (tree.error != VirtualTreeError.none) {
+        virtual_tree_free(&tree); virtual_tree_projection_free(&projection);
+        virtual_table_free(&table); return 0;
+    }
+    let live_ids: ArrayList[i64] = make[i64](tree.placements.len);
+    let i: i32 = 0;
+    while (i < tree.placements.len) {
+        push[i64](&live_ids, tree.placements.data[i].id);
+        i = i + 1;
+    }
+    let store: VirtualRetainedStore = virtual_store_make(8);
+    let lifecycle: VirtualLifecycleResult = virtual_store_reconcile(&store, live_ids);
+    free[i64](&live_ids);
+    let hash: i64 = 0;
+    if (lifecycle.error == VirtualLifecycleError.none) {
+        hash = display_mix(display_mix(table.layout_hash, tree.layout_hash), lifecycle.lifecycle_hash);
+    }
+    virtual_store_free(&store); virtual_tree_free(&tree);
+    virtual_tree_projection_free(&projection); virtual_table_free(&table);
+    return hash;
+}
+
 fn replay_build_scene(state_value: i64, backend_generation: i64) ReplayResult {
     let result: ReplayResult = replay_result_error(ReplayError.none, 0 - 1, 0);
 
@@ -492,12 +557,24 @@ fn replay_build_scene(state_value: i64, backend_generation: i64) ReplayResult {
         semantics_tree_free(&semantics);
         return replay_result_error(ReplayError.scene_error, 0 - 1, 0);
     }
+    let collections_hash: i64 = replay_virtual_collections_hash(magnitude);
+    if (collections_hash == 0) {
+        virtual_free(&virtual_result);
+        grid_free(&grid_layout_result);
+        overlay_free(&overlay_layout_result);
+        flex_wrap_free(&layout);
+        semantics_tree_free(&semantics);
+        return replay_result_error(ReplayError.scene_error, 0 - 1, 0);
+    }
     result.layout_hash = display_mix(
         display_mix(
             display_mix(layout.layout_hash, overlay_layout_result.layout_hash),
             grid_layout_result.layout_hash
         ),
-        display_mix(virtual_result.layout_hash, scroll_state_hash(replay_scroll))
+        display_mix(
+            display_mix(virtual_result.layout_hash, scroll_state_hash(replay_scroll)),
+            collections_hash
+        )
     );
     result.layout_lines = layout.lines.len;
     virtual_free(&virtual_result);

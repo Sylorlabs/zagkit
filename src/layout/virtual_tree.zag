@@ -1,0 +1,324 @@
+@import("std:list")
+@import("../core/geometry.zag")
+@import("common.zag")
+@import("virtual_list.zag")
+
+enum VirtualTreeError {
+    none,
+    too_many_nodes,
+    invalid_node,
+    duplicate_id,
+    invalid_depth,
+    invalid_parent,
+    invalid_style,
+    layout_error,
+}
+
+struct VirtualTreeNode {
+    id: i64,
+    parent_id: i64,
+    depth: i32,
+    has_children: i32,
+    expanded: i32,
+    extent: i64,
+    revision: i64,
+}
+
+struct VirtualTreeVisibleNode {
+    id: i64,
+    parent_id: i64,
+    source_index: i32,
+    depth: i32,
+    has_children: i32,
+    expanded: i32,
+    extent: i64,
+    revision: i64,
+}
+
+struct VirtualTreeProjection {
+    nodes: ArrayList[VirtualTreeVisibleNode],
+    source_count: i32,
+    revision: i64,
+    projection_hash: i64,
+    error: VirtualTreeError,
+    error_index: i32,
+}
+
+struct VirtualTreeStyle {
+    row_extent: i64,
+    row_gap: i64,
+    indent: i64,
+    padding: Insets,
+    direction: LayoutDirection,
+    overscan_before: i32,
+    overscan_after: i32,
+    max_live_nodes: i32,
+}
+
+struct VirtualTreePlacement {
+    id: i64,
+    parent_id: i64,
+    source_index: i32,
+    visible_index: i64,
+    depth: i32,
+    has_children: i32,
+    expanded: i32,
+    frame: Rect,
+    content_frame: Rect,
+    revision: i64,
+}
+
+struct VirtualTreeResult {
+    placements: ArrayList[VirtualTreePlacement],
+    viewport: Size,
+    content: Size,
+    scroll_offset: i64,
+    max_scroll: i64,
+    first_visible: i64,
+    last_visible: i64,
+    first_live: i64,
+    last_live: i64,
+    semantic_count: i64,
+    source_count: i32,
+    layout_hash: i64,
+    error: VirtualTreeError,
+    error_index: i32,
+}
+
+fn virtual_tree_node(id: i64, parent_id: i64, depth: i32,
+    has_children: i32, expanded: i32, extent: i64, revision: i64) VirtualTreeNode {
+    return VirtualTreeNode{
+        .id = id, .parent_id = parent_id, .depth = depth,
+        .has_children = has_children, .expanded = expanded,
+        .extent = extent, .revision = revision,
+    };
+}
+
+fn virtual_tree_style(row_extent: i64, row_gap: i64, indent: i64,
+    padding: Insets) VirtualTreeStyle {
+    return VirtualTreeStyle{
+        .row_extent = row_extent, .row_gap = row_gap, .indent = indent,
+        .padding = padding, .direction = LayoutDirection.ltr,
+        .overscan_before = 2, .overscan_after = 2, .max_live_nodes = 512,
+    };
+}
+
+fn virtual_tree_mix(hash: i64, value: i64) i64 { return (hash * 1099511628211) ^ value; }
+
+fn virtual_tree_projection_free(projection: *VirtualTreeProjection) void {
+    free[VirtualTreeVisibleNode](&projection.*.nodes);
+}
+
+fn virtual_tree_free(result: *VirtualTreeResult) void {
+    free[VirtualTreePlacement](&result.*.placements);
+}
+
+fn virtual_tree_projection_error(error: VirtualTreeError, index: i32,
+    source_count: i32) VirtualTreeProjection {
+    let result: VirtualTreeProjection = VirtualTreeProjection{
+        .nodes = make[VirtualTreeVisibleNode](1), .source_count = source_count,
+        .revision = 0, .projection_hash = 17,
+        .error = error, .error_index = index,
+    };
+    result.projection_hash = virtual_tree_mix(virtual_tree_mix(17, error as i64), index as i64);
+    return result;
+}
+
+fn virtual_tree_result_error(error: VirtualTreeError, index: i32) VirtualTreeResult {
+    let result: VirtualTreeResult = VirtualTreeResult{
+        .placements = make[VirtualTreePlacement](1),
+        .viewport = size(0, 0), .content = size(0, 0),
+        .scroll_offset = 0, .max_scroll = 0,
+        .first_visible = 0 - 1, .last_visible = 0 - 1,
+        .first_live = 0 - 1, .last_live = 0 - 1,
+        .semantic_count = 0, .source_count = 0, .layout_hash = 17,
+        .error = error, .error_index = index,
+    };
+    result.layout_hash = virtual_tree_mix(virtual_tree_mix(17, error as i64), index as i64);
+    return result;
+}
+
+fn virtual_tree_node_valid(node: VirtualTreeNode) i32 {
+    return (node.id > 0 && node.parent_id >= 0 && node.depth >= 0 && node.depth <= 512 &&
+        (node.has_children == 0 || node.has_children == 1) &&
+        (node.expanded == 0 || node.expanded == 1) &&
+        (node.has_children == 1 || node.expanded == 0) &&
+        node.extent > 0 && node.extent <= unbounded_extent() / 4 && node.revision >= 0) as i32;
+}
+
+fn virtual_tree_seen_insert(seen: *ArrayList[i64], id: i64) i32 {
+    let index: i32 = (id % seen.*.len as i64) as i32;
+    let probes: i32 = 0;
+    while (probes < seen.*.len) {
+        if (seen.*.data[index] == id) { return 0; }
+        if (seen.*.data[index] == 0) { seen.*.data[index] = id; return 1; }
+        index = index + 1;
+        if (index == seen.*.len) { index = 0; }
+        probes = probes + 1;
+    }
+    return 0 - 1;
+}
+
+fn virtual_tree_project(source: ArrayList[VirtualTreeNode], revision: i64) VirtualTreeProjection {
+    if (source.len > 16384) {
+        return virtual_tree_projection_error(VirtualTreeError.too_many_nodes, 0 - 1, source.len);
+    }
+    if (revision < 0) {
+        return virtual_tree_projection_error(VirtualTreeError.invalid_node, 0 - 1, source.len);
+    }
+    let ancestor_ids: ArrayList[i64] = make[i64](32);
+    let ancestor_has_children: ArrayList[i32] = make[i32](32);
+    let seen: ArrayList[i64] = make[i64](source.len * 2 + 1);
+    let seen_index: i32 = 0;
+    while (seen_index < source.len * 2 + 1) { push[i64](&seen, 0); seen_index = seen_index + 1; }
+    let visible: ArrayList[VirtualTreeVisibleNode] = make[VirtualTreeVisibleNode](source.len);
+    let hidden_depth: i32 = 0 - 1;
+    let hash: i64 = virtual_tree_mix(17, revision);
+    let i: i32 = 0;
+    while (i < source.len) {
+        let node: VirtualTreeNode = source.data[i];
+        if (virtual_tree_node_valid(node) == 0) {
+            free[i64](&ancestor_ids); free[i32](&ancestor_has_children); free[i64](&seen);
+            free[VirtualTreeVisibleNode](&visible);
+            return virtual_tree_projection_error(VirtualTreeError.invalid_node, i, source.len);
+        }
+        if (virtual_tree_seen_insert(&seen, node.id) != 1) {
+            free[i64](&ancestor_ids); free[i32](&ancestor_has_children); free[i64](&seen);
+            free[VirtualTreeVisibleNode](&visible);
+            return virtual_tree_projection_error(VirtualTreeError.duplicate_id, i, source.len);
+        }
+        if ((i == 0 && node.depth != 0) ||
+            (i > 0 && node.depth > source.data[i - 1].depth + 1)) {
+            free[i64](&ancestor_ids); free[i32](&ancestor_has_children); free[i64](&seen);
+            free[VirtualTreeVisibleNode](&visible);
+            return virtual_tree_projection_error(VirtualTreeError.invalid_depth, i, source.len);
+        }
+        while (ancestor_ids.len > node.depth) {
+            ancestor_ids.len = ancestor_ids.len - 1;
+            ancestor_has_children.len = ancestor_has_children.len - 1;
+        }
+        if (node.depth == 0) {
+            if (node.parent_id != 0) {
+                free[i64](&ancestor_ids); free[i32](&ancestor_has_children); free[i64](&seen);
+                free[VirtualTreeVisibleNode](&visible);
+                return virtual_tree_projection_error(VirtualTreeError.invalid_parent, i, source.len);
+            }
+        } else if (ancestor_ids.len != node.depth ||
+            ancestor_ids.data[node.depth - 1] != node.parent_id ||
+            ancestor_has_children.data[node.depth - 1] == 0) {
+            free[i64](&ancestor_ids); free[i32](&ancestor_has_children); free[i64](&seen);
+            free[VirtualTreeVisibleNode](&visible);
+            return virtual_tree_projection_error(VirtualTreeError.invalid_parent, i, source.len);
+        }
+        push[i64](&ancestor_ids, node.id);
+        push[i32](&ancestor_has_children, node.has_children);
+
+        if (hidden_depth >= 0 && node.depth <= hidden_depth) { hidden_depth = 0 - 1; }
+        if (hidden_depth < 0) {
+            push[VirtualTreeVisibleNode](&visible, VirtualTreeVisibleNode{
+                .id = node.id, .parent_id = node.parent_id, .source_index = i,
+                .depth = node.depth, .has_children = node.has_children,
+                .expanded = node.expanded, .extent = node.extent, .revision = node.revision,
+            });
+            if (node.has_children != 0 && node.expanded == 0) { hidden_depth = node.depth; }
+        }
+        hash = virtual_tree_mix(hash, node.id); hash = virtual_tree_mix(hash, node.parent_id);
+        hash = virtual_tree_mix(hash, node.depth as i64);
+        hash = virtual_tree_mix(hash, node.has_children as i64);
+        hash = virtual_tree_mix(hash, node.expanded as i64);
+        hash = virtual_tree_mix(hash, node.extent); hash = virtual_tree_mix(hash, node.revision);
+        i = i + 1;
+    }
+    free[i64](&ancestor_ids); free[i32](&ancestor_has_children); free[i64](&seen);
+    hash = virtual_tree_mix(hash, visible.len as i64);
+    i = 0;
+    while (i < visible.len) { hash = virtual_tree_mix(hash, visible.data[i].id); i = i + 1; }
+    return VirtualTreeProjection{
+        .nodes = visible, .source_count = source.len, .revision = revision,
+        .projection_hash = hash, .error = VirtualTreeError.none, .error_index = 0 - 1,
+    };
+}
+
+fn virtual_tree_style_valid(style: VirtualTreeStyle) i32 {
+    return (style.row_extent > 0 && style.row_extent <= unbounded_extent() / 4 &&
+        style.row_gap >= 0 && style.row_gap <= unbounded_extent() / 4 &&
+        style.indent >= 0 && style.indent <= unbounded_extent() / 4 &&
+        virtual_insets_valid(style.padding) == 1 &&
+        style.overscan_before >= 0 && style.overscan_before <= 4096 &&
+        style.overscan_after >= 0 && style.overscan_after <= 4096 &&
+        style.max_live_nodes > 0 && style.max_live_nodes <= 4096) as i32;
+}
+
+fn virtual_tree_layout(projection: VirtualTreeProjection, viewport: Size,
+    scroll_offset: i64, style: VirtualTreeStyle) VirtualTreeResult {
+    if (projection.error != VirtualTreeError.none) {
+        return virtual_tree_result_error(projection.error, projection.error_index);
+    }
+    if (virtual_tree_style_valid(style) == 0) {
+        return virtual_tree_result_error(VirtualTreeError.invalid_style, 0 - 1);
+    }
+    let overrides: ArrayList[VirtualExtentOverride] = make[VirtualExtentOverride](projection.nodes.len);
+    let i: i32 = 0;
+    while (i < projection.nodes.len) {
+        if (projection.nodes.data[i].extent != style.row_extent ||
+            projection.nodes.data[i].revision != projection.revision) {
+            push[VirtualExtentOverride](&overrides, virtual_override(
+                i as i64, projection.nodes.data[i].extent, projection.nodes.data[i].revision
+            ));
+        }
+        i = i + 1;
+    }
+    let model: VirtualListModel = virtual_model(
+        projection.nodes.len as i64, 1, style.row_extent, style.row_gap,
+        projection.revision, overrides
+    );
+    let list_style: VirtualListStyle = virtual_style(VirtualAxis.vertical, style.padding);
+    list_style.direction = style.direction;
+    list_style.overscan_before = style.overscan_before;
+    list_style.overscan_after = style.overscan_after;
+    list_style.max_live_items = style.max_live_nodes;
+    let layout: VirtualListResult = virtual_list_layout(model, viewport, scroll_offset, list_style);
+    free[VirtualExtentOverride](&overrides);
+    if (layout.error != VirtualListError.none) {
+        let index: i32 = layout.error_index as i32;
+        virtual_free(&layout);
+        return virtual_tree_result_error(VirtualTreeError.layout_error, index);
+    }
+    let placements: ArrayList[VirtualTreePlacement] = make[VirtualTreePlacement](layout.placements.len);
+    i = 0;
+    while (i < layout.placements.len) {
+        let row: VirtualPlacement = layout.placements.data[i];
+        let node: VirtualTreeVisibleNode = projection.nodes.data[row.index as i32];
+        let indentation: i64 = style.indent * (node.depth as i64);
+        if (indentation < 0 || indentation > row.frame.width) { indentation = row.frame.width; }
+        let content_frame: Rect = row.frame;
+        content_frame.width = row.frame.width - indentation;
+        if (style.direction == LayoutDirection.ltr) { content_frame.x = row.frame.x + indentation; }
+        push[VirtualTreePlacement](&placements, VirtualTreePlacement{
+            .id = node.id, .parent_id = node.parent_id,
+            .source_index = node.source_index, .visible_index = row.index,
+            .depth = node.depth, .has_children = node.has_children,
+            .expanded = node.expanded, .frame = row.frame,
+            .content_frame = content_frame, .revision = node.revision,
+        });
+        i = i + 1;
+    }
+    let result: VirtualTreeResult = VirtualTreeResult{
+        .placements = placements, .viewport = layout.viewport, .content = layout.content,
+        .scroll_offset = layout.scroll_offset, .max_scroll = layout.max_scroll,
+        .first_visible = layout.first_visible, .last_visible = layout.last_visible,
+        .first_live = layout.first_live, .last_live = layout.last_live,
+        .semantic_count = projection.nodes.len as i64, .source_count = projection.source_count,
+        .layout_hash = virtual_tree_mix(projection.projection_hash, layout.layout_hash),
+        .error = VirtualTreeError.none, .error_index = 0 - 1,
+    };
+    i = 0;
+    while (i < result.placements.len) {
+        result.layout_hash = virtual_tree_mix(result.layout_hash, result.placements.data[i].id);
+        result.layout_hash = virtual_tree_mix(result.layout_hash, result.placements.data[i].content_frame.x);
+        result.layout_hash = virtual_tree_mix(result.layout_hash, result.placements.data[i].content_frame.width);
+        i = i + 1;
+    }
+    virtual_free(&layout);
+    return result;
+}

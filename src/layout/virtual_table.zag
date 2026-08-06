@@ -1,0 +1,403 @@
+@import("std:list")
+@import("../core/geometry.zag")
+@import("common.zag")
+@import("virtual_list.zag")
+
+enum VirtualTableError {
+    none,
+    invalid_model,
+    invalid_column,
+    duplicate_column,
+    invalid_pinned_order,
+    invalid_style,
+    invalid_viewport,
+    row_layout_error,
+    cell_limit_exceeded,
+    unknown_column,
+    column_not_resizable,
+}
+
+struct VirtualTableColumn {
+    id: i64,
+    width: i64,
+    minimum: i64,
+    maximum: i64,
+    pinned: i32,
+    resizable: i32,
+    revision: i64,
+}
+
+struct VirtualTableModel {
+    id: i64,
+    rows: VirtualListModel,
+    columns: ArrayList[VirtualTableColumn],
+    revision: i64,
+}
+
+struct VirtualTableStyle {
+    header_extent: i64,
+    column_gap: i64,
+    padding: Insets,
+    direction: LayoutDirection,
+    row_overscan_before: i32,
+    row_overscan_after: i32,
+    column_overscan: i32,
+    max_live_cells: i32,
+}
+
+struct VirtualTableCellId {
+    table_id: i64,
+    row_id: i64,
+    column_id: i64,
+    header: i32,
+}
+
+struct VirtualTableCell {
+    id: VirtualTableCellId,
+    row_id: i64,
+    column_id: i64,
+    row_index: i64,
+    column_index: i32,
+    frame: Rect,
+    header: i32,
+    pinned: i32,
+    row_revision: i64,
+    column_revision: i64,
+}
+
+struct VirtualTableResult {
+    cells: ArrayList[VirtualTableCell],
+    viewport: Size,
+    content: Size,
+    vertical_scroll: i64,
+    horizontal_scroll: i64,
+    max_vertical_scroll: i64,
+    max_horizontal_scroll: i64,
+    first_visible_row: i64,
+    last_visible_row: i64,
+    first_live_row: i64,
+    last_live_row: i64,
+    first_visible_column: i32,
+    last_visible_column: i32,
+    semantic_rows: i64,
+    semantic_columns: i32,
+    pinned_columns: i32,
+    layout_hash: i64,
+    error: VirtualTableError,
+    error_index: i32,
+}
+
+struct VirtualTableResizeResult {
+    column_id: i64,
+    old_width: i64,
+    width: i64,
+    consumed: i64,
+    unconsumed: i64,
+    revision: i64,
+    changed: i32,
+    error: VirtualTableError,
+}
+
+fn virtual_table_column(id: i64, width: i64, minimum: i64,
+    maximum: i64) VirtualTableColumn {
+    return VirtualTableColumn{
+        .id = id, .width = width, .minimum = minimum, .maximum = maximum,
+        .pinned = 0, .resizable = 1, .revision = 0,
+    };
+}
+
+fn virtual_table_model(id: i64, rows: VirtualListModel,
+    columns: ArrayList[VirtualTableColumn], revision: i64) VirtualTableModel {
+    return VirtualTableModel{ .id = id, .rows = rows, .columns = columns, .revision = revision };
+}
+
+fn virtual_table_style(header_extent: i64, column_gap: i64,
+    padding: Insets) VirtualTableStyle {
+    return VirtualTableStyle{
+        .header_extent = header_extent, .column_gap = column_gap, .padding = padding,
+        .direction = LayoutDirection.ltr,
+        .row_overscan_before = 2, .row_overscan_after = 2,
+        .column_overscan = 1, .max_live_cells = 4096,
+    };
+}
+
+fn virtual_table_free(result: *VirtualTableResult) void {
+    free[VirtualTableCell](&result.*.cells);
+}
+
+fn virtual_table_mix(hash: i64, value: i64) i64 { return (hash * 1099511628211) ^ value; }
+
+fn virtual_table_error_result(error: VirtualTableError, index: i32) VirtualTableResult {
+    let result: VirtualTableResult = VirtualTableResult{
+        .cells = make[VirtualTableCell](1), .viewport = size(0, 0), .content = size(0, 0),
+        .vertical_scroll = 0, .horizontal_scroll = 0,
+        .max_vertical_scroll = 0, .max_horizontal_scroll = 0,
+        .first_visible_row = 0 - 1, .last_visible_row = 0 - 1,
+        .first_live_row = 0 - 1, .last_live_row = 0 - 1,
+        .first_visible_column = 0 - 1, .last_visible_column = 0 - 1,
+        .semantic_rows = 0, .semantic_columns = 0, .pinned_columns = 0,
+        .layout_hash = virtual_table_mix(virtual_table_mix(17, error as i64), index as i64),
+        .error = error, .error_index = index,
+    };
+    return result;
+}
+
+fn virtual_table_column_valid(column: VirtualTableColumn) i32 {
+    return (column.id > 0 && column.minimum > 0 && column.width >= column.minimum &&
+        column.maximum >= column.width && column.maximum <= unbounded_extent() / 4 &&
+        (column.pinned == 0 || column.pinned == 1) &&
+        (column.resizable == 0 || column.resizable == 1) && column.revision >= 0) as i32;
+}
+
+fn virtual_table_style_valid(style: VirtualTableStyle) i32 {
+    return (style.header_extent > 0 && style.header_extent <= unbounded_extent() / 4 &&
+        style.column_gap >= 0 && style.column_gap <= unbounded_extent() / 4 &&
+        virtual_insets_valid(style.padding) == 1 &&
+        style.row_overscan_before >= 0 && style.row_overscan_before <= 4096 &&
+        style.row_overscan_after >= 0 && style.row_overscan_after <= 4096 &&
+        style.column_overscan >= 0 && style.column_overscan <= 256 &&
+        style.max_live_cells > 0 && style.max_live_cells <= 65536) as i32;
+}
+
+fn virtual_table_cell_id(table_id: i64, row_id: i64, column_id: i64,
+    header: i32) VirtualTableCellId {
+    return VirtualTableCellId{
+        .table_id = table_id, .row_id = row_id,
+        .column_id = column_id, .header = header,
+    };
+}
+
+fn virtual_table_resize(model: *VirtualTableModel, column_id: i64,
+    delta: i64) VirtualTableResizeResult {
+    let index: i32 = 0 - 1;
+    let i: i32 = 0;
+    while (i < model.*.columns.len) {
+        if (model.*.columns.data[i].id == column_id) { index = i; break; }
+        i = i + 1;
+    }
+    if (index < 0) {
+        return VirtualTableResizeResult{
+            .column_id = column_id, .old_width = 0, .width = 0,
+            .consumed = 0, .unconsumed = delta, .revision = model.*.revision,
+            .changed = 0, .error = VirtualTableError.unknown_column,
+        };
+    }
+    let column: VirtualTableColumn = model.*.columns.data[index];
+    if (column.resizable == 0) {
+        return VirtualTableResizeResult{
+            .column_id = column_id, .old_width = column.width, .width = column.width,
+            .consumed = 0, .unconsumed = delta, .revision = model.*.revision,
+            .changed = 0, .error = VirtualTableError.column_not_resizable,
+        };
+    }
+    if (delta < 0 - unbounded_extent() || delta > unbounded_extent()) {
+        return VirtualTableResizeResult{
+            .column_id = column_id, .old_width = column.width, .width = column.width,
+            .consumed = 0, .unconsumed = delta, .revision = model.*.revision,
+            .changed = 0, .error = VirtualTableError.invalid_column,
+        };
+    }
+    let width: i64 = clamp_i64(column.width + delta, column.minimum, column.maximum);
+    let consumed: i64 = width - column.width;
+    let changed: i32 = (consumed != 0) as i32;
+    if (changed != 0) {
+        model.*.columns.data[index].width = width;
+        model.*.columns.data[index].revision = model.*.columns.data[index].revision + 1;
+        model.*.revision = model.*.revision + 1;
+    }
+    return VirtualTableResizeResult{
+        .column_id = column_id, .old_width = column.width, .width = width,
+        .consumed = consumed, .unconsumed = delta - consumed,
+        .revision = model.*.revision, .changed = changed, .error = VirtualTableError.none,
+    };
+}
+
+fn virtual_table_layout(model: VirtualTableModel, viewport: Size,
+    vertical_scroll: i64, horizontal_scroll: i64,
+    style: VirtualTableStyle) VirtualTableResult {
+    if (model.id <= 0 || model.revision < 0 || model.columns.len <= 0 || model.columns.len > 256 ||
+        virtual_model_error(model.rows) != VirtualListError.none) {
+        return virtual_table_error_result(VirtualTableError.invalid_model, 0 - 1);
+    }
+    let pinned_count: i32 = 0;
+    let seen_unpinned: i32 = 0;
+    let i: i32 = 0;
+    while (i < model.columns.len) {
+        let column: VirtualTableColumn = model.columns.data[i];
+        if (virtual_table_column_valid(column) == 0) {
+            return virtual_table_error_result(VirtualTableError.invalid_column, i);
+        }
+        let j: i32 = 0;
+        while (j < i) {
+            if (model.columns.data[j].id == column.id) {
+                return virtual_table_error_result(VirtualTableError.duplicate_column, i);
+            }
+            j = j + 1;
+        }
+        if (column.pinned != 0) {
+            if (seen_unpinned != 0) {
+                return virtual_table_error_result(VirtualTableError.invalid_pinned_order, i);
+            }
+            pinned_count = pinned_count + 1;
+        } else { seen_unpinned = 1; }
+        i = i + 1;
+    }
+    if (virtual_table_style_valid(style) == 0) {
+        return virtual_table_error_result(VirtualTableError.invalid_style, 0 - 1);
+    }
+    if (viewport.width <= 0 || viewport.height <= 0 ||
+        viewport.width > unbounded_extent() || viewport.height > unbounded_extent() ||
+        viewport.width <= style.padding.left + style.padding.right ||
+        viewport.height <= style.padding.top + style.padding.bottom + style.header_extent) {
+        return virtual_table_error_result(VirtualTableError.invalid_viewport, 0 - 1);
+    }
+    let inner_width: i64 = viewport.width - style.padding.left - style.padding.right;
+    let body_height: i64 = viewport.height - style.padding.top - style.padding.bottom - style.header_extent;
+    let pinned_width: i64 = 0;
+    i = 0;
+    while (i < pinned_count) {
+        pinned_width = pinned_width + model.columns.data[i].width;
+        if (i + 1 < model.columns.len) { pinned_width = pinned_width + style.column_gap; }
+        i = i + 1;
+    }
+    if (pinned_width >= inner_width) {
+        return virtual_table_error_result(VirtualTableError.invalid_viewport, pinned_count - 1);
+    }
+    let scroll_viewport_width: i64 = inner_width - pinned_width;
+    let unpinned_content_width: i64 = 0;
+    i = pinned_count;
+    while (i < model.columns.len) {
+        unpinned_content_width = unpinned_content_width + model.columns.data[i].width;
+        if (i + 1 < model.columns.len) { unpinned_content_width = unpinned_content_width + style.column_gap; }
+        if (unpinned_content_width > unbounded_extent()) {
+            return virtual_table_error_result(VirtualTableError.invalid_column, i);
+        }
+        i = i + 1;
+    }
+    let max_horizontal: i64 = unpinned_content_width - scroll_viewport_width;
+    if (max_horizontal < 0) { max_horizontal = 0; }
+    let horizontal: i64 = clamp_i64(horizontal_scroll, 0, max_horizontal);
+
+    let row_style: VirtualListStyle = virtual_style(VirtualAxis.vertical, insets_all(0));
+    row_style.overscan_before = style.row_overscan_before;
+    row_style.overscan_after = style.row_overscan_after;
+    row_style.max_live_items = 4096;
+    let row_layout: VirtualListResult = virtual_list_layout(
+        model.rows, size(inner_width, body_height), vertical_scroll, row_style
+    );
+    if (row_layout.error != VirtualListError.none) {
+        let error_index: i32 = row_layout.error_index as i32;
+        virtual_free(&row_layout);
+        return virtual_table_error_result(VirtualTableError.row_layout_error, error_index);
+    }
+
+    let visible_columns: ArrayList[i32] = make[i32](model.columns.len);
+    i = 0;
+    while (i < pinned_count) { push[i32](&visible_columns, i); i = i + 1; }
+    let first_scrolling: i32 = 0 - 1;
+    let last_scrolling: i32 = 0 - 1;
+    let logical_offset: i64 = 0;
+    i = pinned_count;
+    while (i < model.columns.len) {
+        let width: i64 = model.columns.data[i].width;
+        if (logical_offset + width > horizontal &&
+            logical_offset < horizontal + scroll_viewport_width) {
+            if (first_scrolling < 0) { first_scrolling = i; }
+            last_scrolling = i;
+        }
+        logical_offset = logical_offset + width;
+        if (i + 1 < model.columns.len) { logical_offset = logical_offset + style.column_gap; }
+        i = i + 1;
+    }
+    let live_column_start: i32 = first_scrolling - style.column_overscan;
+    if (live_column_start < pinned_count) { live_column_start = pinned_count; }
+    let live_column_end: i32 = last_scrolling + style.column_overscan;
+    if (live_column_end >= model.columns.len) { live_column_end = model.columns.len - 1; }
+    if (first_scrolling >= 0) {
+        i = live_column_start;
+        while (i <= live_column_end) { push[i32](&visible_columns, i); i = i + 1; }
+    }
+    let required_cells: i64 = visible_columns.len as i64;
+    required_cells = required_cells * (row_layout.placements.len as i64 + 1);
+    if (required_cells > style.max_live_cells as i64) {
+        free[i32](&visible_columns); virtual_free(&row_layout);
+        return virtual_table_error_result(VirtualTableError.cell_limit_exceeded, required_cells as i32);
+    }
+
+    let column_offsets: ArrayList[i64] = make[i64](model.columns.len);
+    let pinned_cursor: i64 = 0;
+    let unpinned_cursor: i64 = 0;
+    i = 0;
+    while (i < model.columns.len) {
+        if (i < pinned_count) {
+            push[i64](&column_offsets, pinned_cursor);
+            pinned_cursor = pinned_cursor + model.columns.data[i].width + style.column_gap;
+        } else {
+            push[i64](&column_offsets, pinned_width + unpinned_cursor - horizontal);
+            unpinned_cursor = unpinned_cursor + model.columns.data[i].width + style.column_gap;
+        }
+        i = i + 1;
+    }
+
+    let cells: ArrayList[VirtualTableCell] = make[VirtualTableCell](required_cells as i32);
+    i = 0;
+    while (i < visible_columns.len) {
+        let column_index: i32 = visible_columns.data[i];
+        let column: VirtualTableColumn = model.columns.data[column_index];
+        let x: i64 = style.padding.left + column_offsets.data[column_index];
+        if (style.direction == LayoutDirection.rtl) {
+            x = viewport.width - style.padding.right - column_offsets.data[column_index] - column.width;
+        }
+        push[VirtualTableCell](&cells, VirtualTableCell{
+            .id = virtual_table_cell_id(model.id, 0, column.id, 1),
+            .row_id = 0, .column_id = column.id, .row_index = 0 - 1,
+            .column_index = column_index,
+            .frame = rect(x, style.padding.top, column.width, style.header_extent),
+            .header = 1, .pinned = column.pinned,
+            .row_revision = model.revision, .column_revision = column.revision,
+        });
+        let r: i32 = 0;
+        while (r < row_layout.placements.len) {
+            let row: VirtualPlacement = row_layout.placements.data[r];
+            push[VirtualTableCell](&cells, VirtualTableCell{
+                .id = virtual_table_cell_id(model.id, row.id, column.id, 0),
+                .row_id = row.id, .column_id = column.id, .row_index = row.index,
+                .column_index = column_index,
+                .frame = rect(x, style.padding.top + style.header_extent + row.frame.y,
+                    column.width, row.frame.height),
+                .header = 0, .pinned = column.pinned,
+                .row_revision = row.extent_revision, .column_revision = column.revision,
+            });
+            r = r + 1;
+        }
+        i = i + 1;
+    }
+    let content_width: i64 = pinned_width + unpinned_content_width + style.padding.left + style.padding.right;
+    let content_height: i64 = row_layout.content.height + style.header_extent +
+        style.padding.top + style.padding.bottom;
+    let result: VirtualTableResult = VirtualTableResult{
+        .cells = cells, .viewport = viewport, .content = size(content_width, content_height),
+        .vertical_scroll = row_layout.scroll_offset, .horizontal_scroll = horizontal,
+        .max_vertical_scroll = row_layout.max_scroll, .max_horizontal_scroll = max_horizontal,
+        .first_visible_row = row_layout.first_visible, .last_visible_row = row_layout.last_visible,
+        .first_live_row = row_layout.first_live, .last_live_row = row_layout.last_live,
+        .first_visible_column = first_scrolling, .last_visible_column = last_scrolling,
+        .semantic_rows = model.rows.count, .semantic_columns = model.columns.len,
+        .pinned_columns = pinned_count, .layout_hash = virtual_table_mix(row_layout.layout_hash, model.revision),
+        .error = VirtualTableError.none, .error_index = 0 - 1,
+    };
+    i = 0;
+    while (i < result.cells.len) {
+        result.layout_hash = virtual_table_mix(result.layout_hash, result.cells.data[i].id.table_id);
+        result.layout_hash = virtual_table_mix(result.layout_hash, result.cells.data[i].id.row_id);
+        result.layout_hash = virtual_table_mix(result.layout_hash, result.cells.data[i].id.column_id);
+        result.layout_hash = virtual_table_mix(result.layout_hash, result.cells.data[i].id.header as i64);
+        result.layout_hash = virtual_table_mix(result.layout_hash, result.cells.data[i].frame.x);
+        result.layout_hash = virtual_table_mix(result.layout_hash, result.cells.data[i].frame.y);
+        result.layout_hash = virtual_table_mix(result.layout_hash, result.cells.data[i].frame.width);
+        result.layout_hash = virtual_table_mix(result.layout_hash, result.cells.data[i].frame.height);
+        i = i + 1;
+    }
+    free[i64](&column_offsets); free[i32](&visible_columns); virtual_free(&row_layout);
+    return result;
+}

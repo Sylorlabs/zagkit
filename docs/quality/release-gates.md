@@ -49,6 +49,13 @@ fail-closed allocation ceilings, focus restoration, and no linear work per
 scroll frame. A million-row range proof is necessary but does not replace the
 120 Hz reference-hardware and ten-minute stall gates.
 
+Table gates additionally cover two-axis residency, pinned-column occlusion,
+resize bounds, composite cell identity, keyboard grids, and editable-cell
+focus. Tree gates cover expansion, collapse, parent relationships, logical
+indentation, selection, and focus restoration. Recycling cannot transfer a
+logical generation between IDs, and offscreen focused nodes remain protected
+until focus explicitly moves or clears.
+
 Zagkit Talkback conformance drives canonical applications by stable ID and
 checks discovery, query, action, wait, assertion, screenshot, timeline,
 capability, snapshot, and replay behavior. Pixel fallback is separately
