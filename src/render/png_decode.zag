@@ -77,11 +77,24 @@ struct PngTransferCurve {
     valid: i32,
 }
 
+struct PngIccLut {
+    grid_points: i32,
+    input_entries: i32,
+    output_entries: i32,
+    input_tables: ArrayList[i32],
+    clut: ArrayList[i32],
+    output_tables: ArrayList[i32],
+    valid: i32,
+}
+
+struct PngIccLutSample { x: i64, y: i64, z: i64 }
+
 struct PngIccProfileResult {
     transform: PngColorTransform,
     red_curve: PngTransferCurve,
     green_curve: PngTransferCurve,
     blue_curve: PngTransferCurve,
+    lut: PngIccLut,
     valid: i32,
 }
 
@@ -474,10 +487,33 @@ fn png_transfer_curve_free(curve: *PngTransferCurve) void {
     if (curve.*.samples.cap > 0) { free[i64](&curve.*.samples); }
 }
 
+fn png_icc_lut_invalid() PngIccLut {
+    return PngIccLut{
+        .grid_points = 0, .input_entries = 0, .output_entries = 0,
+        .input_tables = ArrayList[i32]{
+            .data = null as *i32, .len = 0, .cap = 0,
+        },
+        .clut = ArrayList[i32]{
+            .data = null as *i32, .len = 0, .cap = 0,
+        },
+        .output_tables = ArrayList[i32]{
+            .data = null as *i32, .len = 0, .cap = 0,
+        },
+        .valid = 0,
+    };
+}
+
+fn png_icc_lut_free(lut: *PngIccLut) void {
+    if (lut.*.input_tables.cap > 0) { free[i32](&lut.*.input_tables); }
+    if (lut.*.clut.cap > 0) { free[i32](&lut.*.clut); }
+    if (lut.*.output_tables.cap > 0) { free[i32](&lut.*.output_tables); }
+}
+
 fn png_icc_profile_free(profile: *PngIccProfileResult) void {
     png_transfer_curve_free(&profile.*.red_curve);
     png_transfer_curve_free(&profile.*.green_curve);
     png_transfer_curve_free(&profile.*.blue_curve);
+    png_icc_lut_free(&profile.*.lut);
 }
 
 fn png_transfer_curve_external() PngTransferCurve {
@@ -566,12 +602,69 @@ fn png_icc_curve(bytes: []u8, tag: PngIccTag) PngTransferCurve {
     return curve;
 }
 
+fn png_icc_lut16(bytes: []u8, tag: PngIccTag) PngIccLut {
+    let lut: PngIccLut = png_icc_lut_invalid();
+    if (tag.valid == 0 || tag.found == 0 || tag.size < 52 ||
+        png_data_is(bytes, tag.offset, "mft2") == 0 ||
+        png_read_u32_be(bytes, tag.offset + 4) != 0 ||
+        bytes[tag.offset + 8] != 3 || bytes[tag.offset + 9] != 3 ||
+        bytes[tag.offset + 11] != 0) { return lut; }
+    let grid: i32 = bytes[tag.offset + 10] as i32;
+    let input_entries: i32 = png_read_u16_be(bytes, tag.offset + 48);
+    let output_entries: i32 = png_read_u16_be(bytes, tag.offset + 50);
+    if (grid < 2 || grid > 33 || input_entries < 2 || input_entries > 4096 ||
+        output_entries < 2 || output_entries > 4096) { return lut; }
+    let matrix_index: i32 = 0;
+    while (matrix_index < 9) {
+        let expected: i64 = 0;
+        if (matrix_index == 0 || matrix_index == 4 || matrix_index == 8) {
+            expected = 65536;
+        }
+        if (png_read_i32_be(bytes, tag.offset + 12 + matrix_index * 4) != expected) {
+            return lut;
+        }
+        matrix_index = matrix_index + 1;
+    }
+    let grid64: i64 = grid as i64;
+    let clut_entries64: i64 = grid64 * grid64 * grid64 * 3;
+    let expected_size: i64 = 52 + (input_entries as i64) * 3 * 2 +
+        clut_entries64 * 2 + (output_entries as i64) * 3 * 2;
+    if (expected_size != tag.size as i64 || clut_entries64 > 107811) {
+        return lut;
+    }
+    lut.input_tables = make[i32](input_entries * 3);
+    lut.clut = make[i32](clut_entries64 as i32);
+    lut.output_tables = make[i32](output_entries * 3);
+    let cursor: i32 = tag.offset + 52;
+    let index: i32 = 0;
+    while (index < input_entries * 3) {
+        push[i32](&lut.input_tables, png_read_u16_be(bytes, cursor));
+        cursor = cursor + 2; index = index + 1;
+    }
+    index = 0;
+    while (index < clut_entries64 as i32) {
+        push[i32](&lut.clut, png_read_u16_be(bytes, cursor));
+        cursor = cursor + 2; index = index + 1;
+    }
+    index = 0;
+    while (index < output_entries * 3) {
+        push[i32](&lut.output_tables, png_read_u16_be(bytes, cursor));
+        cursor = cursor + 2; index = index + 1;
+    }
+    lut.grid_points = grid;
+    lut.input_entries = input_entries;
+    lut.output_entries = output_entries;
+    lut.valid = 1;
+    return lut;
+}
+
 fn png_icc_matrix_profile(bytes: []u8) PngIccProfileResult {
     let result: PngIccProfileResult = PngIccProfileResult{
         .transform = png_color_transform_identity(),
         .red_curve = png_transfer_curve_invalid(),
         .green_curve = png_transfer_curve_invalid(),
-        .blue_curve = png_transfer_curve_invalid(), .valid = 0,
+        .blue_curve = png_transfer_curve_invalid(),
+        .lut = png_icc_lut_invalid(), .valid = 0,
     };
     if (bytes.len < 132 || bytes.len > 4194304 ||
         png_read_u32_be(bytes, 0) != bytes.len as i64 ||
@@ -595,6 +688,36 @@ fn png_icc_matrix_profile(bytes: []u8) PngIccProfileResult {
     if (png_f64_abs(illuminant.x - 0.9642) > 0.001 ||
         png_f64_abs(illuminant.y - 1.0) > 0.001 ||
         png_f64_abs(illuminant.z - 0.8249) > 0.001) { return result; }
+    let lut_tag: PngIccTag = png_icc_tag(bytes, "A2B0");
+    if (lut_tag.valid == 0) { return result; }
+    if (lut_tag.found != 0) {
+        if (png_read_u32_be(bytes, 64) != 0) { return result; }
+        let lut: PngIccLut = png_icc_lut16(bytes, lut_tag);
+        if (lut.valid == 0) { return result; }
+        let target: PngMatrixF64 = PngMatrixF64{
+            .m00 = 0.4360747, .m01 = 0.3850649, .m02 = 0.1430804,
+            .m10 = 0.2225045, .m11 = 0.7168786, .m12 = 0.0606169,
+            .m20 = 0.0139322, .m21 = 0.0971045, .m22 = 0.7141733,
+        };
+        let target_inverse: PngMatrixF64Result = png_matrix_inverse(target);
+        if (target_inverse.valid == 0 ||
+            png_matrix_finite_bounded(target_inverse.matrix, 8.0) == 0) {
+            png_icc_lut_free(&lut); return result;
+        }
+        result.transform = PngColorTransform{
+            .m00 = png_quantize_matrix_value(target_inverse.matrix.m00),
+            .m01 = png_quantize_matrix_value(target_inverse.matrix.m01),
+            .m02 = png_quantize_matrix_value(target_inverse.matrix.m02),
+            .m10 = png_quantize_matrix_value(target_inverse.matrix.m10),
+            .m11 = png_quantize_matrix_value(target_inverse.matrix.m11),
+            .m12 = png_quantize_matrix_value(target_inverse.matrix.m12),
+            .m20 = png_quantize_matrix_value(target_inverse.matrix.m20),
+            .m21 = png_quantize_matrix_value(target_inverse.matrix.m21),
+            .m22 = png_quantize_matrix_value(target_inverse.matrix.m22),
+            .active = 1, .valid = 1,
+        };
+        result.lut = lut; result.valid = 1; return result;
+    }
     let red_xyz: PngIccVectorResult = png_icc_xyz(bytes, png_icc_tag(bytes, "rXYZ"));
     let green_xyz: PngIccVectorResult = png_icc_xyz(bytes, png_icc_tag(bytes, "gXYZ"));
     let blue_xyz: PngIccVectorResult = png_icc_xyz(bytes, png_icc_tag(bytes, "bXYZ"));
@@ -666,7 +789,8 @@ fn png_iccp_profile(bytes: []u8, offset: i32,
         .transform = png_color_transform_identity(),
         .red_curve = png_transfer_curve_invalid(),
         .green_curve = png_transfer_curve_invalid(),
-        .blue_curve = png_transfer_curve_invalid(), .valid = 0,
+        .blue_curve = png_transfer_curve_invalid(),
+        .lut = png_icc_lut_invalid(), .valid = 0,
     };
     if (length < 9) { return result; }
     let name_end: i32 = offset;
@@ -1124,19 +1248,119 @@ fn png_transform_linear_channel(a: i64, b: i64, c: i64,
     return (a * red + b * green + c * blue) / 16777216;
 }
 
+fn png_icc_lerp_u16(lower: i64, upper: i64, remainder: i64,
+    denominator: i64) i64 {
+    return (lower * (denominator - remainder) + upper * remainder +
+        denominator / 2) / denominator;
+}
+
+fn png_icc_table_sample(table: ArrayList[i32], channel: i32,
+    entries: i32, value: i64) i64 {
+    let scaled: i64 = value * ((entries - 1) as i64);
+    let lower: i32 = (scaled / 65535) as i32;
+    let remainder: i64 = scaled % 65535;
+    let upper: i32 = lower + (lower + 1 < entries) as i32;
+    let offset: i32 = channel * entries;
+    return png_icc_lerp_u16(table.data[offset + lower] as i64,
+        table.data[offset + upper] as i64, remainder, 65535);
+}
+
+fn png_icc_clut_value(lut: PngIccLut, red: i32, green: i32,
+    blue: i32, channel: i32) i64 {
+    let index: i32 = ((red * lut.grid_points + green) * lut.grid_points +
+        blue) * 3 + channel;
+    return lut.clut.data[index] as i64;
+}
+
+fn png_icc_clut_channel(lut: PngIccLut, red: i64, green: i64,
+    blue: i64, channel: i32) i64 {
+    let scale: i64 = (lut.grid_points - 1) as i64;
+    let red_scaled: i64 = red * scale;
+    let green_scaled: i64 = green * scale;
+    let blue_scaled: i64 = blue * scale;
+    let red_lower: i32 = (red_scaled / 65535) as i32;
+    let green_lower: i32 = (green_scaled / 65535) as i32;
+    let blue_lower: i32 = (blue_scaled / 65535) as i32;
+    let red_upper: i32 = red_lower +
+        (red_lower + 1 < lut.grid_points) as i32;
+    let green_upper: i32 = green_lower +
+        (green_lower + 1 < lut.grid_points) as i32;
+    let blue_upper: i32 = blue_lower +
+        (blue_lower + 1 < lut.grid_points) as i32;
+    let blue00: i64 = png_icc_lerp_u16(
+        png_icc_clut_value(lut, red_lower, green_lower, blue_lower, channel),
+        png_icc_clut_value(lut, red_lower, green_lower, blue_upper, channel),
+        blue_scaled % 65535, 65535
+    );
+    let blue01: i64 = png_icc_lerp_u16(
+        png_icc_clut_value(lut, red_lower, green_upper, blue_lower, channel),
+        png_icc_clut_value(lut, red_lower, green_upper, blue_upper, channel),
+        blue_scaled % 65535, 65535
+    );
+    let blue10: i64 = png_icc_lerp_u16(
+        png_icc_clut_value(lut, red_upper, green_lower, blue_lower, channel),
+        png_icc_clut_value(lut, red_upper, green_lower, blue_upper, channel),
+        blue_scaled % 65535, 65535
+    );
+    let blue11: i64 = png_icc_lerp_u16(
+        png_icc_clut_value(lut, red_upper, green_upper, blue_lower, channel),
+        png_icc_clut_value(lut, red_upper, green_upper, blue_upper, channel),
+        blue_scaled % 65535, 65535
+    );
+    let green0: i64 = png_icc_lerp_u16(
+        blue00, blue01, green_scaled % 65535, 65535
+    );
+    let green1: i64 = png_icc_lerp_u16(
+        blue10, blue11, green_scaled % 65535, 65535
+    );
+    return png_icc_lerp_u16(
+        green0, green1, red_scaled % 65535, 65535
+    );
+}
+
+fn png_icc_lut_sample(lut: PngIccLut, red: u8, green: u8,
+    blue: u8) PngIccLutSample {
+    let input_red: i64 = png_icc_table_sample(
+        lut.input_tables, 0, lut.input_entries, (red as i64) * 257
+    );
+    let input_green: i64 = png_icc_table_sample(
+        lut.input_tables, 1, lut.input_entries, (green as i64) * 257
+    );
+    let input_blue: i64 = png_icc_table_sample(
+        lut.input_tables, 2, lut.input_entries, (blue as i64) * 257
+    );
+    let pcs_x: i64 = png_icc_table_sample(
+        lut.output_tables, 0, lut.output_entries,
+        png_icc_clut_channel(lut, input_red, input_green, input_blue, 0)
+    );
+    let pcs_y: i64 = png_icc_table_sample(
+        lut.output_tables, 1, lut.output_entries,
+        png_icc_clut_channel(lut, input_red, input_green, input_blue, 1)
+    );
+    let pcs_z: i64 = png_icc_table_sample(
+        lut.output_tables, 2, lut.output_entries,
+        png_icc_clut_channel(lut, input_red, input_green, input_blue, 2)
+    );
+    return PngIccLutSample{
+        .x = (pcs_x * 1073741824 + 16384) / 32768,
+        .y = (pcs_y * 1073741824 + 16384) / 32768,
+        .z = (pcs_z * 1073741824 + 16384) / 32768,
+    };
+}
+
 fn png_expand_rgba(raw: []u8, width: i32, height: i32, row_bytes: i32,
     bit_depth: i32, color_type: i32, palette: ArrayList[u8],
     transparency: ArrayList[u8], source_gamma: i64,
     color_transform: PngColorTransform,
     red_curve: PngTransferCurve, green_curve: PngTransferCurve,
-    blue_curve: PngTransferCurve,
+    blue_curve: PngTransferCurve, lut: PngIccLut,
     profile_assumed: i32) PngDecodeResult {
     let pixels: ArrayList[u8] = make[u8](width * height * 4);
     let gamma_table: ArrayList[u8] = make[u8](256);
     let red_linear: ArrayList[i64] = make[i64](256);
     let green_linear: ArrayList[i64] = make[i64](256);
     let blue_linear: ArrayList[i64] = make[i64](256);
-    if (color_transform.active != 0) {
+    if (color_transform.active != 0 && lut.valid == 0) {
         let linear_sample: i32 = 0;
         while (linear_sample < 256) {
             push[i64](&red_linear, png_transfer_sample_to_linear_q30(
@@ -1219,7 +1443,23 @@ fn png_expand_rgba(raw: []u8, width: i32, height: i32, row_bytes: i32,
                 blue = png_sample_u8(png_sample(row, x * 4 + 2, bit_depth), bit_depth);
                 alpha = png_sample_u8(png_sample(row, x * 4 + 3, bit_depth), bit_depth);
             }
-            if (red_linear.len == 256) {
+            if (lut.valid != 0) {
+                let pcs: PngIccLutSample = png_icc_lut_sample(
+                    lut, red, green, blue
+                );
+                red = png_linear_q30_to_srgb(png_transform_linear_channel(
+                    color_transform.m00, color_transform.m01, color_transform.m02,
+                    pcs.x, pcs.y, pcs.z
+                ));
+                green = png_linear_q30_to_srgb(png_transform_linear_channel(
+                    color_transform.m10, color_transform.m11, color_transform.m12,
+                    pcs.x, pcs.y, pcs.z
+                ));
+                blue = png_linear_q30_to_srgb(png_transform_linear_channel(
+                    color_transform.m20, color_transform.m21, color_transform.m22,
+                    pcs.x, pcs.y, pcs.z
+                ));
+            } else if (red_linear.len == 256) {
                 let linear_red: i64 = red_linear.data[red as i32];
                 let linear_green: i64 = green_linear.data[green as i32];
                 let linear_blue: i64 = blue_linear.data[blue as i32];
@@ -1521,7 +1761,8 @@ fn png_decode(bytes: []u8) PngDecodeResult {
         .transform = png_color_transform_identity(),
         .red_curve = png_transfer_curve_invalid(),
         .green_curve = png_transfer_curve_invalid(),
-        .blue_curve = png_transfer_curve_invalid(), .valid = 0,
+        .blue_curve = png_transfer_curve_invalid(),
+        .lut = png_icc_lut_invalid(), .valid = 0,
     };
     if (saw_icc != 0) {
         icc_profile = png_iccp_profile(bytes, icc_data_offset, icc_data_length);
@@ -1576,7 +1817,7 @@ fn png_decode(bytes: []u8) PngDecodeResult {
         scanlines.bytes.data[0..scanlines.bytes.len], width, height,
         row_bytes64 as i32, bit_depth, color_type, palette, transparency,
         conversion_gamma, effective_transform, effective_red_curve,
-        effective_green_curve, effective_blue_curve,
+        effective_green_curve, effective_blue_curve, icc_profile.lut,
         (saw_srgb == 0 && saw_icc == 0 &&
             !(source_gamma != 0 && saw_chrm != 0)) as i32
     );

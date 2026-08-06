@@ -65,7 +65,7 @@ compiled architectures.
 An `iCCP` wrapper must provide a valid 1-to-79-byte PNG profile name, compression
 method zero, and one independently bounded zlib stream. The decompressed ICC
 profile is limited to 4 MiB and must be an ICC v2 or v4 scanner/display RGB
-matrix profile using XYZ PCS and the D50 PCS illuminant. Zagkit validates the
+profile using XYZ PCS and the D50 PCS illuminant. Zagkit validates the
 declared profile size, header signature, reserved header bytes, rendering intent,
 bounded aligned tag table, unique required tags, XYZ tag types, and transfer
 curve types before executing it. The current executable subset accepts the six
@@ -77,6 +77,20 @@ function executes from bounded fixed-point coefficients and clips to its declare
 undefined or unsafe coefficient domains fail before pixels are touched. Matrix
 columns are converted
 from D50 PCS into linear sRGB, then encoded through the canonical sRGB transfer.
+
+The first LUT subset accepts an `A2B0` `lut16Type` with exactly three RGB input
+and three PCSXYZ output channels when the profile header selects perceptual
+rendering. It does not substitute `A2B0` for another intent. Its matrix must be
+the ICC-mandated identity matrix for non-PCS input. Each input and output table
+has 2 to 4,096 entries;
+the three-dimensional CLUT has 2 to 33 grid points per axis. The tag must end at
+the exact computed table boundary before Zagkit allocates owned tables. Pixels
+execute through input-table interpolation, fixed-point trilinear CLUT
+interpolation, output-table interpolation, PCSXYZ decoding, and the D50-to-sRGB
+matrix in that declared order. This supports high-precision LUT16 profiles
+without assigning an implementation-specific meaning to ambiguous 8-bit
+PCSXYZ LUTs.
+
 An understood `iCCP` profile takes precedence over compatibility `sRGB`, `gAMA`,
 and `cHRM` chunks. The result records declared rather than assumed profile truth.
 
@@ -92,17 +106,18 @@ headless scale evidence, not native compositor or monitor evidence.
 The strict deterministic fuzz gate decodes 20,000 arbitrary byte streams,
 20,000 structured mutations of a valid PNG, 20,000 arbitrary decompressed ICC
 profiles, every strict seed prefix, 4,096 general decode/free repetitions, and
-4,096 sampled-profile parse/decode/free repetitions on both
+4,096 sampled-profile plus 4,096 LUT16 parse/decode/free repetitions on both
 x86-64 and ARM64. Every result must preserve success or failure ownership
 invariants. Coverage-guided sanitizer campaigns
 and a larger published malformed corpus remain additional required evidence.
 
 Dimension, encoded-data, decompressed-scanline, output-pixel, palette-index,
 filter, color-matrix, ICC inflate, ICC tag-table, and arithmetic limits fail
-before out-of-bounds access. Monochrome profiles, LUT profiles, device-link profiles, and
-unsupported `cICP` metadata fail as unsupported color profiles. Unknown interlace
-methods fail before decompression. These paths keep `G3-PNG` open until ICC LUT
-execution plus coverage-guided malformed-input evidence land.
+before out-of-bounds access. Monochrome profiles, device-link profiles, Lab PCS,
+`lutAToBType`, and ambiguous `lut8Type` with PCSXYZ, plus unsupported `cICP`
+metadata, fail as unsupported color profiles. Unknown interlace methods fail
+before decompression. These paths keep `G3-PNG` open until the remaining ICC
+transform families and coverage-guided malformed-input evidence land.
 
 Linear-light filtering, wide-gamut output surfaces, mipmapping,
 high-quality downsampling, image tiling, and GPU upload caches also remain

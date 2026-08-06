@@ -207,6 +207,12 @@ fn fixture_write_signature(bytes: *ArrayList[u8], offset: i32,
     while (i < 4) { bytes.*.data[offset + i] = signature[i]; i = i + 1; }
 }
 
+fn fixture_write_u16_be(bytes: *ArrayList[u8], offset: i32,
+    value: i32) void {
+    bytes.*.data[offset] = ((value >> 8) & 255) as u8;
+    bytes.*.data[offset + 1] = (value & 255) as u8;
+}
+
 fn fixture_icc_tag(bytes: *ArrayList[u8], entry: i32, signature: []u8,
     data_offset: i32, data_size: i32) void {
     fixture_write_signature(bytes, entry, signature);
@@ -337,6 +343,72 @@ fn fixture_matrix_icc(kind: i32) ArrayList[u8] {
     return bytes;
 }
 
+fn fixture_lut16_icc(kind: i32) ArrayList[u8] {
+    let bytes: ArrayList[u8] = make[u8](268);
+    let i: i32 = 0;
+    while (i < 268) { push[u8](&bytes, 0); i = i + 1; }
+    fixture_write_u32_be(&bytes, 0, 268);
+    bytes.data[8] = 4;
+    fixture_write_signature(&bytes, 12, "mntr");
+    fixture_write_signature(&bytes, 16, "RGB ");
+    fixture_write_signature(&bytes, 20, "XYZ ");
+    fixture_write_signature(&bytes, 36, "acsp");
+    fixture_write_u32_be(&bytes, 68, 63190);
+    fixture_write_u32_be(&bytes, 72, 65536);
+    fixture_write_u32_be(&bytes, 76, 54061);
+    fixture_write_u32_be(&bytes, 128, 1);
+    fixture_icc_tag(&bytes, 132, "A2B0", 144, 124);
+    fixture_write_signature(&bytes, 144, "mft2");
+    bytes.data[152] = 3; bytes.data[153] = 3; bytes.data[154] = 2;
+    fixture_write_u32_be(&bytes, 156, 65536);
+    fixture_write_u32_be(&bytes, 172, 65536);
+    fixture_write_u32_be(&bytes, 188, 65536);
+    fixture_write_u16_be(&bytes, 192, 2);
+    fixture_write_u16_be(&bytes, 194, 2);
+    let input_offset: i32 = 196;
+    let channel: i32 = 0;
+    while (channel < 3) {
+        fixture_write_u16_be(&bytes, input_offset + channel * 4, 0);
+        fixture_write_u16_be(&bytes, input_offset + channel * 4 + 2, 65535);
+        channel = channel + 1;
+    }
+    let clut_offset: i32 = 208;
+    let red: i32 = 0;
+    let clut_index: i32 = 0;
+    while (red < 2) {
+        let green: i32 = 0;
+        while (green < 2) {
+            let blue: i32 = 0;
+            while (blue < 2) {
+                fixture_write_u16_be(&bytes, clut_offset + clut_index * 2,
+                    red * 14289 + green * 12618 + blue * 4688);
+                fixture_write_u16_be(&bytes, clut_offset + clut_index * 2 + 2,
+                    red * 7291 + green * 23491 + blue * 1986);
+                fixture_write_u16_be(&bytes, clut_offset + clut_index * 2 + 4,
+                    red * 457 + green * 3182 + blue * 23402);
+                clut_index = clut_index + 3;
+                blue = blue + 1;
+            }
+            green = green + 1;
+        }
+        red = red + 1;
+    }
+    let output_offset: i32 = 256;
+    channel = 0;
+    while (channel < 3) {
+        fixture_write_u16_be(&bytes, output_offset + channel * 4, 0);
+        fixture_write_u16_be(&bytes, output_offset + channel * 4 + 2, 65535);
+        channel = channel + 1;
+    }
+    if (kind == 22) { bytes.data[154] = 34; }
+    if (kind == 23) { fixture_write_u32_be(&bytes, 160, 1); }
+    if (kind == 24) { fixture_write_signature(&bytes, 144, "mft1"); }
+    if (kind == 25) { fixture_write_u32_be(&bytes, 140, 122); }
+    if (kind == 26) { fixture_write_u16_be(&bytes, 192, 1); }
+    if (kind == 27) { fixture_write_u32_be(&bytes, 64, 1); }
+    return bytes;
+}
+
 fn fixture_profile_png(gamma_count: i32, chromaticity_kind: i32,
     gamma_value: i64, include_srgb: i32, icc_kind: i32) PngEncodeResult {
     let compressed: ZlibStoreEncodeResult = zlib_store_encode("\x00\x11\x22\x33\xff");
@@ -364,6 +436,9 @@ fn fixture_profile_png(gamma_count: i32, chromaticity_kind: i32,
         png_write_chunk(&output, "cICP", "\x01\x0d\x00\x01");
     } else if (icc_kind != 0) {
         let profile: ArrayList[u8] = fixture_matrix_icc(icc_kind);
+        if (icc_kind >= 21) {
+            free[u8](&profile); profile = fixture_lut16_icc(icc_kind);
+        }
         let compressed_profile: ZlibStoreEncodeResult = zlib_store_encode(
             profile.data[0..profile.len]
         );
@@ -767,6 +842,96 @@ fn color_profile_contract(state: *TestState) void {
     expect(state, sampled_repeat_valid != 0 && sampled_repeat == 4096,
         "4096 sampled ICC parse decode and cleanup cycles preserve exact output");
     png_encode_free(&sampled_fixture);
+
+    let lut16_fixture: PngEncodeResult = fixture_profile_png(0, 0, 0, 0, 21);
+    let lut16: PngDecodeResult = png_decode(
+        lut16_fixture.bytes.data[0..lut16_fixture.bytes.len]
+    );
+    expect(state, lut16.error == PngDecodeError.none &&
+        lut16.profile_assumed == 0 && lut16.pixels.data[0] == 73 &&
+        lut16.pixels.data[1] == 102 && lut16.pixels.data[2] == 124,
+        "ICC lut16 input tables CLUT and output tables execute in declared order");
+    png_decode_free(&lut16);
+    let lut16_repeat_valid: i32 = 1;
+    let lut16_repeat: i32 = 0;
+    while (lut16_repeat < 4096 && lut16_repeat_valid != 0) {
+        let repeated_lut16: PngDecodeResult = png_decode(
+            lut16_fixture.bytes.data[0..lut16_fixture.bytes.len]
+        );
+        if (repeated_lut16.error != PngDecodeError.none ||
+            repeated_lut16.pixels.data[0] != 73 ||
+            repeated_lut16.pixels.data[1] != 102 ||
+            repeated_lut16.pixels.data[2] != 124) {
+            lut16_repeat_valid = 0;
+        }
+        png_decode_free(&repeated_lut16);
+        lut16_repeat = lut16_repeat + 1;
+    }
+    expect(state, lut16_repeat_valid != 0 && lut16_repeat == 4096,
+        "4096 ICC lut16 parse decode and cleanup cycles preserve exact output");
+    png_encode_free(&lut16_fixture);
+
+    let bad_lut_grid_fixture: PngEncodeResult = fixture_profile_png(
+        0, 0, 0, 0, 22
+    );
+    let bad_lut_grid: PngDecodeResult = png_decode(
+        bad_lut_grid_fixture.bytes.data[0..bad_lut_grid_fixture.bytes.len]
+    );
+    expect(state, bad_lut_grid.error == PngDecodeError.unsupported_color_profile,
+        "ICC lut16 grids above the bounded three dimensional ceiling fail closed");
+    png_decode_free(&bad_lut_grid); png_encode_free(&bad_lut_grid_fixture);
+
+    let bad_lut_matrix_fixture: PngEncodeResult = fixture_profile_png(
+        0, 0, 0, 0, 23
+    );
+    let bad_lut_matrix: PngDecodeResult = png_decode(
+        bad_lut_matrix_fixture.bytes.data[0..bad_lut_matrix_fixture.bytes.len]
+    );
+    expect(state, bad_lut_matrix.error == PngDecodeError.unsupported_color_profile,
+        "RGB to PCS lut16 profiles require the ICC mandated identity matrix");
+    png_decode_free(&bad_lut_matrix); png_encode_free(&bad_lut_matrix_fixture);
+
+    let ambiguous_lut8_fixture: PngEncodeResult = fixture_profile_png(
+        0, 0, 0, 0, 24
+    );
+    let ambiguous_lut8: PngDecodeResult = png_decode(
+        ambiguous_lut8_fixture.bytes.data[0..ambiguous_lut8_fixture.bytes.len]
+    );
+    expect(state, ambiguous_lut8.error == PngDecodeError.unsupported_color_profile,
+        "ambiguous lut8 PCSXYZ profiles remain an explicit unsupported path");
+    png_decode_free(&ambiguous_lut8); png_encode_free(&ambiguous_lut8_fixture);
+
+    let truncated_lut_fixture: PngEncodeResult = fixture_profile_png(
+        0, 0, 0, 0, 25
+    );
+    let truncated_lut: PngDecodeResult = png_decode(
+        truncated_lut_fixture.bytes.data[0..truncated_lut_fixture.bytes.len]
+    );
+    expect(state, truncated_lut.error == PngDecodeError.unsupported_color_profile,
+        "ICC lut16 tables must consume exactly their declared bounded tag");
+    png_decode_free(&truncated_lut); png_encode_free(&truncated_lut_fixture);
+
+    let short_lut_table_fixture: PngEncodeResult = fixture_profile_png(
+        0, 0, 0, 0, 26
+    );
+    let short_lut_table: PngDecodeResult = png_decode(
+        short_lut_table_fixture.bytes.data[0..short_lut_table_fixture.bytes.len]
+    );
+    expect(state, short_lut_table.error == PngDecodeError.unsupported_color_profile,
+        "ICC lut16 one dimensional tables require at least two entries");
+    png_decode_free(&short_lut_table); png_encode_free(&short_lut_table_fixture);
+
+    let wrong_lut_intent_fixture: PngEncodeResult = fixture_profile_png(
+        0, 0, 0, 0, 27
+    );
+    let wrong_lut_intent: PngDecodeResult = png_decode(
+        wrong_lut_intent_fixture.bytes.data[0..wrong_lut_intent_fixture.bytes.len]
+    );
+    expect(state,
+        wrong_lut_intent.error == PngDecodeError.unsupported_color_profile,
+        "A2B0 LUT execution cannot impersonate a non-perceptual rendering intent");
+    png_decode_free(&wrong_lut_intent);
+    png_encode_free(&wrong_lut_intent_fixture);
 
     let oversized_curve_fixture: PngEncodeResult = fixture_profile_png(
         0, 0, 0, 0, 19

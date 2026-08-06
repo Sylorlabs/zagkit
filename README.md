@@ -187,11 +187,12 @@ Bradford white-point adaptation; eight full transfer ramps and Display P3/D50
 fixtures match independent references. Bounded `iCCP` ingestion executes ICC
 v2/v4 RGB matrix profiles in XYZ PCS with shared identity, gamma, or ICC
 parametric curve types 0 through 4 or sampled curves of up to 4,096 entries per
-channel. Sampled tables are deterministically resampled to every RGBA8 input code;
-malformed wrappers, profile bounds, and LUT profiles fail explicitly. A
-deterministic 60,000-input PNG/ICC validation harness plus 4,096 general and
-4,096 sampled-profile cleanup cycles passes on both architectures. ICC LUT
-execution and coverage-guided sanitizer evidence remain open, so the `G3-PNG`
+channel. It also executes bounded RGB-to-XYZ `A2B0` `lut16Type` profiles with
+owned input tables, a trilinearly interpolated 3D CLUT, and output tables.
+Malformed wrappers and profile or table bounds fail explicitly. A deterministic
+60,000-input PNG/ICC validation harness plus 4,096 general, sampled-profile, and
+LUT16 cleanup cycles passes on both architectures. `lutAToBType`, Lab PCS, and
+coverage-guided sanitizer evidence remain open, so the `G3-PNG`
 completion box remains deliberately unchecked. See the
 [image and PNG ingestion contract](docs/architecture/images.md).
 

@@ -120,13 +120,31 @@ fn icc_profile_contract(state: *FuzzState) void {
             bytes.data[0..bytes.len]
         );
         if ((profile.valid != 0 && profile.valid != 1) ||
+            (profile.lut.valid != 0 && profile.lut.valid != 1) ||
             (profile.valid != 0 && (profile.transform.valid == 0 ||
                 profile.transform.active == 0 ||
-                profile.red_curve.valid == 0 || profile.green_curve.valid == 0 ||
-                profile.blue_curve.valid == 0 ||
-                profile.red_curve.kind < 1 || profile.red_curve.kind > 6 ||
-                profile.green_curve.kind < 1 || profile.green_curve.kind > 6 ||
-                profile.blue_curve.kind < 1 || profile.blue_curve.kind > 6))) {
+                (profile.lut.valid == 0 && (
+                    profile.red_curve.valid == 0 ||
+                    profile.green_curve.valid == 0 ||
+                    profile.blue_curve.valid == 0 ||
+                    profile.red_curve.kind < 1 || profile.red_curve.kind > 6 ||
+                    profile.green_curve.kind < 1 ||
+                    profile.green_curve.kind > 6 ||
+                    profile.blue_curve.kind < 1 ||
+                    profile.blue_curve.kind > 6)) ||
+                (profile.lut.valid != 0 && (
+                    profile.lut.grid_points < 2 ||
+                    profile.lut.grid_points > 33 ||
+                    profile.lut.input_entries < 2 ||
+                    profile.lut.input_entries > 4096 ||
+                    profile.lut.output_entries < 2 ||
+                    profile.lut.output_entries > 4096 ||
+                    profile.lut.input_tables.len !=
+                        profile.lut.input_entries * 3 ||
+                    profile.lut.clut.len != profile.lut.grid_points *
+                        profile.lut.grid_points * profile.lut.grid_points * 3 ||
+                    profile.lut.output_tables.len !=
+                        profile.lut.output_entries * 3))))) {
             valid = 0;
         }
         png_icc_profile_free(&profile);
