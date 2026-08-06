@@ -373,10 +373,121 @@ fn png_sample_u8(sample: i32, bit_depth: i32) u8 {
     return sample as u8;
 }
 
+fn png_q30_one() i64 { return 1073741824; }
+fn png_q20_one() i64 { return 1048576; }
+
+fn png_mul_q30(left: i64, right: i64) i64 {
+    return (left * right + png_q30_one() / 2) / png_q30_one();
+}
+
+fn png_exp2_factor(index: i32) i64 {
+    if (index == 1) { return 1518500250; }
+    if (index == 2) { return 1276901417; }
+    if (index == 3) { return 1170923762; }
+    if (index == 4) { return 1121280436; }
+    if (index == 5) { return 1097253708; }
+    if (index == 6) { return 1085434106; }
+    if (index == 7) { return 1079572136; }
+    if (index == 8) { return 1076653033; }
+    if (index == 9) { return 1075196443; }
+    if (index == 10) { return 1074468888; }
+    if (index == 11) { return 1074105294; }
+    if (index == 12) { return 1073923544; }
+    if (index == 13) { return 1073832680; }
+    if (index == 14) { return 1073787251; }
+    if (index == 15) { return 1073764537; }
+    if (index == 16) { return 1073753181; }
+    if (index == 17) { return 1073747502; }
+    if (index == 18) { return 1073744663; }
+    if (index == 19) { return 1073743244; }
+    return 1073742534;
+}
+
+fn png_log2_q20(value: i64) i64 {
+    if (value <= 0) { return 0 - (64 * png_q20_one()); }
+    let normalized: i64 = value;
+    let integer: i64 = 0;
+    while (normalized < png_q30_one()) {
+        normalized = normalized * 2; integer = integer - 1;
+    }
+    let fraction: i64 = 0;
+    let index: i32 = 1;
+    while (index <= 20) {
+        normalized = png_mul_q30(normalized, normalized);
+        if (normalized >= 2 * png_q30_one()) {
+            normalized = normalized / 2;
+            fraction = fraction | (1 << (20 - index)) as i64;
+        }
+        index = index + 1;
+    }
+    return integer * png_q20_one() + fraction;
+}
+
+fn png_exp2_q30(value: i64) i64 {
+    let integer: i64 = value / png_q20_one();
+    let fraction: i64 = value % png_q20_one();
+    if (fraction < 0) {
+        fraction = fraction + png_q20_one(); integer = integer - 1;
+    }
+    let result: i64 = png_q30_one();
+    let index: i32 = 1;
+    while (index <= 20) {
+        if ((fraction & (1 << (20 - index)) as i64) != 0) {
+            result = png_mul_q30(result, png_exp2_factor(index));
+        }
+        index = index + 1;
+    }
+    if (integer < 0) {
+        let shift: i64 = 0 - integer;
+        if (shift >= 31) { return 0; }
+        return result >> shift;
+    }
+    if (integer > 0) {
+        if (integer >= 31) { return 2147483647; }
+        return result << integer;
+    }
+    return result;
+}
+
+fn png_pow_q30(value: i64, exponent_q20: i64) i64 {
+    if (value <= 0) { return 0; }
+    if (value >= png_q30_one()) { return png_q30_one(); }
+    return png_exp2_q30((png_log2_q20(value) * exponent_q20) /
+        png_q20_one());
+}
+
+fn png_gamma_sample_to_srgb(sample: u8, gamma: i64) u8 {
+    if (sample == 0 || gamma <= 0) { return 0; }
+    if (sample == 255) { return 255; }
+    let encoded: i64 = ((sample as i64) * png_q30_one() + 127) / 255;
+    let decode_exponent: i64 = (100000 * png_q20_one() + gamma / 2) / gamma;
+    let linear: i64 = png_pow_q30(encoded, decode_exponent);
+    let srgb: i64 = 0;
+    if (linear <= 3361671) {
+        srgb = (linear * 1292 + 50) / 100;
+    } else {
+        let encoded_root: i64 = png_pow_q30(linear, 436907);
+        srgb = png_mul_q30(encoded_root, 1132797624) - 59055800;
+    }
+    if (srgb <= 0) { return 0; }
+    if (srgb >= png_q30_one()) { return 255; }
+    return ((srgb * 255 + png_q30_one() / 2) / png_q30_one()) as u8;
+}
+
 fn png_expand_rgba(raw: []u8, width: i32, height: i32, row_bytes: i32,
     bit_depth: i32, color_type: i32, palette: ArrayList[u8],
-    transparency: ArrayList[u8], profile_assumed: i32) PngDecodeResult {
+    transparency: ArrayList[u8], source_gamma: i64,
+    profile_assumed: i32) PngDecodeResult {
     let pixels: ArrayList[u8] = make[u8](width * height * 4);
+    let gamma_table: ArrayList[u8] = make[u8](256);
+    if (source_gamma != 0) {
+        let gamma_sample: i32 = 0;
+        while (gamma_sample < 256) {
+            push[u8](&gamma_table,
+                png_gamma_sample_to_srgb(gamma_sample as u8, source_gamma));
+            gamma_sample = gamma_sample + 1;
+        }
+    }
     let transparent_gray: i32 = 0 - 1;
     let transparent_red: i32 = 0 - 1;
     let transparent_green: i32 = 0 - 1;
@@ -417,7 +528,7 @@ fn png_expand_rgba(raw: []u8, width: i32, height: i32, row_bytes: i32,
             } else if (color_type == 3) {
                 let index: i32 = png_sample(row, x, bit_depth);
                 if (index * 3 + 2 >= palette.len) {
-                    free[u8](&pixels);
+                    free[u8](&gamma_table); free[u8](&pixels);
                     return png_decode_fail(PngDecodeError.palette_index,
                         (y * width + x) as i64);
                 }
@@ -436,12 +547,18 @@ fn png_expand_rgba(raw: []u8, width: i32, height: i32, row_bytes: i32,
                 blue = png_sample_u8(png_sample(row, x * 4 + 2, bit_depth), bit_depth);
                 alpha = png_sample_u8(png_sample(row, x * 4 + 3, bit_depth), bit_depth);
             }
+            if (gamma_table.len == 256) {
+                red = gamma_table.data[red as i32];
+                green = gamma_table.data[green as i32];
+                blue = gamma_table.data[blue as i32];
+            }
             push[u8](&pixels, red); push[u8](&pixels, green);
             push[u8](&pixels, blue); push[u8](&pixels, alpha);
             x = x + 1;
         }
         y = y + 1;
     }
+    free[u8](&gamma_table);
     return PngDecodeResult{
         .pixels = pixels, .width = width, .height = height,
         .color_space = RenderColorSpace.srgb,
@@ -476,6 +593,7 @@ fn png_decode(bytes: []u8) PngDecodeResult {
     let saw_srgb: i32 = 0;
     let saw_gamma: i32 = 0;
     let saw_chrm: i32 = 0;
+    let source_gamma: i64 = 0;
     let offset: i32 = 8;
 
     while (offset < bytes.len && saw_end == 0) {
@@ -618,10 +736,11 @@ fn png_decode(bytes: []u8) PngDecodeResult {
                 return png_decode_parse_fail(&idat, &palette, &transparency,
                     PngDecodeError.invalid_chunk_order, offset as i64);
             }
-            if (length != 4 || png_read_u32_be(bytes, data_offset) != 45455) {
+            if (length != 4) {
                 return png_decode_parse_fail(&idat, &palette, &transparency,
                     PngDecodeError.unsupported_color_profile, offset as i64);
             }
+            source_gamma = png_read_u32_be(bytes, data_offset);
             saw_gamma = 1;
         } else if (png_chunk_is(bytes, offset, "cHRM") != 0) {
             if (saw_chrm != 0) {
@@ -708,10 +827,13 @@ fn png_decode(bytes: []u8) PngDecodeResult {
         free[u8](&scanlines.bytes); free[u8](&palette); free[u8](&transparency);
         return png_decode_fail(error, error_offset);
     }
+    let conversion_gamma: i64 = source_gamma;
+    if (saw_srgb != 0) { conversion_gamma = 0; }
     let result: PngDecodeResult = png_expand_rgba(
         scanlines.bytes.data[0..scanlines.bytes.len], width, height,
         row_bytes64 as i32, bit_depth, color_type, palette, transparency,
-        (saw_srgb == 0 && !(saw_gamma != 0 && saw_chrm != 0)) as i32
+        conversion_gamma,
+        (saw_srgb == 0 && !(source_gamma != 0 && saw_chrm != 0)) as i32
     );
     free[u8](&scanlines.bytes); free[u8](&palette); free[u8](&transparency);
     return result;

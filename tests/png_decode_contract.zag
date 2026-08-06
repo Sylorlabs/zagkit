@@ -201,7 +201,8 @@ fn fixture_rewrite_crc(bytes: *ArrayList[u8], chunk_offset: i32) void {
     fixture_write_u32_be(bytes, crc_offset, crc);
 }
 
-fn fixture_profile_png(gamma_count: i32, chromaticity_kind: i32) PngEncodeResult {
+fn fixture_profile_png(gamma_count: i32, chromaticity_kind: i32,
+    gamma_value: i64, include_srgb: i32) PngEncodeResult {
     let compressed: ZlibStoreEncodeResult = zlib_store_encode("\x00\x11\x22\x33\xff");
     let output: ArrayList[u8] = make[u8](compressed.bytes.len + 160);
     push[u8](&output, 137); push[u8](&output, 80);
@@ -214,8 +215,9 @@ fn fixture_profile_png(gamma_count: i32, chromaticity_kind: i32) PngEncodeResult
     push[u8](&header, 0); push[u8](&header, 0); push[u8](&header, 0);
     png_write_chunk(&output, "IHDR", header.data[0..header.len]);
     free[u8](&header);
+    if (include_srgb != 0) { png_write_chunk(&output, "sRGB", "\x00"); }
     let gamma: ArrayList[u8] = make[u8](4);
-    png_write_u32_be(&gamma, 45455);
+    png_write_u32_be(&gamma, gamma_value);
     let gamma_index: i32 = 0;
     while (gamma_index < gamma_count) {
         png_write_chunk(&output, "gAMA", gamma.data[0..gamma.len]);
@@ -412,17 +414,17 @@ fn color_contract(state: *TestState) void {
 }
 
 fn color_profile_contract(state: *TestState) void {
-    let declared_fixture: PngEncodeResult = fixture_profile_png(1, 1);
+    let declared_fixture: PngEncodeResult = fixture_profile_png(1, 1, 45455, 0);
     let declared: PngDecodeResult = png_decode(
         declared_fixture.bytes.data[0..declared_fixture.bytes.len]
     );
     expect(state, declared.error == PngDecodeError.none &&
-        declared.profile_assumed == 0 && declared.pixels.data[0] == 17 &&
-        declared.pixels.data[1] == 34 && declared.pixels.data[2] == 51,
-        "exact sRGB gamma and chromaticities decode without an assumed profile");
+        declared.profile_assumed == 0 && declared.pixels.data[0] == 9 &&
+        declared.pixels.data[1] == 28 && declared.pixels.data[2] == 48,
+        "declared gamma and standard primaries convert without assumed profile truth");
     png_decode_free(&declared); png_encode_free(&declared_fixture);
 
-    let gamma_only_fixture: PngEncodeResult = fixture_profile_png(1, 0);
+    let gamma_only_fixture: PngEncodeResult = fixture_profile_png(1, 0, 45455, 0);
     let gamma_only: PngDecodeResult = png_decode(
         gamma_only_fixture.bytes.data[0..gamma_only_fixture.bytes.len]
     );
@@ -431,7 +433,38 @@ fn color_profile_contract(state: *TestState) void {
         "gamma without declared primaries keeps the fallback-profile truth visible");
     png_decode_free(&gamma_only); png_encode_free(&gamma_only_fixture);
 
-    let duplicate_fixture: PngEncodeResult = fixture_profile_png(2, 0);
+    let linear_fixture: PngEncodeResult = fixture_profile_png(1, 0, 100000, 0);
+    let linear: PngDecodeResult = png_decode(
+        linear_fixture.bytes.data[0..linear_fixture.bytes.len]
+    );
+    expect(state, linear.error == PngDecodeError.none &&
+        linear.profile_assumed != 0 && linear.pixels.data[0] == 73 &&
+        linear.pixels.data[1] == 102 && linear.pixels.data[2] == 124 &&
+        linear.pixels.data[3] == 255,
+        "linear-gamma samples convert deterministically into canonical sRGB");
+    png_decode_free(&linear); png_encode_free(&linear_fixture);
+
+    let zero_fixture: PngEncodeResult = fixture_profile_png(1, 0, 0, 0);
+    let zero: PngDecodeResult = png_decode(
+        zero_fixture.bytes.data[0..zero_fixture.bytes.len]
+    );
+    expect(state, zero.error == PngDecodeError.none &&
+        zero.profile_assumed != 0 && zero.pixels.data[0] == 17 &&
+        zero.pixels.data[1] == 34 && zero.pixels.data[2] == 51,
+        "meaningless zero gamma is ignored while fallback truth stays visible");
+    png_decode_free(&zero); png_encode_free(&zero_fixture);
+
+    let precedence_fixture: PngEncodeResult = fixture_profile_png(1, 0, 100000, 1);
+    let precedence: PngDecodeResult = png_decode(
+        precedence_fixture.bytes.data[0..precedence_fixture.bytes.len]
+    );
+    expect(state, precedence.error == PngDecodeError.none &&
+        precedence.profile_assumed == 0 && precedence.pixels.data[0] == 17 &&
+        precedence.pixels.data[1] == 34 && precedence.pixels.data[2] == 51,
+        "explicit sRGB takes precedence over accompanying gamma metadata");
+    png_decode_free(&precedence); png_encode_free(&precedence_fixture);
+
+    let duplicate_fixture: PngEncodeResult = fixture_profile_png(2, 0, 45455, 0);
     let duplicate: PngDecodeResult = png_decode(
         duplicate_fixture.bytes.data[0..duplicate_fixture.bytes.len]
     );
@@ -439,13 +472,49 @@ fn color_profile_contract(state: *TestState) void {
         "duplicate color metadata fails before image decompression");
     png_decode_free(&duplicate); png_encode_free(&duplicate_fixture);
 
-    let foreign_fixture: PngEncodeResult = fixture_profile_png(1, 2);
+    let foreign_fixture: PngEncodeResult = fixture_profile_png(1, 2, 45455, 0);
     let foreign: PngDecodeResult = png_decode(
         foreign_fixture.bytes.data[0..foreign_fixture.bytes.len]
     );
     expect(state, foreign.error == PngDecodeError.unsupported_color_profile,
         "unconverted chromaticities fail rather than being mislabeled sRGB");
     png_decode_free(&foreign); png_encode_free(&foreign_fixture);
+
+    let ramp: ArrayList[u8] = make[u8](256);
+    let sample: i32 = 0;
+    while (sample < 256) {
+        push[u8](&ramp, png_gamma_sample_to_srgb(sample as u8, 100000));
+        sample = sample + 1;
+    }
+    let ramps_exact: i32 = checksum_crc32(ramp.data[0..ramp.len]) == 1696635244;
+    free[u8](&ramp);
+    let gamma_values: ArrayList[i64] = make[i64](7);
+    push[i64](&gamma_values, 45455); push[i64](&gamma_values, 70000);
+    push[i64](&gamma_values, 55000);
+    push[i64](&gamma_values, 35000); push[i64](&gamma_values, 220000);
+    push[i64](&gamma_values, 25000); push[i64](&gamma_values, 500000);
+    let expected_crcs: ArrayList[i64] = make[i64](7);
+    push[i64](&expected_crcs, 247783021); push[i64](&expected_crcs, 3885669558);
+    push[i64](&expected_crcs, 4144236837);
+    push[i64](&expected_crcs, 2933270737); push[i64](&expected_crcs, 2066708568);
+    push[i64](&expected_crcs, 726426539); push[i64](&expected_crcs, 3244028137);
+    let gamma_index: i32 = 0;
+    while (gamma_index < gamma_values.len && ramps_exact != 0) {
+        let values: ArrayList[u8] = make[u8](256);
+        sample = 0;
+        while (sample < 256) {
+            push[u8](&values, png_gamma_sample_to_srgb(
+                sample as u8, gamma_values.data[gamma_index]
+            ));
+            sample = sample + 1;
+        }
+        if (checksum_crc32(values.data[0..values.len]) !=
+            expected_crcs.data[gamma_index]) { ramps_exact = 0; }
+        free[u8](&values); gamma_index = gamma_index + 1;
+    }
+    expect(state, ramps_exact,
+        "eight full gamma ramps match independent sRGB transfer references");
+    free[i64](&expected_crcs); free[i64](&gamma_values);
 }
 
 fn interlace_contract(state: *TestState) void {

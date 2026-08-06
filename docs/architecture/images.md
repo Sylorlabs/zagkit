@@ -45,12 +45,21 @@ seven bounded Adam7 passes reconstruct into the same canonical pixels.
 Renderer-owned output is always straight-alpha sRGB RGBA8. Sixteen-bit samples
 use their high byte as the current deterministic conversion policy;
 transparency comparisons use the original full sample before conversion. Files
-without explicit color
-metadata use Zagkit's documented sRGB fallback policy; this is an assumption
+without explicit color metadata use Zagkit's documented sRGB fallback policy;
+this is an assumption
 recorded by the asset pipeline, not a claim that the source declared sRGB. An
-explicit `sRGB` chunk, or the exact standard sRGB `gAMA` plus `cHRM` pair,
-records a declared profile. A matching gamma without declared primaries still
-records the fallback as assumed.
+explicit `sRGB` chunk records sRGB directly. The conventional 45455 `gAMA`
+plus standard sRGB `cHRM` pair records a declared approximate profile and is
+converted rather than mislabeled as the piecewise sRGB transfer. A gamma chunk
+without declared primaries still records the fallback as assumed. All nonzero
+[`gAMA`](https://www.w3.org/TR/png-3/#11gAMA) transfer curves are
+converted into canonical sRGB by deterministic fixed-point log, power, and
+sRGB-transfer operations. When `cHRM` is absent, that conversion explicitly
+assumes sRGB primaries; an `sRGB` chunk takes precedence over accompanying
+gamma metadata. A meaningless zero gamma is ignored without becoming declared
+profile truth. Eight complete 256-value ramps match independently calculated
+references exactly on both compiled architectures.
+
 `png_decode_resource_spec`
 adapts a successful owned result to the normal copying resource-store API, so
 the decoder can be freed immediately after insertion.
@@ -60,12 +69,18 @@ the canonical resource store, and compares full-surface hashes at 1x, 1.25x,
 1.5x, 2x, and 3x. The same golden hashes pass on x86-64 and ARM64; this is
 headless scale evidence, not native compositor or monitor evidence.
 
+The strict deterministic fuzz gate decodes 20,000 arbitrary byte streams,
+20,000 structured mutations of a valid PNG, every strict seed prefix, and 4,096
+decode/free repetitions on both x86-64 and ARM64. Every result must preserve
+success or failure ownership invariants. Coverage-guided sanitizer campaigns
+and a larger published malformed corpus remain additional required evidence.
+
 Dimension, encoded-data, decompressed-scanline, output-pixel, palette-index,
 filter, and arithmetic limits fail before out-of-bounds access. Explicit iCCP,
-non-sRGB chromaticity conversion, and non-sRGB gAMA values fail as unsupported
-color profiles. Unknown interlace methods fail before decompression. These
+and non-sRGB chromaticity conversion still fail as unsupported color profiles.
+Unknown interlace methods fail before decompression. These
 unavailable paths keep `G3-PNG` open until general profile conversion and
-broader malformed-input fuzzing land.
+coverage-guided malformed-input evidence land.
 
 Linear-light filtering, Display P3 conversion, wide-gamut surfaces, mipmapping,
 high-quality downsampling, image tiling, and GPU upload caches also remain

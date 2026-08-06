@@ -181,8 +181,11 @@ Focused contracts pass identically on x86-64 and ARM64/qemu, an independent
 240-file corpus covers every accepted color and bit-depth family across five
 zlib strategies, and an independently encoded Adam7 image matches exact source
 pixels. End-to-end decoded-resource CPU goldens pass at 1x, 1.25x, 1.5x, 2x,
-and 3x on both compiled architectures. Arbitrary ICC/chromaticity conversion
-and broader fuzzing remain open, so the `G3-PNG`
+and 3x on both compiled architectures. Non-sRGB gamma transfer curves now
+convert deterministically to sRGB and eight full ramps match independent
+references. A deterministic 40,000-input mutation harness plus 4,096 repeated
+cleanup cycles passes on both architectures. Arbitrary ICC/chromaticity
+conversion and coverage-guided sanitizer evidence remain open, so the `G3-PNG`
 completion box remains deliberately unchecked. See the
 [image and PNG ingestion contract](docs/architecture/images.md).
 

@@ -1,0 +1,155 @@
+@import("../src/render/png_decode.zag")
+@import("../src/render/png_encode.zag")
+
+struct FuzzState { passed: i32, failed: i32 }
+
+fn fuzz_expect(state: *FuzzState, condition: i32, name: []u8) void {
+    if (condition != 0) {
+        state.*.passed = state.*.passed + 1;
+        _zag_print("ok  "); _zag_println(name);
+    } else {
+        state.*.failed = state.*.failed + 1;
+        _zag_print("FAIL "); _zag_println(name);
+    }
+}
+
+fn fuzz_next(random: *i64) i64 {
+    random.* = (random.* * 1103515245 + 12345) & 2147483647;
+    return random.*;
+}
+
+fn fuzz_copy(bytes: []u8) ArrayList[u8] {
+    let copy: ArrayList[u8] = make[u8](bytes.len);
+    let i: i32 = 0;
+    while (i < bytes.len) { push[u8](&copy, bytes[i]); i = i + 1; }
+    return copy;
+}
+
+fn fuzz_result_valid(result: PngDecodeResult) i32 {
+    if (result.error == PngDecodeError.none) {
+        if (result.width <= 0 || result.height <= 0 ||
+            result.color_space != RenderColorSpace.srgb ||
+            result.error_offset != 0 - 1 ||
+            (result.profile_assumed != 0 && result.profile_assumed != 1)) { return 0; }
+        let expected: i64 = (result.width as i64) *
+            (result.height as i64) * 4;
+        return (expected > 0 && result.pixels.len as i64 == expected) as i32;
+    }
+    return (result.width == 0 && result.height == 0 &&
+        result.color_space == RenderColorSpace.none &&
+        result.pixels.len == 0 && result.profile_assumed == 0) as i32;
+}
+
+fn fuzz_seed_surface() CpuSurface {
+    let surface: CpuSurface = cpu_surface_make(8, 8);
+    let i: i32 = 0;
+    while (i < surface.pixels.len) {
+        surface.pixels.data[i] = ((i * 73 + 29) & 255) as u8;
+        i = i + 1;
+    }
+    return surface;
+}
+
+fn arbitrary_bytes_contract(state: *FuzzState) void {
+    let random: i64 = 881726454;
+    let valid: i32 = 1;
+    let case_index: i32 = 0;
+    while (case_index < 20000 && valid != 0) {
+        let length: i32 = (fuzz_next(&random) % 513) as i32;
+        let bytes: ArrayList[u8] = make[u8](length);
+        let i: i32 = 0;
+        while (i < length) {
+            push[u8](&bytes, (fuzz_next(&random) & 255) as u8);
+            i = i + 1;
+        }
+        let result: PngDecodeResult = png_decode(bytes.data[0..bytes.len]);
+        if (fuzz_result_valid(result) == 0) { valid = 0; }
+        png_decode_free(&result); free[u8](&bytes);
+        case_index = case_index + 1;
+    }
+    fuzz_expect(state, valid != 0 && case_index == 20000,
+        "20000 deterministic arbitrary byte streams remain bounded and owned");
+}
+
+fn mutation_contract(state: *FuzzState) void {
+    let surface: CpuSurface = fuzz_seed_surface();
+    let encoded: PngEncodeResult = png_encode_surface(surface);
+    let random: i64 = 19349663;
+    let valid: i32 = 1;
+    let accepted: i32 = 0;
+    let case_index: i32 = 0;
+    while (case_index < 20000 && valid != 0) {
+        let bytes: ArrayList[u8] = fuzz_copy(
+            encoded.bytes.data[0..encoded.bytes.len]
+        );
+        let changes: i32 = 1 + (fuzz_next(&random) % 4) as i32;
+        let change: i32 = 0;
+        while (change < changes) {
+            let index: i32 = (fuzz_next(&random) % bytes.len) as i32;
+            let bit: i32 = (fuzz_next(&random) % 8) as i32;
+            bytes.data[index] = bytes.data[index] ^ (1 << bit) as u8;
+            change = change + 1;
+        }
+        if (case_index % 5 == 0) {
+            bytes.len = (fuzz_next(&random) % bytes.len) as i32;
+        }
+        let result: PngDecodeResult = png_decode(bytes.data[0..bytes.len]);
+        if (fuzz_result_valid(result) == 0) { valid = 0; }
+        if (result.error == PngDecodeError.none) { accepted = accepted + 1; }
+        png_decode_free(&result); free[u8](&bytes);
+        case_index = case_index + 1;
+    }
+    fuzz_expect(state, valid != 0 && case_index == 20000 && accepted < 100,
+        "20000 structured PNG mutations fail closed or retain canonical output");
+    png_encode_free(&encoded); cpu_surface_free(&surface);
+}
+
+fn prefix_and_repeat_contract(state: *FuzzState) void {
+    let surface: CpuSurface = fuzz_seed_surface();
+    let encoded: PngEncodeResult = png_encode_surface(surface);
+    let valid: i32 = 1;
+    let length: i32 = 0;
+    while (length < encoded.bytes.len && valid != 0) {
+        let result: PngDecodeResult = png_decode(encoded.bytes.data[0..length]);
+        if (result.error == PngDecodeError.none || fuzz_result_valid(result) == 0) {
+            valid = 0;
+        }
+        png_decode_free(&result); length = length + 1;
+    }
+    fuzz_expect(state, valid != 0,
+        "every strict canonical prefix preserves failure-result ownership invariants");
+
+    let expected_crc: i64 = checksum_crc32(
+        surface.pixels.data[0..surface.pixels.len]
+    );
+    let repeat: i32 = 0;
+    while (repeat < 4096 && valid != 0) {
+        let result: PngDecodeResult = png_decode(
+            encoded.bytes.data[0..encoded.bytes.len]
+        );
+        if (fuzz_result_valid(result) == 0 ||
+            result.error != PngDecodeError.none ||
+            checksum_crc32(result.pixels.data[0..result.pixels.len]) != expected_crc) {
+            valid = 0;
+        }
+        png_decode_free(&result); repeat = repeat + 1;
+    }
+    fuzz_expect(state, valid != 0 && repeat == 4096,
+        "4096 decode and cleanup cycles preserve exact pixels without state leakage");
+    png_encode_free(&encoded); cpu_surface_free(&surface);
+}
+
+fn main() i32 {
+    let state: FuzzState = FuzzState{ .passed = 0, .failed = 0 };
+    arbitrary_bytes_contract(&state);
+    mutation_contract(&state);
+    prefix_and_repeat_contract(&state);
+    _zag_print("PNG decode fuzz: pass=");
+    let passed: []u8 = _zag_i64_to_str(state.passed as i64);
+    _zag_print(passed); _zag_str_free(passed);
+    _zag_print(" fail=");
+    let failed: []u8 = _zag_i64_to_str(state.failed as i64);
+    _zag_println(failed); _zag_str_free(failed);
+    if (state.failed == 0) { return 0; }
+    return 1;
+}
