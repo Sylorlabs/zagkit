@@ -14,15 +14,19 @@ cleanup() { rm -rf "$tmp"; }
 trap cleanup EXIT
 
 cd "$root"
-"$znc" tests/flex_contract.zag --no-zagd --no-analyze --no-foreground-cache -o "$tmp/flex-contract"
+"$znc" tests/flex_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/flex-contract"
 "$tmp/flex-contract"
-"$znc" tests/state_reconcile_contract.zag --no-zagd --no-analyze --no-foreground-cache -o "$tmp/state-reconcile-contract"
+"$znc" tests/state_reconcile_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/state-reconcile-contract"
 "$tmp/state-reconcile-contract"
-"$znc" tests/semantics_contract.zag --no-zagd --no-analyze --no-foreground-cache -o "$tmp/semantics-contract"
+"$znc" tests/semantics_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/semantics-contract"
 "$tmp/semantics-contract"
-"$znc" tests/talkback_contract.zag --no-zagd --no-analyze --no-foreground-cache -o "$tmp/talkback-contract"
+"$znc" tests/talkback_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/talkback-contract"
 "$tmp/talkback-contract"
-"$znc" tests/display_list_contract.zag --no-zagd --no-analyze --no-foreground-cache -o "$tmp/display-list-contract"
+"$znc" tests/display_list_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/display-list-contract"
 "$tmp/display-list-contract"
+"$znc" tests/display_list_codec_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/display-list-codec-contract"
+"$tmp/display-list-codec-contract"
+"$znc" tests/cpu_raster_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/cpu-raster-contract"
+"$tmp/cpu-raster-contract"
 
-printf 'headless test: PASS (state, reconciliation, constraints, Flex, semantics, Talkback, and display lists)\n'
+printf 'headless test: PASS (state, reconciliation, constraints, Flex, semantics, Talkback, display lists, and CPU raster)\n'

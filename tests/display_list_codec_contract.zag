@@ -1,0 +1,131 @@
+@import("../src/render/display_list_codec.zag")
+
+struct TestState { passed: i32, failed: i32 }
+
+fn expect(state: *TestState, condition: i32, name: []u8) void {
+    if (condition != 0) {
+        state.*.passed = state.*.passed + 1;
+        _zag_print("ok  "); _zag_println(name);
+    } else {
+        state.*.failed = state.*.failed + 1;
+        _zag_print("FAIL "); _zag_println(name);
+    }
+}
+
+fn codec_scene() DisplayList {
+    let list: DisplayList = display_list_make();
+    let owner: NodeKey = node_key_scoped(42, 3);
+    _ = display_list_push(&list, display_op(DisplayOpKind.save, owner));
+    let clip: DisplayOp = display_op(DisplayOpKind.clip_rect, owner);
+    clip.bounds = rect(0 - unit_scale(), 2 * unit_scale(), 80 * unit_scale(), 40 * unit_scale());
+    _ = display_list_push(&list, clip);
+    let fill: DisplayOp = display_op(DisplayOpKind.fill_rect, owner);
+    fill.bounds = rect(3 * unit_scale(), 4 * unit_scale(), 20 * unit_scale(), 10 * unit_scale());
+    fill.paint = paint_rgba16(1234, 2345, 3456, 4567);
+    _ = display_list_push(&list, fill);
+    _ = display_list_push(&list, display_op(DisplayOpKind.restore, owner));
+    _ = display_list_seal(&list);
+    return list;
+}
+
+fn bytes_equal(a: ArrayList[u8], b: ArrayList[u8]) i32 {
+    if (a.len != b.len) { return 0; }
+    let i: i32 = 0;
+    while (i < a.len) {
+        if (a.data[i] != b.data[i]) { return 0; }
+        i = i + 1;
+    }
+    return 1;
+}
+
+fn round_trip_contract(state: *TestState) void {
+    let source: DisplayList = codec_scene();
+    let encoded: DisplayEncodeResult = display_list_encode(source);
+    expect(state, encoded.error == DisplayCodecError.none && encoded.bytes.len == 36 + 4 * 160, "sealed display list encodes to the versioned exact size");
+    expect(state, encoded.bytes.data[0] == 90 && encoded.bytes.data[1] == 75 && encoded.bytes.data[2] == 68 && encoded.bytes.data[3] == 76, "codec carries the ZKDL magic");
+
+    let decoded: DisplayDecodeResult = display_list_decode(encoded.bytes);
+    expect(state, decoded.error == DisplayCodecError.none && decoded.list.sealed == 1, "valid bytes decode to a sealed display list");
+    expect(state, decoded.list.content_hash == source.content_hash && decoded.list.revision == source.revision, "round trip preserves deterministic identity");
+    expect(state, decoded.list.ops.data[2].owner.value == 42 && decoded.list.ops.data[2].owner.generation == 3, "round trip preserves retained ownership");
+    expect(state, decoded.list.ops.data[1].bounds.x == 0 - unit_scale() && decoded.list.ops.data[2].paint.alpha == 4567, "round trip preserves signed geometry and RGBA16 paint");
+
+    let encoded_again: DisplayEncodeResult = display_list_encode(decoded.list);
+    expect(state, bytes_equal(encoded.bytes, encoded_again.bytes) == 1, "decode and re-encode are byte identical");
+    display_encode_free(&encoded_again);
+    display_decode_free(&decoded);
+    display_encode_free(&encoded);
+    display_list_free(&source);
+}
+
+fn malformed_contract(state: *TestState) void {
+    let source: DisplayList = codec_scene();
+    let encoded: DisplayEncodeResult = display_list_encode(source);
+
+    let saved: u8 = encoded.bytes.data[0];
+    encoded.bytes.data[0] = 0;
+    let bad_magic: DisplayDecodeResult = display_list_decode(encoded.bytes);
+    expect(state, bad_magic.error == DisplayCodecError.bad_magic && bad_magic.error_offset == 0, "bad magic fails at byte zero");
+    display_decode_free(&bad_magic);
+    encoded.bytes.data[0] = saved;
+
+    let saved_version: u8 = encoded.bytes.data[4];
+    encoded.bytes.data[4] = 2;
+    let bad_version: DisplayDecodeResult = display_list_decode(encoded.bytes);
+    expect(state, bad_version.error == DisplayCodecError.unsupported_version && bad_version.error_offset == 4, "unsupported versions fail visibly");
+    display_decode_free(&bad_version);
+    encoded.bytes.data[4] = saved_version;
+
+    let saved_kind: u8 = encoded.bytes.data[36];
+    encoded.bytes.data[36] = 99;
+    let bad_kind: DisplayDecodeResult = display_list_decode(encoded.bytes);
+    expect(state, bad_kind.error == DisplayCodecError.invalid_kind && bad_kind.error_offset == 36, "unknown operation kinds fail at the exact record");
+    display_decode_free(&bad_kind);
+    encoded.bytes.data[36] = saved_kind;
+
+    let saved_paint: u8 = encoded.bytes.data[36 + 2 * 160 + 56];
+    encoded.bytes.data[36 + 2 * 160 + 56] = saved_paint + 1;
+    let bad_hash: DisplayDecodeResult = display_list_decode(encoded.bytes);
+    expect(state, bad_hash.error == DisplayCodecError.hash_mismatch, "content tampering fails deterministic identity verification");
+    display_decode_free(&bad_hash);
+    encoded.bytes.data[36 + 2 * 160 + 56] = saved_paint;
+
+    let truncated: ArrayList[u8] = make[u8](20);
+    let i: i32 = 0;
+    while (i < 20) { push[u8](&truncated, encoded.bytes.data[i]); i = i + 1; }
+    let short_result: DisplayDecodeResult = display_list_decode(truncated);
+    expect(state, short_result.error == DisplayCodecError.truncated && short_result.error_offset == 20, "truncated headers fail with the observed length");
+    display_decode_free(&short_result);
+    free[u8](&truncated);
+
+    push[u8](&encoded.bytes, 0);
+    let trailing: DisplayDecodeResult = display_list_decode(encoded.bytes);
+    expect(state, trailing.error == DisplayCodecError.trailing_data, "trailing bytes fail canonical decoding");
+    display_decode_free(&trailing);
+
+    display_encode_free(&encoded);
+    display_list_free(&source);
+}
+
+fn encode_rejection_contract(state: *TestState) void {
+    let unsealed: DisplayList = display_list_make();
+    let result: DisplayEncodeResult = display_list_encode(unsealed);
+    expect(state, result.error == DisplayCodecError.not_sealed && result.bytes.len == 0, "unsealed builders cannot be serialized as immutable replay input");
+    display_encode_free(&result);
+    display_list_free(&unsealed);
+}
+
+fn main() i32 {
+    let state: TestState = TestState{ .passed = 0, .failed = 0 };
+    round_trip_contract(&state);
+    malformed_contract(&state);
+    encode_rejection_contract(&state);
+    let passed_text: []u8 = _zag_i64_to_str(state.passed as i64);
+    let failed_text: []u8 = _zag_i64_to_str(state.failed as i64);
+    _zag_print("Display-list codec contract: pass="); _zag_print(passed_text);
+    _zag_print(" fail="); _zag_println(failed_text);
+    _zag_str_free(passed_text);
+    _zag_str_free(failed_text);
+    if (state.failed == 0) { return 0; }
+    return 1;
+}

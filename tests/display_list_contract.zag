@@ -104,6 +104,11 @@ fn rejection_contract(state: *TestState) void {
     bad_layer.parameter = 70000;
     expect(state, display_list_push(&list, bad_layer) == DisplayError.invalid_parameter, "layer opacity outside RGBA16 range is rejected");
 
+    let bad_paint: DisplayOp = display_op(DisplayOpKind.fill_rect, node_key(1));
+    bad_paint.bounds = rect(0, 0, 10, 10);
+    bad_paint.paint.red = 65536;
+    expect(state, display_list_push(&list, bad_paint) == DisplayError.invalid_parameter, "raw paint channels outside RGBA16 fail before mutation");
+
     _ = display_list_push(&list, display_op(DisplayOpKind.save, node_key(1)));
     expect(state, display_list_seal(&list) == DisplayError.unbalanced_stack && list.sealed == 0, "unbalanced save state cannot seal");
     _ = display_list_push(&list, display_op(DisplayOpKind.restore, node_key(1)));

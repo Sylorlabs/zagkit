@@ -1,0 +1,184 @@
+@import("std:list")
+@import("display_list.zag")
+
+enum DisplayCodecError {
+    none,
+    not_sealed,
+    content_mutated,
+    bad_magic,
+    unsupported_version,
+    invalid_count,
+    truncated,
+    trailing_data,
+    invalid_kind,
+    invalid_operation,
+    hash_mismatch,
+}
+
+struct DisplayEncodeResult {
+    bytes: ArrayList[u8],
+    error: DisplayCodecError,
+}
+
+struct DisplayDecodeResult {
+    list: DisplayList,
+    error: DisplayCodecError,
+    error_offset: i64,
+}
+
+fn display_codec_version() i64 { return 1; }
+fn display_codec_header_size() i64 { return 36; }
+fn display_codec_op_size() i64 { return 160; }
+
+fn display_write_i64(bytes: *ArrayList[u8], value: i64) void {
+    let i: i32 = 0;
+    while (i < 8) {
+        push[u8](bytes, ((value >> (i * 8)) & 255) as u8);
+        i = i + 1;
+    }
+}
+
+fn display_read_i64(bytes: ArrayList[u8], offset: i64) i64 {
+    let value: i64 = 0;
+    let i: i32 = 0;
+    while (i < 8) {
+        value = value | ((bytes.data[(offset as i32) + i] as i64) << (i * 8));
+        i = i + 1;
+    }
+    return value;
+}
+
+fn display_encode_fail(error: DisplayCodecError) DisplayEncodeResult {
+    return DisplayEncodeResult{ .bytes = make[u8](1), .error = error };
+}
+
+fn display_list_encode(list: DisplayList) DisplayEncodeResult {
+    if (list.sealed == 0) { return display_encode_fail(DisplayCodecError.not_sealed); }
+    if (display_list_verify(list) != DisplayError.none) {
+        return display_encode_fail(DisplayCodecError.content_mutated);
+    }
+    if (list.ops.len < 0 || list.ops.len > 1000000) {
+        return display_encode_fail(DisplayCodecError.invalid_count);
+    }
+
+    let bytes: ArrayList[u8] = make[u8]((display_codec_header_size() + (list.ops.len as i64) * display_codec_op_size()) as i32);
+    push[u8](&bytes, 90); push[u8](&bytes, 75); push[u8](&bytes, 68); push[u8](&bytes, 76);
+    display_write_i64(&bytes, display_codec_version());
+    display_write_i64(&bytes, list.ops.len as i64);
+    display_write_i64(&bytes, list.content_hash);
+    display_write_i64(&bytes, list.revision);
+
+    let i: i32 = 0;
+    while (i < list.ops.len) {
+        let op: DisplayOp = list.ops.data[i];
+        display_write_i64(&bytes, op.kind as i64);
+        display_write_i64(&bytes, op.owner.value);
+        display_write_i64(&bytes, op.owner.generation);
+        display_write_i64(&bytes, op.bounds.x);
+        display_write_i64(&bytes, op.bounds.y);
+        display_write_i64(&bytes, op.bounds.width);
+        display_write_i64(&bytes, op.bounds.height);
+        display_write_i64(&bytes, op.paint.red);
+        display_write_i64(&bytes, op.paint.green);
+        display_write_i64(&bytes, op.paint.blue);
+        display_write_i64(&bytes, op.paint.alpha);
+        display_write_i64(&bytes, op.paint.stroke_width);
+        display_write_i64(&bytes, op.transform.scale_x);
+        display_write_i64(&bytes, op.transform.skew_x);
+        display_write_i64(&bytes, op.transform.skew_y);
+        display_write_i64(&bytes, op.transform.scale_y);
+        display_write_i64(&bytes, op.transform.translate_x);
+        display_write_i64(&bytes, op.transform.translate_y);
+        display_write_i64(&bytes, op.resource_id);
+        display_write_i64(&bytes, op.parameter);
+        i = i + 1;
+    }
+    return DisplayEncodeResult{ .bytes = bytes, .error = DisplayCodecError.none };
+}
+
+fn display_encode_free(result: *DisplayEncodeResult) void {
+    free[u8](&result.*.bytes);
+}
+
+fn display_decode_fail(list: DisplayList, error: DisplayCodecError, offset: i64) DisplayDecodeResult {
+    return DisplayDecodeResult{ .list = list, .error = error, .error_offset = offset };
+}
+
+fn display_list_decode(bytes: ArrayList[u8]) DisplayDecodeResult {
+    let list: DisplayList = display_list_make();
+    if ((bytes.len as i64) < display_codec_header_size()) {
+        return display_decode_fail(list, DisplayCodecError.truncated, bytes.len as i64);
+    }
+    if (bytes.data[0] != 90 || bytes.data[1] != 75 || bytes.data[2] != 68 || bytes.data[3] != 76) {
+        return display_decode_fail(list, DisplayCodecError.bad_magic, 0);
+    }
+    let version: i64 = display_read_i64(bytes, 4);
+    if (version != display_codec_version()) {
+        return display_decode_fail(list, DisplayCodecError.unsupported_version, 4);
+    }
+    let count: i64 = display_read_i64(bytes, 12);
+    if (count < 0 || count > 1000000) {
+        return display_decode_fail(list, DisplayCodecError.invalid_count, 12);
+    }
+    let expected_size: i64 = display_codec_header_size() + count * display_codec_op_size();
+    if ((bytes.len as i64) < expected_size) {
+        return display_decode_fail(list, DisplayCodecError.truncated, bytes.len as i64);
+    }
+    if ((bytes.len as i64) > expected_size) {
+        return display_decode_fail(list, DisplayCodecError.trailing_data, expected_size);
+    }
+    let stored_hash: i64 = display_read_i64(bytes, 20);
+    let stored_revision: i64 = display_read_i64(bytes, 28);
+
+    let offset: i64 = display_codec_header_size();
+    let i: i64 = 0;
+    while (i < count) {
+        let kind_code: i64 = display_read_i64(bytes, offset);
+        if (kind_code < 0 || kind_code > 11) {
+            return display_decode_fail(list, DisplayCodecError.invalid_kind, offset);
+        }
+        let op: DisplayOp = display_op(kind_code as DisplayOpKind, node_key_scoped(
+            display_read_i64(bytes, offset + 8),
+            display_read_i64(bytes, offset + 16)
+        ));
+        op.bounds = rect(
+            display_read_i64(bytes, offset + 24),
+            display_read_i64(bytes, offset + 32),
+            display_read_i64(bytes, offset + 40),
+            display_read_i64(bytes, offset + 48)
+        );
+        op.paint = Paint{
+            .red = display_read_i64(bytes, offset + 56),
+            .green = display_read_i64(bytes, offset + 64),
+            .blue = display_read_i64(bytes, offset + 72),
+            .alpha = display_read_i64(bytes, offset + 80),
+            .stroke_width = display_read_i64(bytes, offset + 88),
+        };
+        op.transform = Transform{
+            .scale_x = display_read_i64(bytes, offset + 96),
+            .skew_x = display_read_i64(bytes, offset + 104),
+            .skew_y = display_read_i64(bytes, offset + 112),
+            .scale_y = display_read_i64(bytes, offset + 120),
+            .translate_x = display_read_i64(bytes, offset + 128),
+            .translate_y = display_read_i64(bytes, offset + 136),
+        };
+        op.resource_id = display_read_i64(bytes, offset + 144);
+        op.parameter = display_read_i64(bytes, offset + 152);
+        if (display_list_push(&list, op) != DisplayError.none) {
+            return display_decode_fail(list, DisplayCodecError.invalid_operation, offset);
+        }
+        offset = offset + display_codec_op_size();
+        i = i + 1;
+    }
+    if (display_list_seal(&list) != DisplayError.none) {
+        return display_decode_fail(list, DisplayCodecError.invalid_operation, offset);
+    }
+    if (list.content_hash != stored_hash || list.revision != stored_revision) {
+        return display_decode_fail(list, DisplayCodecError.hash_mismatch, 20);
+    }
+    return DisplayDecodeResult{ .list = list, .error = DisplayCodecError.none, .error_offset = 0 - 1 };
+}
+
+fn display_decode_free(result: *DisplayDecodeResult) void {
+    display_list_free(&result.*.list);
+}

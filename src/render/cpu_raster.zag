@@ -1,0 +1,254 @@
+@import("std:list")
+@import("display_list.zag")
+
+enum CpuRasterError {
+    none,
+    invalid_surface,
+    unsealed_display_list,
+    mutated_display_list,
+    invalid_geometry,
+    unsupported_operation,
+}
+
+struct CpuSurface {
+    width: i32,
+    height: i32,
+    pixels: ArrayList[u8],
+}
+
+struct CpuRasterState {
+    clip: Rect,
+    transform: Transform,
+}
+
+struct CpuRasterResult {
+    surface: CpuSurface,
+    error: CpuRasterError,
+    error_op: i32,
+    rendered_ops: i32,
+    pixels_touched: i64,
+}
+
+fn cpu_surface_make(width: i32, height: i32) CpuSurface {
+    let pixels: ArrayList[u8] = make[u8](1);
+    if (width <= 0 || height <= 0 || width > 8192 || height > 8192) {
+        return CpuSurface{ .width = 0, .height = 0, .pixels = pixels };
+    }
+    let byte_count: i64 = (width as i64) * (height as i64) * 4;
+    if (byte_count <= 0 || byte_count > 268435456) {
+        return CpuSurface{ .width = 0, .height = 0, .pixels = pixels };
+    }
+    free[u8](&pixels);
+    pixels = make[u8](byte_count as i32);
+    let i: i64 = 0;
+    while (i < byte_count) { push[u8](&pixels, 0); i = i + 1; }
+    return CpuSurface{ .width = width, .height = height, .pixels = pixels };
+}
+
+fn cpu_surface_free(surface: *CpuSurface) void {
+    free[u8](&surface.*.pixels);
+}
+
+fn cpu_raster_free(result: *CpuRasterResult) void {
+    cpu_surface_free(&result.*.surface);
+}
+
+fn cpu_surface_hash(surface: CpuSurface) i64 {
+    let hash: i64 = display_mix(display_mix(17, surface.width as i64), surface.height as i64);
+    let i: i32 = 0;
+    while (i < surface.pixels.len) {
+        hash = display_mix(hash, surface.pixels.data[i] as i64);
+        i = i + 1;
+    }
+    return hash;
+}
+
+fn cpu_result(surface: CpuSurface, error: CpuRasterError, error_op: i32, rendered_ops: i32, pixels_touched: i64) CpuRasterResult {
+    return CpuRasterResult{
+        .surface = surface,
+        .error = error,
+        .error_op = error_op,
+        .rendered_ops = rendered_ops,
+        .pixels_touched = pixels_touched,
+    };
+}
+
+fn cpu_rect_intersection(a: Rect, b: Rect) Rect {
+    let left: i64 = a.x;
+    if (b.x > left) { left = b.x; }
+    let top: i64 = a.y;
+    if (b.y > top) { top = b.y; }
+    let right: i64 = a.x + a.width;
+    if (b.x + b.width < right) { right = b.x + b.width; }
+    let bottom: i64 = a.y + a.height;
+    if (b.y + b.height < bottom) { bottom = b.y + b.height; }
+    if (right <= left || bottom <= top) { return rect(0, 0, 0, 0); }
+    return rect(left, top, right - left, bottom - top);
+}
+
+fn cpu_fixed_safe(value: i64) i32 {
+    return (value >= -1000000000000 && value <= 1000000000000) as i32;
+}
+
+fn cpu_transform_safe(transform: Transform) i32 {
+    let max_scale: i64 = 4096 * unit_scale();
+    return (transform.scale_x > 0 && transform.scale_x <= max_scale &&
+        transform.scale_y > 0 && transform.scale_y <= max_scale &&
+        transform.skew_x == 0 && transform.skew_y == 0 &&
+        cpu_fixed_safe(transform.translate_x) != 0 &&
+        cpu_fixed_safe(transform.translate_y) != 0) as i32;
+}
+
+fn cpu_transform_rect(value: Rect, transform: Transform) Rect {
+    return rect(
+        (value.x * transform.scale_x) / unit_scale() + transform.translate_x,
+        (value.y * transform.scale_y) / unit_scale() + transform.translate_y,
+        (value.width * transform.scale_x) / unit_scale(),
+        (value.height * transform.scale_y) / unit_scale()
+    );
+}
+
+fn cpu_compose_transform(current: Transform, next: Transform) Transform {
+    return Transform{
+        .scale_x = (current.scale_x * next.scale_x) / unit_scale(),
+        .skew_x = 0,
+        .skew_y = 0,
+        .scale_y = (current.scale_y * next.scale_y) / unit_scale(),
+        .translate_x = current.translate_x + (current.scale_x * next.translate_x) / unit_scale(),
+        .translate_y = current.translate_y + (current.scale_y * next.translate_y) / unit_scale(),
+    };
+}
+
+fn cpu_blend_pixel(surface: *CpuSurface, x: i32, y: i32, paint: Paint, coverage: i64) void {
+    if (coverage <= 0) { return; }
+    let index: i32 = (y * surface.*.width + x) * 4;
+    let source_r: i64 = (paint.red * 255 + 32767) / 65535;
+    let source_g: i64 = (paint.green * 255 + 32767) / 65535;
+    let source_b: i64 = (paint.blue * 255 + 32767) / 65535;
+    let paint_alpha: i64 = (paint.alpha * 255 + 32767) / 65535;
+    let source_a: i64 = (paint_alpha * coverage + 2048) / 4096;
+    let dest_r: i64 = surface.*.pixels.data[index] as i64;
+    let dest_g: i64 = surface.*.pixels.data[index + 1] as i64;
+    let dest_b: i64 = surface.*.pixels.data[index + 2] as i64;
+    let dest_a: i64 = surface.*.pixels.data[index + 3] as i64;
+    let inverse_a: i64 = 255 - source_a;
+    let out_alpha_numerator: i64 = source_a * 255 + dest_a * inverse_a;
+    if (out_alpha_numerator <= 0) {
+        surface.*.pixels.data[index] = 0;
+        surface.*.pixels.data[index + 1] = 0;
+        surface.*.pixels.data[index + 2] = 0;
+        surface.*.pixels.data[index + 3] = 0;
+        return;
+    }
+    let out_r_numerator: i64 = source_r * source_a * 255 + dest_r * dest_a * inverse_a;
+    let out_g_numerator: i64 = source_g * source_a * 255 + dest_g * dest_a * inverse_a;
+    let out_b_numerator: i64 = source_b * source_a * 255 + dest_b * dest_a * inverse_a;
+    surface.*.pixels.data[index] = ((out_r_numerator + out_alpha_numerator / 2) / out_alpha_numerator) as u8;
+    surface.*.pixels.data[index + 1] = ((out_g_numerator + out_alpha_numerator / 2) / out_alpha_numerator) as u8;
+    surface.*.pixels.data[index + 2] = ((out_b_numerator + out_alpha_numerator / 2) / out_alpha_numerator) as u8;
+    surface.*.pixels.data[index + 3] = ((out_alpha_numerator + 127) / 255) as u8;
+}
+
+fn cpu_fill_rect(surface: *CpuSurface, raw_bounds: Rect, clip: Rect, paint: Paint) i64 {
+    let surface_bounds: Rect = rect(0, 0, (surface.*.width as i64) * unit_scale(), (surface.*.height as i64) * unit_scale());
+    let bounds: Rect = cpu_rect_intersection(cpu_rect_intersection(raw_bounds, clip), surface_bounds);
+    if (bounds.width <= 0 || bounds.height <= 0) { return 0; }
+    let first_x: i32 = (bounds.x / unit_scale()) as i32;
+    let first_y: i32 = (bounds.y / unit_scale()) as i32;
+    let last_x: i32 = ((bounds.x + bounds.width + unit_scale() - 1) / unit_scale()) as i32;
+    let last_y: i32 = ((bounds.y + bounds.height + unit_scale() - 1) / unit_scale()) as i32;
+    let touched: i64 = 0;
+    let y: i32 = first_y;
+    while (y < last_y) {
+        let pixel_top: i64 = (y as i64) * unit_scale();
+        let overlap_top: i64 = bounds.y;
+        if (pixel_top > overlap_top) { overlap_top = pixel_top; }
+        let overlap_bottom: i64 = bounds.y + bounds.height;
+        if (pixel_top + unit_scale() < overlap_bottom) { overlap_bottom = pixel_top + unit_scale(); }
+        let x: i32 = first_x;
+        while (x < last_x) {
+            let pixel_left: i64 = (x as i64) * unit_scale();
+            let overlap_left: i64 = bounds.x;
+            if (pixel_left > overlap_left) { overlap_left = pixel_left; }
+            let overlap_right: i64 = bounds.x + bounds.width;
+            if (pixel_left + unit_scale() < overlap_right) { overlap_right = pixel_left + unit_scale(); }
+            let coverage: i64 = (overlap_right - overlap_left) * (overlap_bottom - overlap_top);
+            if (coverage > 0) {
+                cpu_blend_pixel(surface, x, y, paint, coverage);
+                touched = touched + 1;
+            }
+            x = x + 1;
+        }
+        y = y + 1;
+    }
+    return touched;
+}
+
+fn cpu_rasterize(list: DisplayList, width: i32, height: i32) CpuRasterResult {
+    let surface: CpuSurface = cpu_surface_make(width, height);
+    if (surface.width == 0 || surface.height == 0) {
+        return cpu_result(surface, CpuRasterError.invalid_surface, 0 - 1, 0, 0);
+    }
+    if (list.sealed == 0) {
+        return cpu_result(surface, CpuRasterError.unsealed_display_list, 0 - 1, 0, 0);
+    }
+    if (display_list_verify(list) != DisplayError.none) {
+        return cpu_result(surface, CpuRasterError.mutated_display_list, 0 - 1, 0, 0);
+    }
+
+    let stack: ArrayList[CpuRasterState] = make[CpuRasterState](16);
+    let current: CpuRasterState = CpuRasterState{
+        .clip = rect(0, 0, (width as i64) * unit_scale(), (height as i64) * unit_scale()),
+        .transform = transform_identity(),
+    };
+    let rendered_ops: i32 = 0;
+    let pixels_touched: i64 = 0;
+    let i: i32 = 0;
+    while (i < list.ops.len) {
+        let op: DisplayOp = list.ops.data[i];
+        if (op.kind == DisplayOpKind.save) {
+            push[CpuRasterState](&stack, current);
+        } else if (op.kind == DisplayOpKind.restore) {
+            current = pop[CpuRasterState](&stack);
+        } else if (op.kind == DisplayOpKind.clip_rect) {
+            if (cpu_fixed_safe(op.bounds.x) == 0 || cpu_fixed_safe(op.bounds.y) == 0 ||
+                cpu_fixed_safe(op.bounds.width) == 0 || cpu_fixed_safe(op.bounds.height) == 0) {
+                free[CpuRasterState](&stack);
+                return cpu_result(surface, CpuRasterError.invalid_geometry, i, rendered_ops, pixels_touched);
+            }
+            let transformed: Rect = cpu_transform_rect(op.bounds, current.transform);
+            current.clip = cpu_rect_intersection(current.clip, transformed);
+        } else if (op.kind == DisplayOpKind.concat_transform) {
+            if (cpu_transform_safe(op.transform) == 0) {
+                free[CpuRasterState](&stack);
+                return cpu_result(surface, CpuRasterError.unsupported_operation, i, rendered_ops, pixels_touched);
+            }
+            let composed: Transform = cpu_compose_transform(current.transform, op.transform);
+            if (cpu_transform_safe(composed) == 0) {
+                free[CpuRasterState](&stack);
+                return cpu_result(surface, CpuRasterError.invalid_geometry, i, rendered_ops, pixels_touched);
+            }
+            current.transform = composed;
+        } else if (op.kind == DisplayOpKind.fill_rect) {
+            if (cpu_fixed_safe(op.bounds.x) == 0 || cpu_fixed_safe(op.bounds.y) == 0 ||
+                cpu_fixed_safe(op.bounds.width) == 0 || cpu_fixed_safe(op.bounds.height) == 0) {
+                free[CpuRasterState](&stack);
+                return cpu_result(surface, CpuRasterError.invalid_geometry, i, rendered_ops, pixels_touched);
+            }
+            let transformed: Rect = cpu_transform_rect(op.bounds, current.transform);
+            if (cpu_fixed_safe(transformed.x) == 0 || cpu_fixed_safe(transformed.y) == 0 ||
+                cpu_fixed_safe(transformed.width) == 0 || cpu_fixed_safe(transformed.height) == 0) {
+                free[CpuRasterState](&stack);
+                return cpu_result(surface, CpuRasterError.invalid_geometry, i, rendered_ops, pixels_touched);
+            }
+            pixels_touched = pixels_touched + cpu_fill_rect(&surface, transformed, current.clip, op.paint);
+        } else {
+            free[CpuRasterState](&stack);
+            return cpu_result(surface, CpuRasterError.unsupported_operation, i, rendered_ops, pixels_touched);
+        }
+        rendered_ops = rendered_ops + 1;
+        i = i + 1;
+    }
+    free[CpuRasterState](&stack);
+    return cpu_result(surface, CpuRasterError.none, 0 - 1, rendered_ops, pixels_touched);
+}

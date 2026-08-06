@@ -75,6 +75,27 @@ fn display_color_channel(value: i64) i64 {
     return value;
 }
 
+fn display_fixed_value_valid(value: i64) i32 {
+    return (value >= 0 - unbounded_extent() && value <= unbounded_extent()) as i32;
+}
+
+fn display_paint_valid(paint: Paint) i32 {
+    return (paint.red >= 0 && paint.red <= 65535 &&
+        paint.green >= 0 && paint.green <= 65535 &&
+        paint.blue >= 0 && paint.blue <= 65535 &&
+        paint.alpha >= 0 && paint.alpha <= 65535 &&
+        paint.stroke_width >= 0 && display_fixed_value_valid(paint.stroke_width) != 0) as i32;
+}
+
+fn display_transform_valid(transform: Transform) i32 {
+    return (display_fixed_value_valid(transform.scale_x) != 0 &&
+        display_fixed_value_valid(transform.skew_x) != 0 &&
+        display_fixed_value_valid(transform.skew_y) != 0 &&
+        display_fixed_value_valid(transform.scale_y) != 0 &&
+        display_fixed_value_valid(transform.translate_x) != 0 &&
+        display_fixed_value_valid(transform.translate_y) != 0) as i32;
+}
+
 fn paint_rgba16(red: i64, green: i64, blue: i64, alpha: i64) Paint {
     return Paint{
         .red = display_color_channel(red),
@@ -174,6 +195,12 @@ fn display_op_requires_resource(kind: DisplayOpKind) i32 {
 
 fn display_list_push(list: *DisplayList, op: DisplayOp) DisplayError {
     if (list.*.sealed != 0) { return display_fail(list, DisplayError.sealed); }
+    if (display_fixed_value_valid(op.bounds.x) == 0 ||
+        display_fixed_value_valid(op.bounds.y) == 0 ||
+        display_fixed_value_valid(op.bounds.width) == 0 ||
+        display_fixed_value_valid(op.bounds.height) == 0) {
+        return display_fail(list, DisplayError.invalid_geometry);
+    }
     if (display_op_requires_bounds(op.kind) != 0 &&
         (op.bounds.width <= 0 || op.bounds.height <= 0)) {
         return display_fail(list, DisplayError.invalid_geometry);
@@ -181,7 +208,10 @@ fn display_list_push(list: *DisplayList, op: DisplayOp) DisplayError {
     if (display_op_requires_resource(op.kind) != 0 && op.resource_id <= 0) {
         return display_fail(list, DisplayError.invalid_resource);
     }
-    if (op.paint.stroke_width < 0) { return display_fail(list, DisplayError.invalid_parameter); }
+    if (display_paint_valid(op.paint) == 0 || display_transform_valid(op.transform) == 0 ||
+        op.parameter < 0 || display_fixed_value_valid(op.parameter) == 0) {
+        return display_fail(list, DisplayError.invalid_parameter);
+    }
     if (op.kind == DisplayOpKind.begin_layer && (op.parameter < 0 || op.parameter > 65535)) {
         return display_fail(list, DisplayError.invalid_parameter);
     }

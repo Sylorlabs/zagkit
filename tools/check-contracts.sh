@@ -30,6 +30,15 @@ for path in \
     require_file "$path"
 done
 
+grep -q 'Run strict headless contracts' .github/workflows/contracts.yml \
+    || fail "CI no longer executes strict headless contracts"
+grep -q 'contracts/toolchain.json' .github/workflows/contracts.yml \
+    || fail "CI no longer resolves its Zag revision from the toolchain contract"
+grep -q 'ZAG_BOOTSTRAP_MEMORY_GUARD=off .toolchain/zag/zag-poc/bootstrap.sh' .github/workflows/contracts.yml \
+    || fail "CI no longer self-hosts the pinned Zag source before testing"
+grep -q -- '--analyze-strict' tools/test-headless.sh \
+    || fail "headless tests no longer enforce strict Zag analysis"
+
 for path in \
     docs/rfcs/0000-rfc-process.md \
     docs/rfcs/0001-product-and-platform-contract.md \

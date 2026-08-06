@@ -23,6 +23,12 @@ include a generated capability record and exact Zag compiler revision.
   contract with ID-first targeting and explicit scale-aware pixel fallback.
 - An experimental immutable display list for explicit paints, resources, clips,
   transforms, layers, and effects with deterministic content identity.
+- A versioned canonical display-list codec with bounded validated decoding and
+  byte-identical replay round trips.
+- The first deterministic CPU-oracle subset for fixed-point fills, clipping,
+  axis-aligned transforms, fractional coverage, and source-over alpha.
+- Strict executable headless contracts in CI using the exact pinned Zag
+  revision rather than an ambient compiler.
 
 ## 0.1.0-experimental.0 (unreleased)
 

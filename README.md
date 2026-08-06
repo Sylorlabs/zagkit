@@ -83,14 +83,30 @@ fixed-point geometry, RGBA16 paints, paths, images, glyph runs, layers, and
 effects as explicit operations. Invalid geometry, resources, parameters, and
 stack balance fail before mutation; the builder rejects writes after sealing,
 and verification detects out-of-contract raw mutation against deterministic
-content identity. Path/resource storage, serialization, damage, CPU
-rasterization, and GPU transport remain open.
+content identity. Path/resource storage, resource serialization, damage, CPU
+rasterization, and GPU transport remain open. The first versioned binary codec
+now round-trips sealed lists byte-identically and rejects malformed, truncated,
+noncanonical, unknown-version, and hash-mismatched input; schema evolution,
+resource payloads, and fuzz coverage remain open.
+
+The first CPU-oracle subset rasterizes fixed-point rectangle fills with exact
+clip and axis-aligned transform state, area-based fractional edge coverage, and
+deterministic source-over alpha into owned RGBA8 surfaces. Unsupported paths,
+images, glyphs, strokes, skew, layers, and effects fail at the exact operation;
+this subset is not yet the complete CPU renderer required by Milestone 2.
 
 Run the deterministic headless foundation test with:
 
 ```sh
 ./tools/test-headless.sh
 ```
+
+The script compiles every executable contract with strict Zag semantic
+analysis. CI checks out the exact compiler revision from the toolchain contract
+self-hosts that pinned source to a byte-identical compiler fixed point, and runs
+the same suite before validating repository metadata. The committed upstream
+seed is bootstrap authority, not evidence that it already contains later
+compiler-source fixes.
 
 ## Build order
 

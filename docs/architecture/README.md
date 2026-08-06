@@ -47,3 +47,15 @@ RGBA16 paints, layers, and effects remain explicit rather than backend calls.
 Balanced lists seal with deterministic content identity, and verification
 detects mutation outside the builder contract before rendering. Resource
 storage, serialization, damage, the CPU oracle, and GPU transports remain open.
+
+Display-list replay uses the versioned little-endian `ZKDL` codec. Decoding is
+bounded to one million operations, reconstructs operations only through the
+same validation path as live building, requires balanced seal state, verifies
+the stored content identity and revision, and rejects trailing bytes so one
+scene has one canonical encoding. Resource payload serialization remains open.
+
+The CPU oracle begins with deterministic RGBA8 rectangle rasterization from
+26.6 fixed-point geometry. Clip and positive axis-aligned transform state,
+fractional edge coverage, and source-over alpha are integer-only. Every
+unsupported display operation fails at its exact index instead of silently
+degrading or claiming a visual result.
