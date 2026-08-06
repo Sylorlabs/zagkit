@@ -43,7 +43,7 @@ is normative in [DEPENDENCIES.md](DEPENDENCIES.md).
 | Product and architecture contract | accepted | [RFC index](docs/rfcs/README.md) |
 | Compiler dependency | pinned, prerequisites incomplete | [toolchain lock](contracts/toolchain.json) |
 | Platform shells | unavailable | [support matrix](SUPPORT.md) |
-| Headless core | experimental state, reconciliation, intrinsic measurement, geometry, Flex, Grid, Overlay, scroll, virtual collections, collection semantics, Talkback, canonical paths, display lists, CPU raster, input, replay, and motion | [headless test](tools/test-headless.sh) |
+| Headless core | experimental state, reconciliation, intrinsic measurement, geometry, Flex, Grid, Overlay, scroll, virtual collections, collection semantics, Talkback, canonical paths and images, display lists, CPU raster, input, replay, and motion | [headless test](tools/test-headless.sh) |
 | Components and visual language | inventory only, visual review pending | [component inventory](contracts/components.json) |
 | Flex and Zagkit Talkback | Flex foundation and in-process ID-first Talkback dispatch executing; native transport remains unavailable | [Talkback contract](docs/automation/talkback.md) |
 | Benchmarks | scene specifications only, no results | [benchmark contract](benchmarks/README.md) |
@@ -143,19 +143,22 @@ geometry, identity, truncation, and trailing bytes are validated before use.
 The version 2
 binary codec round-trips resource metadata, payloads, revisions, allocation
 policy, and operations byte-identically and rejects malformed, truncated,
-noncanonical, unknown-version, and hash-mismatched input. Path flattening and
-rasterization, other payload interpretation, damage, complete CPU rasterization,
-GPU transport, schema evolution, and fuzz coverage remain open. See the
-[path contract](docs/architecture/paths.md).
+noncanonical, unknown-version, and hash-mismatched input. Scale-adaptive path
+coverage, encoded image and glyph interpretation, damage, complete CPU
+rasterization, GPU transport, schema evolution, and fuzz coverage remain open.
+See the [path contract](docs/architecture/paths.md) and
+[image contract](docs/architecture/images.md).
 
 The first CPU-oracle subset rasterizes fixed-point rectangle fills, centered
 rectangle strokes, and canonical path fills with exact clip and axis-aligned
 transform state, analytic rectangle coverage, deterministic 8 by 8 path
 coverage, non-zero and even-odd winding, bounded curve flattening, and
 source-over alpha into owned RGBA8 surfaces. Path edge and work budgets fail
-before pixel mutation. Unsupported images, glyphs, path strokes, skew, layers,
-and effects fail at the exact operation; this subset is not yet the complete
-CPU renderer required by Milestone 2.
+before pixel mutation. Canonical decoded sRGB RGBA8 images render with exact
+one-to-one texels, premultiplied bilinear scaling, fractional-edge coverage,
+clip and transform state, and operation opacity. Unsupported color conversion,
+glyphs, path strokes, skew, layers, and effects fail at the exact operation;
+this subset is not yet the complete CPU renderer required by Milestone 2.
 
 The first input slice resolves full affine transforms back to local coordinates,
 honors local clips and z-order, rejects singular or malformed hit nodes, and

@@ -642,6 +642,22 @@ fn replay_build_scene(state_value: i64, backend_generation: i64) ReplayResult {
         semantics_tree_free(&semantics);
         return replay_result_error(ReplayError.scene_error, 0 - 1, 0);
     }
+    let replay_image_payload: []u8 = "RGBA";
+    if (magnitude != 0) { replay_image_payload = "ZKUI"; }
+    let replay_image_spec: RenderResourceSpec = render_resource_spec(
+        902, RenderResourceKind.image, replay_image_payload,
+        image_resource_format_tag()
+    );
+    replay_image_spec.width = 1;
+    replay_image_spec.height = 1;
+    replay_image_spec.color_space = RenderColorSpace.srgb;
+    if (display_list_add_resource(&list, replay_image_spec) !=
+        RenderResourceError.none) {
+        display_list_free(&list);
+        flex_wrap_free(&layout);
+        semantics_tree_free(&semantics);
+        return replay_result_error(ReplayError.scene_error, 0 - 1, 0);
+    }
     let first_op: DisplayOp = display_op(DisplayOpKind.fill_rect, node_key(101));
     first_op.bounds = layout.placements.data[0].frame;
     let blue: i64 = (backend_generation % 8) * 4096;
@@ -673,7 +689,17 @@ fn replay_build_scene(state_value: i64, backend_generation: i64) ReplayResult {
     let path_op: DisplayOp = display_op(DisplayOpKind.draw_path, node_key(104));
     path_op.resource_id = 901;
     path_op.paint = paint_rgba16(57344, 49152, 8192, 32768);
-    if (display_list_push(&list, path_op) != DisplayError.none ||
+    if (display_list_push(&list, path_op) != DisplayError.none) {
+        display_list_free(&list);
+        flex_wrap_free(&layout);
+        semantics_tree_free(&semantics);
+        return replay_result_error(ReplayError.scene_error, 0 - 1, 0);
+    }
+    let image_op: DisplayOp = display_op(DisplayOpKind.draw_image, node_key(105));
+    image_op.resource_id = 902;
+    image_op.bounds = rect(5 * unit_scale(), 0, 2 * unit_scale(), 2 * unit_scale());
+    image_op.paint.alpha = 50000;
+    if (display_list_push(&list, image_op) != DisplayError.none ||
         display_list_seal(&list) != DisplayError.none) {
         display_list_free(&list);
         flex_wrap_free(&layout);

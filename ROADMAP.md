@@ -41,7 +41,7 @@ affected Zagkit conformance.
 Strict native Zag contracts currently execute state and dependency tracking,
 keyed reconciliation, bounded geometry, retained intrinsic measurement,
 adaptive and wrapped Flex, semantics, ID-first in-process Talkback dispatch,
-immutable display lists and their codec, a rectangle and path CPU-oracle subset,
+immutable display lists and their codec, a shape and image CPU-oracle subset,
 transformed pointer routing, deterministic replay, and motion kernels. This is
 real headless execution but does not satisfy the milestone exit gate yet.
 

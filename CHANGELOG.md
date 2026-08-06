@@ -44,6 +44,9 @@ include a generated capability record and exact Zag compiler revision.
   even-odd fill rules, line and curve commands, immutable identity, typed
   display-resource validation, malformed-input offsets, and byte-identical
   round trips.
+- Canonical decoded RGBA8 image resources with overflow-safe dimensional
+  validation, exact payload sizing, explicit color-space truth, deterministic
+  premultiplied bilinear CPU sampling, fractional-edge coverage, and opacity.
 - An experimental immutable display list for explicit paints, resources, clips,
   transforms, layers, and effects with deterministic content identity.
 - A versioned canonical display-list codec with bounded validated decoding and

@@ -7,7 +7,8 @@ feed Zagkit paths, decoded images, glyph runs, effects, fonts, SVG, and PNG. It
 is not itself a decoder and does not make an opaque payload renderable.
 SVG parsing, PNG parsing and color management, font validation, glyph shaping,
 and decoded rendering remain separate open contracts. Canonical path payloads
-are the first typed schema layered over this store; see [paths](paths.md).
+and decoded RGBA8 images are the first typed schemas layered over this store;
+see [paths](paths.md) and [images](images.md).
 
 ## Identity and metadata
 
@@ -53,7 +54,7 @@ canonical resource section before operations and reconstructs it through the
 same bounded validation path; decoding and re-encoding are byte identical.
 
 The current executable contract still does not decode SVG or PNG, validate font
-tables, interpret glyph payload schemas, rasterize path strokes or images,
-cache platform uploads, or implement memory-pressure eviction. Those
+tables, interpret glyph payload schemas, rasterize path strokes, convert wide
+gamut images, cache platform uploads, or implement memory-pressure eviction. Those
 capabilities remain unavailable until their own malformed-input, rendering,
 replacement, and cleanup suites pass.

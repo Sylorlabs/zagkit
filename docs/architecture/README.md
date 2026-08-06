@@ -32,6 +32,7 @@ Detailed experimental contracts:
 - [Flex placement and adaptive spacing](flex.md)
 - [motion scheduler and tracks](motion.md)
 - [canonical vector paths](paths.md)
+- [canonical decoded images](images.md)
 
 The first experimental compiled slice now fixes the initial Zag shapes for
 `NodeKey`, `State<T>`, `Binding<T>`, `Action`, `Environment`, `ViewContext`,
@@ -79,7 +80,9 @@ enforces configurable byte and count ceilings, requires exact replacement
 revisions, and verifies sealed byte-level identity. Display lists own the store.
 Path resources additionally require the bounded canonical
 [ZKPATH01 contract](paths.md) and are validated once before operation references
-seal. SVG, PNG, font, image, and glyph decoding remain unavailable.
+seal. Canonical decoded [RGBA8 images](images.md) also have exact dimensional,
+schema, color-space, and payload-size validation. SVG, PNG, font, and glyph
+decoding remain unavailable.
 
 Display-list replay uses the versioned little-endian `ZKDL` version 2 codec.
 Decoding is bounded to one million operations, reconstructs operations through the
@@ -89,10 +92,11 @@ scene has one canonical encoding. A bounded variable-length resource section
 preserves allocation policy, typed metadata, revisions, and exact owned bytes.
 
 The CPU oracle begins with deterministic RGBA8 rectangle fills, centered
-rectangle strokes, and canonical path fills from 26.6 fixed-point geometry.
-Clip and positive axis-aligned transform state, analytic rectangle coverage,
-8 by 8 path coverage, non-zero and even-odd winding, fixed curve flattening,
-and source-over alpha are integer-only.
+rectangle strokes, canonical path fills, and canonical decoded image draws from
+26.6 fixed-point geometry. Clip and positive axis-aligned transform state,
+analytic rectangle coverage, 8 by 8 path coverage, non-zero and even-odd
+winding, fixed curve flattening, premultiplied bilinear image sampling, and
+source-over alpha are integer-only.
 Explicit edge and work ceilings reject pathological path scenes before pixel
 mutation. Every unsupported display operation fails at its exact index instead
 of silently degrading or claiming a visual result.

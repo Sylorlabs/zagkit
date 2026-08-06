@@ -33,7 +33,7 @@ fn build_scene(color: i64) DisplayList {
             path_payload.bytes.data[0..path_payload.bytes.len], path_resource_format_tag()));
     path_encode_free(&path_payload);
     let image_resource: RenderResourceSpec = render_resource_spec(
-        202, RenderResourceKind.image, "RGBA", 2
+        202, RenderResourceKind.image, "RGBA", image_resource_format_tag()
     );
     image_resource.width = 1; image_resource.height = 1;
     image_resource.color_space = RenderColorSpace.srgb;
@@ -152,6 +152,13 @@ fn rejection_contract(state: *TestState) void {
     expect(state, display_list_push(&list, zero_stroke) == DisplayError.invalid_parameter,
         "rectangle strokes require a positive logical width");
 
+    let tinted_image: DisplayOp = display_op(DisplayOpKind.draw_image, node_key(1));
+    tinted_image.bounds = rect(0, 0, 10, 10);
+    tinted_image.resource_id = 1;
+    tinted_image.paint.red = 1;
+    expect(state, display_list_push(&list, tinted_image) == DisplayError.invalid_parameter,
+        "draw-image paint keeps RGB and stroke fields canonical while alpha owns opacity");
+
     _ = display_list_push(&list, display_op(DisplayOpKind.save, node_key(1)));
     expect(state, display_list_seal(&list) == DisplayError.unbalanced_stack && list.sealed == 0, "unbalanced save state cannot seal");
     _ = display_list_push(&list, display_op(DisplayOpKind.restore, node_key(1)));
@@ -188,6 +195,19 @@ fn rejection_contract(state: *TestState) void {
         malformed.error_index == 0 - 1,
         "canonical path validation rejects opaque owned bytes before operation validation");
     display_list_free(&malformed);
+
+    let malformed_image: DisplayList = display_list_make();
+    let malformed_image_spec: RenderResourceSpec = render_resource_spec(
+        7, RenderResourceKind.image, "RGB", image_resource_format_tag()
+    );
+    malformed_image_spec.width = 1;
+    malformed_image_spec.height = 1;
+    malformed_image_spec.color_space = RenderColorSpace.srgb;
+    _ = display_list_add_resource(&malformed_image, malformed_image_spec);
+    expect(state, display_list_seal(&malformed_image) == DisplayError.invalid_resource &&
+        malformed_image.error_index == 0 - 1,
+        "decoded image byte counts are validated before operation references");
+    display_list_free(&malformed_image);
 }
 
 fn deterministic_sweep(state: *TestState) void {

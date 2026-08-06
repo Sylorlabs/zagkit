@@ -3,6 +3,7 @@
 @import("../core/view_contract.zag")
 @import("resources.zag")
 @import("path.zag")
+@import("image.zag")
 
 enum DisplayOpKind {
     save,
@@ -272,6 +273,9 @@ fn display_resource_payload_valid(resource: RenderResource) i32 {
         return (resource.format_tag == path_resource_format_tag() &&
             path_payload_valid(resource.payload.data[0..resource.payload.len]) != 0) as i32;
     }
+    if (resource.kind == RenderResourceKind.image) {
+        return (image_resource_validate(resource) == ImagePayloadError.none) as i32;
+    }
     return 1;
 }
 
@@ -306,6 +310,11 @@ fn display_list_push(list: *DisplayList, op: DisplayOp) DisplayError {
         return display_fail(list, DisplayError.invalid_parameter);
     }
     if (op.kind == DisplayOpKind.stroke_rect && op.paint.stroke_width <= 0) {
+        return display_fail(list, DisplayError.invalid_parameter);
+    }
+    if (op.kind == DisplayOpKind.draw_image &&
+        (op.paint.red != 0 || op.paint.green != 0 || op.paint.blue != 0 ||
+         op.paint.stroke_width != unit_scale())) {
         return display_fail(list, DisplayError.invalid_parameter);
     }
     if (op.kind == DisplayOpKind.begin_layer && (op.parameter < 0 || op.parameter > 65535)) {

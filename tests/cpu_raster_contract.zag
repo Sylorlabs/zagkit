@@ -31,6 +31,34 @@ fn path_scene(path: PathData, paint: Paint) DisplayList {
     return list;
 }
 
+fn image_scene(pixels: []u8, width: i64, height: i64,
+    bounds: Rect, color_space: RenderColorSpace, opacity: i64) DisplayList {
+    let list: DisplayList = display_list_make();
+    let spec: RenderResourceSpec = render_resource_spec(
+        18, RenderResourceKind.image, pixels, image_resource_format_tag()
+    );
+    spec.width = width;
+    spec.height = height;
+    spec.color_space = color_space;
+    _ = display_list_add_resource(&list, spec);
+    let draw: DisplayOp = display_op(DisplayOpKind.draw_image, node_key(18));
+    draw.resource_id = 18;
+    draw.bounds = bounds;
+    draw.paint.alpha = opacity;
+    _ = display_list_push(&list, draw);
+    _ = display_list_seal(&list);
+    return list;
+}
+
+fn rgba_pixels_2x2() ArrayList[u8] {
+    let pixels: ArrayList[u8] = make[u8](16);
+    push[u8](&pixels, 255); push[u8](&pixels, 0); push[u8](&pixels, 0); push[u8](&pixels, 255);
+    push[u8](&pixels, 0); push[u8](&pixels, 255); push[u8](&pixels, 0); push[u8](&pixels, 255);
+    push[u8](&pixels, 0); push[u8](&pixels, 0); push[u8](&pixels, 255); push[u8](&pixels, 255);
+    push[u8](&pixels, 255); push[u8](&pixels, 255); push[u8](&pixels, 255); push[u8](&pixels, 0);
+    return pixels;
+}
+
 fn square_path(fill_rule: PathFillRule, include_inner: i32) PathData {
     let path: PathData = path_make(fill_rule);
     _ = path_move_to(&path, path_point(0, 0));
@@ -148,6 +176,67 @@ fn stroke_rect_contract(state: *TestState) void {
         "stroke corners subtract inner area with deterministic rounding");
     cpu_raster_free(&result);
     display_list_free(&list);
+}
+
+fn image_contract(state: *TestState) void {
+    let pixels: ArrayList[u8] = rgba_pixels_2x2();
+    let exact: DisplayList = image_scene(pixels.data[0..pixels.len], 2, 2,
+        rect(0, 0, 2 * unit_scale(), 2 * unit_scale()),
+        RenderColorSpace.srgb, 65535);
+    let exact_result: CpuRasterResult = cpu_rasterize(exact, 2, 2);
+    expect(state, exact_result.error == CpuRasterError.none &&
+        exact_result.rendered_ops == 1 && exact_result.pixels_touched == 3,
+        "canonical decoded images render through the explicit draw-image operation");
+    expect(state, pixel(exact_result.surface, 0, 0, 0) == 255 &&
+        pixel(exact_result.surface, 1, 0, 1) == 255 &&
+        pixel(exact_result.surface, 0, 1, 2) == 255 &&
+        pixel(exact_result.surface, 1, 1, 3) == 0,
+        "one-to-one image rendering preserves exact RGBA8 texels including transparency");
+    cpu_raster_free(&exact_result);
+    display_list_free(&exact);
+    free[u8](&pixels);
+
+    let gradient: ArrayList[u8] = make[u8](8);
+    push[u8](&gradient, 255); push[u8](&gradient, 0); push[u8](&gradient, 0); push[u8](&gradient, 255);
+    push[u8](&gradient, 0); push[u8](&gradient, 0); push[u8](&gradient, 255); push[u8](&gradient, 255);
+    let scaled: DisplayList = image_scene(gradient.data[0..gradient.len], 2, 1,
+        rect(0, 0, 4 * unit_scale(), unit_scale()), RenderColorSpace.srgb, 65535);
+    let scaled_result: CpuRasterResult = cpu_rasterize(scaled, 4, 1);
+    expect(state, pixel(scaled_result.surface, 0, 0, 0) == 255 &&
+        pixel(scaled_result.surface, 0, 0, 2) == 0 &&
+        pixel(scaled_result.surface, 1, 0, 0) == 191 &&
+        pixel(scaled_result.surface, 1, 0, 2) == 64 &&
+        pixel(scaled_result.surface, 2, 0, 0) == 64 &&
+        pixel(scaled_result.surface, 2, 0, 2) == 191 &&
+        pixel(scaled_result.surface, 3, 0, 2) == 255,
+        "bilinear scaling is symmetric and aligns source and destination pixel centers");
+    cpu_raster_free(&scaled_result);
+    display_list_free(&scaled);
+    free[u8](&gradient);
+
+    let red: ArrayList[u8] = make[u8](4);
+    push[u8](&red, 255); push[u8](&red, 0); push[u8](&red, 0); push[u8](&red, 255);
+    let translucent: DisplayList = image_scene(red.data[0..red.len], 1, 1,
+        rect(unit_scale() / 2, 0, unit_scale(), unit_scale()),
+        RenderColorSpace.srgb, 32768);
+    let translucent_result: CpuRasterResult = cpu_rasterize(translucent, 2, 1);
+    expect(state, pixel(translucent_result.surface, 0, 0, 0) == 255 &&
+        pixel(translucent_result.surface, 1, 0, 0) == 255 &&
+        pixel(translucent_result.surface, 0, 0, 3) == 64 &&
+        pixel(translucent_result.surface, 1, 0, 3) == 64,
+        "fractional image edges and operation opacity compose without dark fringes");
+    cpu_raster_free(&translucent_result);
+    display_list_free(&translucent);
+
+    let unsupported: DisplayList = image_scene(red.data[0..red.len], 1, 1,
+        rect(0, 0, unit_scale(), unit_scale()), RenderColorSpace.display_p3, 65535);
+    let unsupported_result: CpuRasterResult = cpu_rasterize(unsupported, 1, 1);
+    expect(state, unsupported_result.error == CpuRasterError.unsupported_operation &&
+        unsupported_result.error_op == 0 && unsupported_result.pixels_touched == 0,
+        "unimplemented color conversion fails before image pixels are touched");
+    cpu_raster_free(&unsupported_result);
+    display_list_free(&unsupported);
+    free[u8](&red);
 }
 
 fn path_fill_contract(state: *TestState) void {
@@ -313,6 +402,7 @@ fn main() i32 {
     clip_and_transform_contract(&state);
     deterministic_contract(&state);
     stroke_rect_contract(&state);
+    image_contract(&state);
     path_fill_contract(&state);
     path_work_limit_contract(&state);
     path_clip_transform_contract(&state);
