@@ -1,0 +1,125 @@
+@import("../src/input/router.zag")
+
+struct TestState { passed: i32, failed: i32 }
+
+fn expect(state: *TestState, condition: i32, name: []u8) void {
+    if (condition != 0) {
+        state.*.passed = state.*.passed + 1;
+        _zag_print("ok  "); _zag_println(name);
+    } else {
+        state.*.failed = state.*.failed + 1;
+        _zag_print("FAIL "); _zag_println(name);
+    }
+}
+
+fn basic_tree() HitTree {
+    let tree: HitTree = hit_tree_make();
+    let root: HitNode = hit_node(node_key(1), hit_root_key(), rect(0, 0, 200, 200));
+    root.z_order = 0;
+    _ = hit_tree_add(&tree, root);
+    let bottom: HitNode = hit_node(node_key(2), node_key(1), rect(0, 0, 100, 100));
+    bottom.z_order = 1;
+    bottom.focusable = 1;
+    _ = hit_tree_add(&tree, bottom);
+    let top: HitNode = hit_node(node_key(3), node_key(1), rect(0, 0, 100, 100));
+    top.z_order = 2;
+    top.focusable = 1;
+    top.has_clip = 1;
+    top.clip = rect(10, 10, 50, 50);
+    _ = hit_tree_add(&tree, top);
+    return tree;
+}
+
+fn hit_contract(state: *TestState) void {
+    let tree: HitTree = basic_tree();
+    let overlap: HitResult = hit_test(tree, 20, 20);
+    let clipped: HitResult = hit_test(tree, 5, 5);
+    expect(state, overlap.found == 1 && overlap.id.value == 3, "highest z-order clipped node wins overlap");
+    expect(state, clipped.found == 1 && clipped.id.value == 2, "local clip excludes the top node without hiding lower content");
+
+    let rotated: HitNode = hit_node(node_key(4), node_key(1), rect(0, 0, 64, 64));
+    rotated.z_order = 5;
+    rotated.transform = Transform{
+        .scale_x = 0, .skew_x = 0 - unit_scale(),
+        .skew_y = unit_scale(), .scale_y = 0,
+        .translate_x = 128, .translate_y = 0,
+    };
+    _ = hit_tree_add(&tree, rotated);
+    let transformed: HitResult = hit_test(tree, 96, 32);
+    expect(state, transformed.id.value == 4 && transformed.local_x == 32 && transformed.local_y == 32, "affine inverse returns exact local coordinates for rotated content");
+    hit_tree_free(&tree);
+}
+
+fn validation_contract(state: *TestState) void {
+    let tree: HitTree = hit_tree_make();
+    let root: HitNode = hit_node(node_key(10), hit_root_key(), rect(0, 0, 10, 10));
+    _ = hit_tree_add(&tree, root);
+    expect(state, hit_tree_add(&tree, root) == HitTreeError.duplicate_id && tree.nodes.len == 1, "duplicate hit IDs fail before mutation");
+    let orphan: HitNode = hit_node(node_key(11), node_key(99), rect(0, 0, 10, 10));
+    expect(state, hit_tree_add(&tree, orphan) == HitTreeError.missing_parent, "missing hit parent fails visibly");
+    let singular: HitNode = hit_node(node_key(12), node_key(10), rect(0, 0, 10, 10));
+    singular.transform.scale_x = 0;
+    expect(state, hit_tree_add(&tree, singular) == HitTreeError.singular_transform, "singular transforms never enter the hit tree");
+    let extreme: HitNode = hit_node(node_key(13), node_key(10), rect(0, 0, 10, 10));
+    extreme.transform.translate_x = 1000000001;
+    expect(state, hit_tree_add(&tree, extreme) == HitTreeError.invalid_transform, "unsafe transform translation never enters the hit tree");
+    expect(state, hit_test(tree, 1000000001, 0).found == 0, "unsafe direct hit coordinates fail closed before affine arithmetic");
+    hit_tree_free(&tree);
+}
+
+fn routing_contract(state: *TestState) void {
+    let tree: HitTree = basic_tree();
+    let router: InputRouter = input_router_make();
+    expect(state, input_request_capture(&router, tree, 7, node_key(3)) == 0, "capture cannot target a pointer before its down phase");
+    let down: RouteResult = input_route_pointer(&router, tree, pointer_event(7, PointerPhase.down, 20, 20));
+    expect(state, down.hit.id.value == 3 && router.focus.value == 3 && down.captured == 0, "pointer down targets top node and advances focus");
+    expect(state, input_request_capture(&router, tree, 7, node_key(3)) == 1, "enabled node can capture an active pointer identity");
+    let outside: RouteResult = input_route_pointer(&router, tree, pointer_event(7, PointerPhase.move, 500, 500));
+    expect(state, outside.hit.id.value == 3 && outside.captured == 1 && outside.hit.local_x == 500, "captured move remains ID-routed outside bounds with local coordinates");
+    let up: RouteResult = input_route_pointer(&router, tree, pointer_event(7, PointerPhase.up, 500, 500));
+    expect(state, up.captured == 1 && input_capture_index(router, 7) < 0, "pointer up routes to capture then releases it");
+    let after: RouteResult = input_route_pointer(&router, tree, pointer_event(7, PointerPhase.move, 500, 500));
+    expect(state, after.hit.found == 0 && after.captured == 0, "uncaptured outside move has no phantom target");
+    expect(state, router.events.len == 4 && router.events.data[3].sequence == 4, "input evidence is one monotonic ordered stream");
+
+    let invalid: RouteResult = input_route_pointer(&router, tree, pointer_event(0 - 1, PointerPhase.down, 0, 0));
+    expect(state, invalid.status == RouteStatus.invalid_pointer && invalid.sequence == 5, "invalid pointers fail visibly without escaping the event log");
+    expect(state, input_request_focus(&router, tree, node_key(1)) == 0 && input_request_focus(&router, tree, node_key(2)) == 1, "focus requests enforce enabled focusable targets");
+    input_router_free(&router);
+    hit_tree_free(&tree);
+}
+
+fn stale_capture_contract(state: *TestState) void {
+    let tree: HitTree = basic_tree();
+    let router: InputRouter = input_router_make();
+    _ = input_route_pointer(&router, tree, pointer_event(9, PointerPhase.down, 20, 20));
+    _ = input_request_capture(&router, tree, 9, node_key(3));
+    tree.nodes.data[2].enabled = 0;
+    let result: RouteResult = input_route_pointer(&router, tree, pointer_event(9, PointerPhase.move, 20, 20));
+    expect(state, result.captured == 0 && result.hit.id.value == 2 && input_capture_index(router, 9) < 0, "disabled capture target releases and reroutes from current truth");
+    _ = input_route_pointer(&router, tree, pointer_event(10, PointerPhase.down, 20, 20));
+    _ = input_request_capture(&router, tree, 10, node_key(2));
+    let cancelled: RouteResult = input_route_pointer(&router, tree, pointer_event(10, PointerPhase.cancel, 500, 500));
+    let after_cancel: RouteResult = input_route_pointer(&router, tree, pointer_event(10, PointerPhase.move, 500, 500));
+    expect(state, cancelled.captured == 1 && cancelled.hit.id.value == 2 &&
+        input_capture_index(router, 10) < 0 && input_active_index(router, 10) < 0 &&
+        after_cancel.hit.found == 0, "cancel routes once to capture then clears active pointer state");
+    input_router_free(&router);
+    hit_tree_free(&tree);
+}
+
+fn main() i32 {
+    let state: TestState = TestState{ .passed = 0, .failed = 0 };
+    hit_contract(&state);
+    validation_contract(&state);
+    routing_contract(&state);
+    stale_capture_contract(&state);
+    let passed_text: []u8 = _zag_i64_to_str(state.passed as i64);
+    let failed_text: []u8 = _zag_i64_to_str(state.failed as i64);
+    _zag_print("Input contract: pass="); _zag_print(passed_text);
+    _zag_print(" fail="); _zag_println(failed_text);
+    _zag_str_free(passed_text);
+    _zag_str_free(failed_text);
+    if (state.failed == 0) { return 0; }
+    return 1;
+}

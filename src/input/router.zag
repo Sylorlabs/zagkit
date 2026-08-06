@@ -1,0 +1,182 @@
+@import("std:list")
+@import("hit_test.zag")
+
+enum PointerPhase { down, move, up, cancel, wheel }
+enum RouteStatus { accepted, invalid_pointer }
+
+struct PointerEvent {
+    pointer_id: i64,
+    phase: PointerPhase,
+    x: i64,
+    y: i64,
+    buttons: i64,
+}
+
+struct PointerCapture {
+    pointer_id: i64,
+    target: NodeKey,
+}
+
+struct RoutedEvent {
+    sequence: i64,
+    pointer_id: i64,
+    phase: PointerPhase,
+    target: NodeKey,
+    local_x: i64,
+    local_y: i64,
+    captured: i32,
+    status: RouteStatus,
+}
+
+struct RouteResult {
+    status: RouteStatus,
+    hit: HitResult,
+    sequence: i64,
+    captured: i32,
+}
+
+struct InputRouter {
+    captures: ArrayList[PointerCapture],
+    active_pointers: ArrayList[i64],
+    events: ArrayList[RoutedEvent],
+    focus: NodeKey,
+    next_sequence: i64,
+}
+
+fn pointer_event(pointer_id: i64, phase: PointerPhase, x: i64, y: i64) PointerEvent {
+    return PointerEvent{ .pointer_id = pointer_id, .phase = phase, .x = x, .y = y, .buttons = 0 };
+}
+
+fn input_router_make() InputRouter {
+    return InputRouter{
+        .captures = make[PointerCapture](4),
+        .active_pointers = make[i64](4),
+        .events = make[RoutedEvent](32),
+        .focus = hit_root_key(),
+        .next_sequence = 1,
+    };
+}
+
+fn input_router_free(router: *InputRouter) void {
+    free[PointerCapture](&router.*.captures);
+    free[i64](&router.*.active_pointers);
+    free[RoutedEvent](&router.*.events);
+}
+
+fn input_active_index(router: InputRouter, pointer_id: i64) i32 {
+    let i: i32 = router.active_pointers.len - 1;
+    while (i >= 0) {
+        if (router.active_pointers.data[i] == pointer_id) { return i; }
+        i = i - 1;
+    }
+    return 0 - 1;
+}
+
+fn input_set_active(router: *InputRouter, pointer_id: i64) void {
+    if (input_active_index(router.*, pointer_id) < 0) { push[i64](&router.*.active_pointers, pointer_id); }
+}
+
+fn input_clear_active(router: *InputRouter, pointer_id: i64) void {
+    let index: i32 = input_active_index(router.*, pointer_id);
+    if (index < 0) { return; }
+    let i: i32 = index;
+    while (i + 1 < router.*.active_pointers.len) {
+        router.*.active_pointers.data[i] = router.*.active_pointers.data[i + 1];
+        i = i + 1;
+    }
+    router.*.active_pointers.len = router.*.active_pointers.len - 1;
+}
+
+fn input_capture_index(router: InputRouter, pointer_id: i64) i32 {
+    let i: i32 = router.captures.len - 1;
+    while (i >= 0) {
+        if (router.captures.data[i].pointer_id == pointer_id) { return i; }
+        i = i - 1;
+    }
+    return 0 - 1;
+}
+
+fn input_release_capture(router: *InputRouter, pointer_id: i64) i32 {
+    let index: i32 = input_capture_index(router.*, pointer_id);
+    if (index < 0) { return 0; }
+    let i: i32 = index;
+    while (i + 1 < router.*.captures.len) {
+        router.*.captures.data[i] = router.*.captures.data[i + 1];
+        i = i + 1;
+    }
+    router.*.captures.len = router.*.captures.len - 1;
+    return 1;
+}
+
+fn input_request_capture(router: *InputRouter, tree: HitTree, pointer_id: i64, target: NodeKey) i32 {
+    if (pointer_id < 0 || input_active_index(router.*, pointer_id) < 0) { return 0; }
+    let node_index: i32 = hit_tree_find_index(tree, target);
+    if (node_index < 0 || tree.nodes.data[node_index].enabled == 0) { return 0; }
+    let existing: i32 = input_capture_index(router.*, pointer_id);
+    if (existing >= 0) {
+        router.*.captures.data[existing].target = target;
+        return 1;
+    }
+    push[PointerCapture](&router.*.captures, PointerCapture{ .pointer_id = pointer_id, .target = target });
+    return 1;
+}
+
+fn input_request_focus(router: *InputRouter, tree: HitTree, target: NodeKey) i32 {
+    let node_index: i32 = hit_tree_find_index(tree, target);
+    if (node_index < 0 || tree.nodes.data[node_index].enabled == 0 ||
+        tree.nodes.data[node_index].focusable == 0) { return 0; }
+    router.*.focus = target;
+    return 1;
+}
+
+fn input_route_record(router: *InputRouter, event: PointerEvent, status: RouteStatus, hit: HitResult, captured: i32) RouteResult {
+    let sequence: i64 = router.*.next_sequence;
+    router.*.next_sequence = router.*.next_sequence + 1;
+    push[RoutedEvent](&router.*.events, RoutedEvent{
+        .sequence = sequence,
+        .pointer_id = event.pointer_id,
+        .phase = event.phase,
+        .target = hit.id,
+        .local_x = hit.local_x,
+        .local_y = hit.local_y,
+        .captured = captured,
+        .status = status,
+    });
+    return RouteResult{ .status = status, .hit = hit, .sequence = sequence, .captured = captured };
+}
+
+fn input_route_pointer(router: *InputRouter, tree: HitTree, event: PointerEvent) RouteResult {
+    if (event.pointer_id < 0 || event.x < -1000000000 || event.x > 1000000000 ||
+        event.y < -1000000000 || event.y > 1000000000) {
+        return input_route_record(router, event, RouteStatus.invalid_pointer, hit_empty_result(), 0);
+    }
+
+    if (event.phase == PointerPhase.down) { input_set_active(router, event.pointer_id); }
+
+    let hit: HitResult = hit_empty_result();
+    let captured: i32 = 0;
+    let capture_index: i32 = input_capture_index(router.*, event.pointer_id);
+    if (capture_index >= 0) {
+        let target_index: i32 = hit_tree_find_index(tree, router.*.captures.data[capture_index].target);
+        if (target_index >= 0 && tree.nodes.data[target_index].enabled != 0) {
+            hit = hit_node_local(tree.nodes.data[target_index], event.x, event.y);
+            hit.node_index = target_index;
+            captured = 1;
+        } else {
+            _ = input_release_capture(router, event.pointer_id);
+        }
+    }
+    if (captured == 0 && event.phase != PointerPhase.cancel) {
+        hit = hit_test(tree, event.x, event.y);
+    }
+    if (event.phase == PointerPhase.down && hit.found != 0 &&
+        tree.nodes.data[hit.node_index].focusable != 0) {
+        router.*.focus = hit.id;
+    }
+    let result: RouteResult = input_route_record(router, event, RouteStatus.accepted, hit, captured);
+    if (event.phase == PointerPhase.up || event.phase == PointerPhase.cancel) {
+        _ = input_release_capture(router, event.pointer_id);
+        input_clear_active(router, event.pointer_id);
+    }
+    return result;
+}

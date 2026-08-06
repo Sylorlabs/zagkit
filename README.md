@@ -95,6 +95,13 @@ deterministic source-over alpha into owned RGBA8 surfaces. Unsupported paths,
 images, glyphs, strokes, skew, layers, and effects fail at the exact operation;
 this subset is not yet the complete CPU renderer required by Milestone 2.
 
+The first input slice resolves full affine transforms back to local coordinates,
+honors local clips and z-order, rejects singular or malformed hit nodes, and
+routes pointer phases through explicit capture and focus truth. Capture loss,
+pointer-up release, stale targets, misses, and invalid pointers remain visible
+in one ordered event stream. Keyboard, touch arbitration, wheel payloads,
+gestures, and replay remain open.
+
 Run the deterministic headless foundation test with:
 
 ```sh

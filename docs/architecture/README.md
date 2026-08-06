@@ -59,3 +59,9 @@ The CPU oracle begins with deterministic RGBA8 rectangle rasterization from
 fractional edge coverage, and source-over alpha are integer-only. Every
 unsupported display operation fails at its exact index instead of silently
 degrading or claiming a visual result.
+
+The experimental input router consumes a parallel retained `HitTree`. It uses
+integer affine inversion for local coordinates, resolves local clips and
+z-order deterministically, and keeps pointer capture and focus explicit.
+Accepted, missed, captured, cancelled, and invalid events share one ordered
+evidence stream; platform input adaptation and replay remain open.

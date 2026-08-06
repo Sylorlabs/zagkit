@@ -29,6 +29,8 @@ include a generated capability record and exact Zag compiler revision.
   axis-aligned transforms, fractional coverage, and source-over alpha.
 - Strict executable headless contracts in CI using the exact pinned Zag
   revision rather than an ambient compiler.
+- Transformed hit testing and deterministic pointer routing with clipping,
+  z-order, capture, focus, stale-target recovery, and ordered evidence.
 
 ## 0.1.0-experimental.0 (unreleased)
 
