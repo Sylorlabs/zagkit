@@ -1,9 +1,9 @@
 @import("std:list")
 @import("../core/geometry.zag")
+@import("common.zag")
 @import("measure.zag")
 
 enum FlexAxis { row, column }
-enum LayoutDirection { ltr, rtl }
 enum MainAlignment { start, center, end, space_between, space_around, space_evenly }
 enum CrossAlignment { start, center, end, stretch, baseline }
 enum FlexError { none, invalid_constraints, invalid_style, invalid_item, arithmetic_overflow }

@@ -1,0 +1,322 @@
+@import("std:list")
+@import("../core/geometry.zag")
+@import("common.zag")
+@import("measure.zag")
+
+enum OverlayError {
+    none,
+    too_many_items,
+    invalid_constraints,
+    invalid_style,
+    invalid_item,
+    duplicate_id,
+    arithmetic_overflow,
+}
+
+struct OverlayItem {
+    id: i64,
+    metrics: IntrinsicMetrics,
+    horizontal: PlacementAlignment,
+    vertical: PlacementAlignment,
+    insets: Insets,
+    z_order: i64,
+}
+
+struct OverlayStyle {
+    padding: Insets,
+    direction: LayoutDirection,
+}
+
+struct OverlayPlacement {
+    id: i64,
+    frame: Rect,
+    baseline: i64,
+    z_order: i64,
+}
+
+struct OverlayResult {
+    placements: ArrayList[OverlayPlacement],
+    container: Size,
+    overflow_width: i64,
+    overflow_height: i64,
+    layout_hash: i64,
+    error: OverlayError,
+    error_index: i32,
+}
+
+fn overlay_item(id: i64, metrics: IntrinsicMetrics) OverlayItem {
+    return OverlayItem{
+        .id = id,
+        .metrics = metrics,
+        .horizontal = PlacementAlignment.start,
+        .vertical = PlacementAlignment.start,
+        .insets = insets_all(0),
+        .z_order = 0,
+    };
+}
+
+fn overlay_style(padding: Insets, direction: LayoutDirection) OverlayStyle {
+    return OverlayStyle{ .padding = padding, .direction = direction };
+}
+
+fn overlay_item_limit() i32 { return 4096; }
+
+fn overlay_free(result: *OverlayResult) void {
+    free[OverlayPlacement](&result.*.placements);
+}
+
+fn overlay_mix(hash: i64, value: i64) i64 {
+    return (hash * 1099511628211) ^ value;
+}
+
+fn overlay_error_result(error: OverlayError, index: i32) OverlayResult {
+    let result: OverlayResult = OverlayResult{
+        .placements = make[OverlayPlacement](1),
+        .container = size(0, 0),
+        .overflow_width = 0,
+        .overflow_height = 0,
+        .layout_hash = 17,
+        .error = error,
+        .error_index = index,
+    };
+    result.layout_hash = overlay_mix(result.layout_hash, error as i64);
+    result.layout_hash = overlay_mix(result.layout_hash, index as i64);
+    return result;
+}
+
+fn overlay_extent_valid(value: i64) i32 {
+    return (value >= 0 && value <= unbounded_extent() / 4) as i32;
+}
+
+fn overlay_insets_valid(value: Insets) i32 {
+    return (overlay_extent_valid(value.top) == 1 && overlay_extent_valid(value.right) == 1 &&
+        overlay_extent_valid(value.bottom) == 1 && overlay_extent_valid(value.left) == 1) as i32;
+}
+
+fn overlay_item_valid(item: OverlayItem) i32 {
+    if (item.id <= 0 || intrinsic_metric_valid(item.metrics) == 0 ||
+        overlay_insets_valid(item.insets) == 0) { return 0; }
+    if (item.horizontal == PlacementAlignment.baseline ||
+        item.vertical == PlacementAlignment.baseline) { return 0; }
+    return 1;
+}
+
+fn overlay_checked_add(a: i64, b: i64) i64 {
+    if (a < 0 || b < 0 || a > unbounded_extent() - b) { return 0 - 1; }
+    return a + b;
+}
+
+fn overlay_axis_size(
+    minimum: i64,
+    preferred: i64,
+    maximum: i64,
+    available: i64,
+    alignment: PlacementAlignment,
+) i64 {
+    if (alignment == PlacementAlignment.stretch) {
+        return clamp_i64(available, minimum, maximum);
+    }
+    let upper: i64 = maximum;
+    if (available < upper) { upper = available; }
+    return clamp_i64(preferred, minimum, upper);
+}
+
+fn overlay_axis_offset(
+    available: i64,
+    extent: i64,
+    alignment: PlacementAlignment,
+    reverse: i32,
+) i64 {
+    let remaining: i64 = available - extent;
+    if (alignment == PlacementAlignment.center) { return remaining / 2; }
+    if (alignment == PlacementAlignment.end) {
+        if (reverse != 0) { return 0; }
+        return remaining;
+    }
+    if (alignment == PlacementAlignment.start) {
+        if (reverse != 0) { return remaining; }
+        return 0;
+    }
+    return 0;
+}
+
+fn overlay_hash(result: OverlayResult) i64 {
+    let hash: i64 = overlay_mix(overlay_mix(17, result.container.width), result.container.height);
+    hash = overlay_mix(hash, result.overflow_width);
+    hash = overlay_mix(hash, result.overflow_height);
+    hash = overlay_mix(hash, result.error as i64);
+    hash = overlay_mix(hash, result.error_index as i64);
+    hash = overlay_mix(hash, result.placements.len as i64);
+    let i: i32 = 0;
+    while (i < result.placements.len) {
+        let placement: OverlayPlacement = result.placements.data[i];
+        hash = overlay_mix(hash, placement.id);
+        hash = overlay_mix(hash, placement.frame.x);
+        hash = overlay_mix(hash, placement.frame.y);
+        hash = overlay_mix(hash, placement.frame.width);
+        hash = overlay_mix(hash, placement.frame.height);
+        hash = overlay_mix(hash, placement.baseline);
+        hash = overlay_mix(hash, placement.z_order);
+        i = i + 1;
+    }
+    return hash;
+}
+
+fn overlay_input_hash(
+    items: ArrayList[OverlayItem],
+    constraints: Constraints,
+    style: OverlayStyle,
+) i64 {
+    let hash: i64 = overlay_mix(17, items.len as i64);
+    hash = overlay_mix(hash, constraints.min_width);
+    hash = overlay_mix(hash, constraints.max_width);
+    hash = overlay_mix(hash, constraints.min_height);
+    hash = overlay_mix(hash, constraints.max_height);
+    hash = overlay_mix(hash, style.padding.top);
+    hash = overlay_mix(hash, style.padding.right);
+    hash = overlay_mix(hash, style.padding.bottom);
+    hash = overlay_mix(hash, style.padding.left);
+    hash = overlay_mix(hash, style.direction as i64);
+    let i: i32 = 0;
+    while (i < items.len) {
+        let item: OverlayItem = items.data[i];
+        hash = overlay_mix(hash, item.id);
+        hash = overlay_mix(hash, intrinsic_metrics_hash(item.metrics));
+        hash = overlay_mix(hash, item.horizontal as i64);
+        hash = overlay_mix(hash, item.vertical as i64);
+        hash = overlay_mix(hash, item.insets.top);
+        hash = overlay_mix(hash, item.insets.right);
+        hash = overlay_mix(hash, item.insets.bottom);
+        hash = overlay_mix(hash, item.insets.left);
+        hash = overlay_mix(hash, item.z_order);
+        i = i + 1;
+    }
+    return hash;
+}
+
+fn overlay_layout(
+    items: ArrayList[OverlayItem],
+    raw_constraints: Constraints,
+    style: OverlayStyle,
+) OverlayResult {
+    if (items.len > overlay_item_limit()) {
+        return overlay_error_result(OverlayError.too_many_items, 0 - 1);
+    }
+    let constraints: Constraints = normalize_constraints(raw_constraints);
+    if (constraints.min_width > unbounded_extent() || constraints.max_width > unbounded_extent() ||
+        constraints.min_height > unbounded_extent() || constraints.max_height > unbounded_extent()) {
+        return overlay_error_result(OverlayError.invalid_constraints, 0 - 1);
+    }
+    if (overlay_insets_valid(style.padding) == 0) {
+        return overlay_error_result(OverlayError.invalid_style, 0 - 1);
+    }
+    let i: i32 = 0;
+    while (i < items.len) {
+        if (overlay_item_valid(items.data[i]) == 0) {
+            return overlay_error_result(OverlayError.invalid_item, i);
+        }
+        let j: i32 = 0;
+        while (j < i) {
+            if (items.data[j].id == items.data[i].id) {
+                return overlay_error_result(OverlayError.duplicate_id, i);
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+
+    let horizontal_padding: i64 = overlay_checked_add(style.padding.left, style.padding.right);
+    let vertical_padding: i64 = overlay_checked_add(style.padding.top, style.padding.bottom);
+    if (horizontal_padding < 0 || vertical_padding < 0) {
+        return overlay_error_result(OverlayError.arithmetic_overflow, 0 - 1);
+    }
+    let desired_width: i64 = horizontal_padding;
+    let desired_height: i64 = vertical_padding;
+    i = 0;
+    while (i < items.len) {
+        let item: OverlayItem = items.data[i];
+        let item_horizontal: i64 = overlay_checked_add(item.insets.left, item.insets.right);
+        let item_vertical: i64 = overlay_checked_add(item.insets.top, item.insets.bottom);
+        let width: i64 = overlay_checked_add(item.metrics.preferred.width, item_horizontal);
+        let height: i64 = overlay_checked_add(item.metrics.preferred.height, item_vertical);
+        if (width < 0 || height < 0) {
+            return overlay_error_result(OverlayError.arithmetic_overflow, i);
+        }
+        let outer_width: i64 = overlay_checked_add(horizontal_padding, width);
+        let outer_height: i64 = overlay_checked_add(vertical_padding, height);
+        if (outer_width < 0 || outer_height < 0) {
+            return overlay_error_result(OverlayError.arithmetic_overflow, i);
+        }
+        if (outer_width > desired_width) { desired_width = outer_width; }
+        if (outer_height > desired_height) { desired_height = outer_height; }
+        i = i + 1;
+    }
+    let container: Size = size(
+        clamp_i64(desired_width, constraints.min_width, constraints.max_width),
+        clamp_i64(desired_height, constraints.min_height, constraints.max_height)
+    );
+    let content_width: i64 = container.width - horizontal_padding;
+    let content_height: i64 = container.height - vertical_padding;
+    if (content_width < 0) { content_width = 0; }
+    if (content_height < 0) { content_height = 0; }
+
+    let placements: ArrayList[OverlayPlacement] = make[OverlayPlacement](items.len);
+    let overflow_width: i64 = horizontal_padding - container.width;
+    if (overflow_width < 0) { overflow_width = 0; }
+    let overflow_height: i64 = vertical_padding - container.height;
+    if (overflow_height < 0) { overflow_height = 0; }
+    i = 0;
+    while (i < items.len) {
+        let item: OverlayItem = items.data[i];
+        let item_horizontal: i64 = item.insets.left + item.insets.right;
+        let item_vertical: i64 = item.insets.top + item.insets.bottom;
+        let available_width: i64 = content_width - item_horizontal;
+        let available_height: i64 = content_height - item_vertical;
+        if (available_width < 0) { available_width = 0; }
+        if (available_height < 0) { available_height = 0; }
+        let width: i64 = overlay_axis_size(
+            item.metrics.minimum.width, item.metrics.preferred.width,
+            item.metrics.maximum.width, available_width, item.horizontal
+        );
+        let height: i64 = overlay_axis_size(
+            item.metrics.minimum.height, item.metrics.preferred.height,
+            item.metrics.maximum.height, available_height, item.vertical
+        );
+        let x_offset: i64 = overlay_axis_offset(
+            available_width, width, item.horizontal,
+            (style.direction == LayoutDirection.rtl) as i32
+        );
+        let y_offset: i64 = 0;
+        if (item.vertical == PlacementAlignment.center) { y_offset = (available_height - height) / 2; }
+        else if (item.vertical == PlacementAlignment.end) { y_offset = available_height - height; }
+        let frame: Rect = rect(
+            style.padding.left + item.insets.left + x_offset,
+            style.padding.top + item.insets.top + y_offset,
+            width,
+            height
+        );
+        let item_overflow_width: i64 = width - available_width;
+        if (item_overflow_width > overflow_width) { overflow_width = item_overflow_width; }
+        let item_overflow_height: i64 = height - available_height;
+        if (item_overflow_height > overflow_height) { overflow_height = item_overflow_height; }
+        push[OverlayPlacement](&placements, OverlayPlacement{
+            .id = item.id,
+            .frame = frame,
+            .baseline = frame.y + clamp_i64(item.metrics.baseline, 0, frame.height),
+            .z_order = item.z_order,
+        });
+        i = i + 1;
+    }
+
+    let result: OverlayResult = OverlayResult{
+        .placements = placements,
+        .container = container,
+        .overflow_width = overflow_width,
+        .overflow_height = overflow_height,
+        .layout_hash = 0,
+        .error = OverlayError.none,
+        .error_index = 0 - 1,
+    };
+    result.layout_hash = overlay_mix(overlay_input_hash(items, constraints, style), overlay_hash(result));
+    return result;
+}

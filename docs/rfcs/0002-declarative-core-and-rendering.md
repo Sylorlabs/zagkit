@@ -38,6 +38,10 @@ must be deterministic for the same inputs. Cycles, non-finite geometry,
 overflow, unstable intrinsic measurement, and duplicate keys fail with
 inspectable reasons.
 
+The first executable Grid and Overlay interpretation of this decision is
+documented in [the placement contract](../architecture/grid-and-overlay.md).
+That experimental surface does not freeze the eventual declarative View API.
+
 ## Rendering contract
 
 Rendering produces an immutable `DisplayList` of paths, paints, images, glyph

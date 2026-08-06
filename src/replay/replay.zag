@@ -3,6 +3,8 @@
 @import("../input/router.zag")
 @import("../layout/flex.zag")
 @import("../layout/flex_wrap.zag")
+@import("../layout/grid.zag")
+@import("../layout/overlay.zag")
 @import("../semantics/semantics.zag")
 @import("../render/cpu_raster.zag")
 @import("../motion/motion.zag")
@@ -414,8 +416,55 @@ fn replay_build_scene(state_value: i64, backend_generation: i64) ReplayResult {
         semantics_tree_free(&semantics);
         return replay_result_error(ReplayError.scene_error, 0 - 1, 0);
     }
-    result.layout_hash = layout.layout_hash;
+    let overlay_items: ArrayList[OverlayItem] = make[OverlayItem](2);
+    let overlay_first: OverlayItem = overlay_item(101, first_metrics);
+    overlay_first.horizontal = PlacementAlignment.start;
+    overlay_first.vertical = PlacementAlignment.start;
+    push[OverlayItem](&overlay_items, overlay_first);
+    let overlay_second: OverlayItem = overlay_item(102, second_metrics);
+    overlay_second.horizontal = PlacementAlignment.end;
+    overlay_second.vertical = PlacementAlignment.end;
+    push[OverlayItem](&overlay_items, overlay_second);
+    let overlay_layout_result: OverlayResult = overlay_layout(
+        overlay_items, tight_constraints(8 * unit_scale(), 6 * unit_scale()),
+        overlay_style(insets_all(0), LayoutDirection.ltr)
+    );
+    free[OverlayItem](&overlay_items);
+    if (overlay_layout_result.error != OverlayError.none) {
+        overlay_free(&overlay_layout_result);
+        flex_wrap_free(&layout);
+        semantics_tree_free(&semantics);
+        return replay_result_error(ReplayError.scene_error, 0 - 1, 0);
+    }
+
+    let grid_columns: ArrayList[GridTrack] = make[GridTrack](2);
+    push[GridTrack](&grid_columns, grid_fraction(1, unit_scale(), unbounded_extent()));
+    push[GridTrack](&grid_columns, grid_fraction(1, unit_scale(), unbounded_extent()));
+    let grid_rows: ArrayList[GridTrack] = make[GridTrack](1);
+    push[GridTrack](&grid_rows, grid_intrinsic(unit_scale(), 4 * unit_scale(), 6 * unit_scale()));
+    let grid_items: ArrayList[GridItem] = make[GridItem](2);
+    push[GridItem](&grid_items, grid_item_at(101, 0, 0, first_metrics));
+    push[GridItem](&grid_items, grid_item_at(102, 0, 1, second_metrics));
+    let grid_layout_result: GridResult = grid_layout(
+        grid_items, grid_columns, grid_rows,
+        tight_constraints(8 * unit_scale(), 6 * unit_scale()),
+        grid_style(unit_scale(), 0, insets_all(0))
+    );
+    free[GridItem](&grid_items); free[GridTrack](&grid_columns); free[GridTrack](&grid_rows);
+    if (grid_layout_result.error != GridError.none) {
+        grid_free(&grid_layout_result);
+        overlay_free(&overlay_layout_result);
+        flex_wrap_free(&layout);
+        semantics_tree_free(&semantics);
+        return replay_result_error(ReplayError.scene_error, 0 - 1, 0);
+    }
+    result.layout_hash = display_mix(
+        display_mix(layout.layout_hash, overlay_layout_result.layout_hash),
+        grid_layout_result.layout_hash
+    );
     result.layout_lines = layout.lines.len;
+    grid_free(&grid_layout_result);
+    overlay_free(&overlay_layout_result);
 
     let list: DisplayList = display_list_make();
     let first_op: DisplayOp = display_op(DisplayOpKind.fill_rect, node_key(101));

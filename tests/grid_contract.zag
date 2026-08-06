@@ -1,0 +1,208 @@
+@import("std:list")
+@import("../src/layout/grid.zag")
+
+struct TestState { passed: i32, failed: i32 }
+
+fn expect(state: *TestState, condition: i32, name: []u8) void {
+    if (condition != 0) {
+        state.*.passed = state.*.passed + 1;
+        _zag_print("ok  "); _zag_println(name);
+    } else {
+        state.*.failed = state.*.failed + 1;
+        _zag_print("FAIL "); _zag_println(name);
+    }
+}
+
+fn metrics(min_width: i64, min_height: i64, width: i64, height: i64,
+    max_width: i64, max_height: i64, baseline: i64) IntrinsicMetrics {
+    return intrinsic_metrics(min_width, min_height, width, height, max_width, max_height, baseline);
+}
+
+fn basic_grid_contract(state: *TestState) void {
+    let columns: ArrayList[GridTrack] = make[GridTrack](3);
+    push[GridTrack](&columns, grid_fixed(4));
+    push[GridTrack](&columns, grid_fraction(1, 2, 20));
+    push[GridTrack](&columns, grid_fraction(2, 2, 20));
+    let rows: ArrayList[GridTrack] = make[GridTrack](2);
+    push[GridTrack](&rows, grid_intrinsic(2, 4, 10));
+    push[GridTrack](&rows, grid_fixed(3));
+    let items: ArrayList[GridItem] = make[GridItem](3);
+    push[GridItem](&items, grid_item_at(1, 0, 0, metrics(2, 2, 4, 2, 8, 8, 1)));
+    let automatic: GridItem = grid_item(2, metrics(1, 1, 2, 2, 8, 8, 1));
+    push[GridItem](&items, automatic);
+    let spanning: GridItem = grid_item_at(3, 1, 1, metrics(4, 2, 10, 3, 30, 6, 2));
+    spanning.column_span = 2;
+    spanning.z_order = 7;
+    push[GridItem](&items, spanning);
+    let style: GridStyle = grid_style(1, 1, insets_all(1));
+    style.vertical_content = ContentAlignment.space_between;
+    let result: GridResult = grid_layout(items, columns, rows, tight_constraints(30, 12), style);
+    expect(state, result.error == GridError.none && result.columns.len == 3 && result.rows.len == 2 &&
+        result.columns.data[0].extent == 4 && result.columns.data[1].extent == 8 &&
+        result.columns.data[2].extent == 14,
+        "grid resolves fixed and weighted fraction tracks against exact available width");
+    expect(state, result.placements.data[1].row == 0 && result.placements.data[1].column == 1 &&
+        result.placements.data[1].frame.x == 6,
+        "grid auto placement is deterministic row-major and preserves input identity");
+    expect(state, result.placements.data[2].frame.x == 6 && result.placements.data[2].frame.y == 8 &&
+        result.placements.data[2].frame.width == 23 && result.placements.data[2].frame.height == 3 &&
+        result.placements.data[2].z_order == 7,
+        "grid spans include interior gaps and retained z-order without geometry ambiguity");
+    expect(state, result.overflow_width == 0 && result.overflow_height == 0 && result.layout_hash != 0,
+        "grid exposes clean per-axis overflow and stable nonzero layout identity");
+    let repeated: GridResult = grid_layout(items, columns, rows, tight_constraints(30, 12), style);
+    expect(state, repeated.layout_hash == result.layout_hash,
+        "identical grid inputs produce identical track and placement identity");
+    grid_free(&repeated); grid_free(&result);
+    free[GridItem](&items); free[GridTrack](&columns); free[GridTrack](&rows);
+}
+
+fn span_intrinsic_and_rtl_contract(state: *TestState) void {
+    let columns: ArrayList[GridTrack] = make[GridTrack](2);
+    push[GridTrack](&columns, grid_intrinsic(2, 2, 20));
+    push[GridTrack](&columns, grid_intrinsic(2, 2, 20));
+    let rows: ArrayList[GridTrack] = make[GridTrack](1);
+    push[GridTrack](&rows, grid_intrinsic(2, 3, 10));
+    let items: ArrayList[GridItem] = make[GridItem](1);
+    let span: GridItem = grid_item_at(1, 0, 0, metrics(8, 2, 15, 3, 30, 8, 2));
+    span.column_span = 2;
+    span.horizontal = PlacementAlignment.start;
+    span.vertical = PlacementAlignment.start;
+    push[GridItem](&items, span);
+    let loose: Constraints = Constraints{
+        .min_width = 0, .max_width = unbounded_extent(),
+        .min_height = 0, .max_height = unbounded_extent(),
+    };
+    let ltr_style: GridStyle = grid_style(1, 1, insets_all(1));
+    let ltr: GridResult = grid_layout(items, columns, rows, loose, ltr_style);
+    expect(state, ltr.container.width == 17 && ltr.container.height == 5 &&
+        ltr.columns.data[0].extent + ltr.columns.data[1].extent + 1 == 15,
+        "spanning intrinsic content grows eligible tracks and determines an unbounded container");
+    let rtl_style: GridStyle = ltr_style;
+    rtl_style.direction = LayoutDirection.rtl;
+    let rtl: GridResult = grid_layout(items, columns, rows, loose, rtl_style);
+    expect(state, rtl.columns.data[0].offset > rtl.columns.data[1].offset &&
+        rtl.placements.data[0].frame.x == 1 && rtl.layout_hash != ltr.layout_hash,
+        "RTL mirrors logical grid columns and records direction in deterministic identity");
+    grid_free(&rtl); grid_free(&ltr);
+    free[GridItem](&items); free[GridTrack](&columns); free[GridTrack](&rows);
+}
+
+fn baseline_contract(state: *TestState) void {
+    let columns: ArrayList[GridTrack] = make[GridTrack](2);
+    push[GridTrack](&columns, grid_fixed(10)); push[GridTrack](&columns, grid_fixed(10));
+    let rows: ArrayList[GridTrack] = make[GridTrack](1);
+    push[GridTrack](&rows, grid_intrinsic(5, 6, 12));
+    let items: ArrayList[GridItem] = make[GridItem](2);
+    let first: GridItem = grid_item_at(1, 0, 0, metrics(2, 2, 4, 4, 8, 8, 3));
+    first.horizontal = PlacementAlignment.center; first.vertical = PlacementAlignment.baseline;
+    push[GridItem](&items, first);
+    let second: GridItem = grid_item_at(2, 0, 1, metrics(2, 2, 4, 5, 8, 8, 1));
+    second.horizontal = PlacementAlignment.center; second.vertical = PlacementAlignment.baseline;
+    push[GridItem](&items, second);
+    let result: GridResult = grid_layout(items, columns, rows, tight_constraints(23, 8),
+        grid_style(1, 0, insets_all(1)));
+    expect(state, result.placements.data[0].baseline == result.placements.data[1].baseline &&
+        result.placements.data[0].frame.y == 1 && result.placements.data[1].frame.y == 3,
+        "single-row baseline alignment preserves typography across unequal glyph boxes");
+    grid_free(&result); free[GridItem](&items); free[GridTrack](&columns); free[GridTrack](&rows);
+}
+
+fn collision_and_failure_contract(state: *TestState) void {
+    let columns: ArrayList[GridTrack] = make[GridTrack](1); push[GridTrack](&columns, grid_fixed(8));
+    let rows: ArrayList[GridTrack] = make[GridTrack](1); push[GridTrack](&rows, grid_fixed(8));
+    let items: ArrayList[GridItem] = make[GridItem](2);
+    push[GridItem](&items, grid_item_at(1, 0, 0, metrics(1, 1, 2, 2, 4, 4, 1)));
+    push[GridItem](&items, grid_item_at(2, 0, 0, metrics(1, 1, 2, 2, 4, 4, 1)));
+    let style: GridStyle = grid_style(0, 0, insets_all(0));
+    let collision: GridResult = grid_layout(items, columns, rows, tight_constraints(8, 8), style);
+    expect(state, collision.error == GridError.collision && collision.error_index == 1 &&
+        collision.placements.len == 0,
+        "explicit grid collisions fail at the exact item by default");
+    grid_free(&collision);
+    style.allow_overlap = 1;
+    let overlap: GridResult = grid_layout(items, columns, rows, tight_constraints(8, 8), style);
+    expect(state, overlap.error == GridError.none && overlap.overlap_cells == 1 &&
+        overlap.placements.len == 2,
+        "explicit overlap is opt-in and reports every occupied collision cell");
+    grid_free(&overlap);
+    items.data[1].id = 1;
+    let duplicate: GridResult = grid_layout(items, columns, rows, tight_constraints(8, 8), style);
+    expect(state, duplicate.error == GridError.duplicate_id && duplicate.error_index == 1,
+        "duplicate grid IDs fail before placement");
+    grid_free(&duplicate);
+    items.data[1].id = 2; items.data[0].row = 0 - 1; items.data[0].column = 0 - 1;
+    items.data[1].row = 0 - 1; items.data[1].column = 0 - 1; style.allow_overlap = 0;
+    let full: GridResult = grid_layout(items, columns, rows, tight_constraints(8, 8), style);
+    expect(state, full.error == GridError.no_space && full.error_index == 1,
+        "auto placement fails closed when no unoccupied span remains");
+    grid_free(&full);
+    items.data[1].row = 0; items.data[1].column = 0 - 1;
+    let partial: GridResult = grid_layout(items, columns, rows, tight_constraints(8, 8), style);
+    expect(state, partial.error == GridError.invalid_item && partial.error_index == 1,
+        "partial auto coordinates are rejected instead of guessed");
+    grid_free(&partial);
+    free[GridItem](&items); free[GridTrack](&columns); free[GridTrack](&rows);
+
+    let bad_columns: ArrayList[GridTrack] = make[GridTrack](1);
+    push[GridTrack](&bad_columns, grid_fraction(0, 1, 4));
+    let valid_rows: ArrayList[GridTrack] = make[GridTrack](1); push[GridTrack](&valid_rows, grid_fixed(2));
+    let empty: ArrayList[GridItem] = make[GridItem](1);
+    let bad_track: GridResult = grid_layout(empty, bad_columns, valid_rows, tight_constraints(4, 2),
+        grid_style(0, 0, insets_all(0)));
+    expect(state, bad_track.error == GridError.invalid_track && bad_track.error_index == 0,
+        "zero-weight fraction tracks fail typed validation");
+    grid_free(&bad_track); free[GridItem](&empty); free[GridTrack](&bad_columns); free[GridTrack](&valid_rows);
+}
+
+fn overflow_and_property_contract(state: *TestState) void {
+    let fixed_columns: ArrayList[GridTrack] = make[GridTrack](2);
+    push[GridTrack](&fixed_columns, grid_fixed(8)); push[GridTrack](&fixed_columns, grid_fixed(8));
+    let fixed_rows: ArrayList[GridTrack] = make[GridTrack](1); push[GridTrack](&fixed_rows, grid_fixed(4));
+    let empty: ArrayList[GridItem] = make[GridItem](1);
+    let overflow: GridResult = grid_layout(empty, fixed_columns, fixed_rows, tight_constraints(12, 4),
+        grid_style(1, 0, insets_all(0)));
+    expect(state, overflow.error == GridError.none && overflow.overflow_width == 5 &&
+        overflow.columns.data[1].offset == 9,
+        "unshrinkable fixed tracks remain exact and expose quantified overflow");
+    grid_free(&overflow); free[GridItem](&empty);
+    free[GridTrack](&fixed_columns); free[GridTrack](&fixed_rows);
+
+    let all_valid: i32 = 1;
+    let extent: i64 = 7;
+    while (extent <= 128) {
+        let columns: ArrayList[GridTrack] = make[GridTrack](2);
+        push[GridTrack](&columns, grid_fraction(1, 1, unbounded_extent()));
+        push[GridTrack](&columns, grid_fraction(3, 1, unbounded_extent()));
+        let rows: ArrayList[GridTrack] = make[GridTrack](1); push[GridTrack](&rows, grid_fraction(1, 1, unbounded_extent()));
+        let items: ArrayList[GridItem] = make[GridItem](2);
+        push[GridItem](&items, grid_item_at(1, 0, 0, metrics(1, 1, 1, 1, unbounded_extent(), unbounded_extent(), 1)));
+        push[GridItem](&items, grid_item_at(2, 0, 1, metrics(1, 1, 1, 1, unbounded_extent(), unbounded_extent(), 1)));
+        let result: GridResult = grid_layout(items, columns, rows, tight_constraints(extent, 7),
+            grid_style(1, 0, insets_all(1)));
+        if (result.error != GridError.none || result.columns.data[0].offset != 1 ||
+            result.columns.data[1].offset != 2 + result.columns.data[0].extent ||
+            result.columns.data[1].offset + result.columns.data[1].extent != extent - 1 ||
+            result.overflow_width != 0) { all_valid = 0; }
+        grid_free(&result); free[GridItem](&items); free[GridTrack](&columns); free[GridTrack](&rows);
+        extent = extent + 1;
+    }
+    expect(state, all_valid == 1,
+        "122-extent fraction sweep fills exact padded bounds without drift or hidden overflow");
+}
+
+fn main() i32 {
+    let state: TestState = TestState{ .passed = 0, .failed = 0 };
+    basic_grid_contract(&state);
+    span_intrinsic_and_rtl_contract(&state);
+    baseline_contract(&state);
+    collision_and_failure_contract(&state);
+    overflow_and_property_contract(&state);
+    let passed_text: []u8 = _zag_i64_to_str(state.passed as i64);
+    let failed_text: []u8 = _zag_i64_to_str(state.failed as i64);
+    _zag_print("Grid contract: pass="); _zag_print(passed_text);
+    _zag_print(" fail="); _zag_println(failed_text);
+    _zag_str_free(passed_text); _zag_str_free(failed_text);
+    if (state.failed == 0) { return 0; }
+    return 1;
+}

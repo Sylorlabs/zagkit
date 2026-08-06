@@ -37,8 +37,11 @@ Screenshots remain necessary visual evidence, not complete product evidence.
 ## Flex and Zagkit Talkback
 
 Flex conformance covers gap, padding, alignment, distribution, baseline, wrap,
-intrinsic size, constraints, grid, overlay, breakpoints, safe areas, density,
-RTL, and large text. Every layout change reports its exact state read and rule.
+intrinsic size, constraints, grid tracks and spans, overlay placement,
+breakpoints, safe areas, density, RTL, and large text. Grid collisions fail
+closed unless overlap is explicit, and every primitive reports quantified
+overflow plus deterministic identity. Every layout change reports its exact
+state read and rule.
 
 Zagkit Talkback conformance drives canonical applications by stable ID and
 checks discovery, query, action, wait, assertion, screenshot, timeline,

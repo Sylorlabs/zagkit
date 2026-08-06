@@ -20,6 +20,10 @@ cd "$root"
 "$tmp/flex-adaptive-contract"
 "$znc" tests/measure_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/measure-contract"
 "$tmp/measure-contract"
+"$znc" tests/overlay_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/overlay-contract"
+"$tmp/overlay-contract"
+"$znc" tests/grid_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/grid-contract"
+"$tmp/grid-contract"
 "$znc" tests/state_reconcile_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/state-reconcile-contract"
 "$tmp/state-reconcile-contract"
 "$znc" tests/semantics_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/semantics-contract"
@@ -39,4 +43,4 @@ cd "$root"
 "$znc" tests/motion_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/motion-contract"
 "$tmp/motion-contract"
 
-printf 'headless test: PASS (state, reconciliation, intrinsic measurement, constraints, Flex, semantics, Talkback, display lists, CPU raster, input, replay, and motion)\n'
+printf 'headless test: PASS (state, reconciliation, intrinsic measurement, constraints, Flex, Grid, Overlay, semantics, Talkback, display lists, CPU raster, input, replay, and motion)\n'
