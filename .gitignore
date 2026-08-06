@@ -1,0 +1,19 @@
+# Zag build products
+zag-out/
+.zag-cache/
+.zagd.lock
+
+# Contract and benchmark output
+artifacts/
+benchmark-results/
+capability-reports/
+
+# Platform build products
+.DS_Store
+Thumbs.db
+*.app/
+*.apk
+*.aab
+*.ipa
+*.msix
+*.dmg

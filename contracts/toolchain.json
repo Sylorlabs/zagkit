@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "zagkit_version": "0.1.0-experimental.0",
+  "zag": {
+    "repository": "https://github.com/Sylorlabs/zag",
+    "resolved_ref": "refs/heads/zag-v2-machine-control",
+    "commit": "67cad46feb6a6d912b8d599d7ed3ade7e81175c5",
+    "compiler_version": "2026.07.0-dev",
+    "edition": "2026"
+  },
+  "audited_on": "2026-08-06",
+  "pin_policy": "Every Zagkit release replaces this record with the exact Zag source commit used to build and test it. Branch names and local dirty state are never release identities.",
+  "evidence": [
+    "Zag origin/zag-v2-machine-control resolved to 67cad46feb6a6d912b8d599d7ed3ade7e81175c5 on 2026-08-06.",
+    "zag-poc/zag.mod at the pinned commit declares version 2026.07.0-dev and edition 2026.",
+    "The pinned commit documents x86-64 Linux as supported and ARM64 Linux as experimental with qemu-user execution evidence."
+  ]
+}

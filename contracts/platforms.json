@@ -1,0 +1,119 @@
+{
+  "schema_version": 1,
+  "generated_for": "0.1.0-experimental.0",
+  "generated_on": "2026-08-06",
+  "status_vocabulary": ["supported", "experimental", "unavailable"],
+  "required_capabilities": [
+    "platform_shell",
+    "cpu_renderer",
+    "gpu_transport",
+    "text_input",
+    "accessibility",
+    "clipboard_drag_drop",
+    "multi_window",
+    "packaging",
+    "auto_backend_selection"
+  ],
+  "platforms": [
+    {
+      "id": "linux",
+      "family": "Linux",
+      "architectures": ["x86_64", "arm64"],
+      "beta_os_policy": "Current Ubuntu LTS and current Fedora releases when the backend enters beta.",
+      "toolchain_state": "Pinned Zag supports x86-64 Linux and marks ARM64 Linux experimental with qemu-user execution evidence; physical ARM64 target proof is not recorded.",
+      "public_channel": "experimental",
+      "capabilities": [
+        {"id":"platform_shell","state":"unavailable","reason":"Wayland and X11 shells are not implemented.","evidence":[]},
+        {"id":"cpu_renderer","state":"unavailable","reason":"The deterministic CPU renderer is not implemented.","evidence":[]},
+        {"id":"gpu_transport","state":"unavailable","reason":"No Zagkit Linux GPU transport exists or has device evidence.","evidence":[]},
+        {"id":"text_input","state":"unavailable","reason":"No Linux IME bridge or editing engine exists.","evidence":[]},
+        {"id":"accessibility","state":"unavailable","reason":"No AT-SPI adapter exists or has assistive technology evidence.","evidence":[]},
+        {"id":"clipboard_drag_drop","state":"unavailable","reason":"Clipboard and drag and drop seams are not implemented.","evidence":[]},
+        {"id":"multi_window","state":"unavailable","reason":"Window, monitor, and scale lifecycle support is not implemented.","evidence":[]},
+        {"id":"packaging","state":"unavailable","reason":"No installable Linux artifact or packaging gate exists.","evidence":[]},
+        {"id":"auto_backend_selection","state":"unavailable","reason":"There are no eligible Zagkit backends for .auto to select.","evidence":[]}
+      ]
+    },
+    {
+      "id": "macos",
+      "family": "macOS",
+      "architectures": ["arm64", "x86_64"],
+      "beta_os_policy": "Current and previous two stable major releases when the backend enters beta.",
+      "toolchain_state": "The pinned Zag revision has no Mach-O or Darwin target.",
+      "public_channel": "experimental",
+      "capabilities": [
+        {"id":"platform_shell","state":"unavailable","reason":"The AppKit shell and Darwin target are not implemented.","evidence":[]},
+        {"id":"cpu_renderer","state":"unavailable","reason":"The deterministic CPU renderer is not implemented.","evidence":[]},
+        {"id":"gpu_transport","state":"unavailable","reason":"No Zagkit Metal transport exists or has device evidence.","evidence":[]},
+        {"id":"text_input","state":"unavailable","reason":"No NSTextInputClient bridge or editing engine exists.","evidence":[]},
+        {"id":"accessibility","state":"unavailable","reason":"No NSAccessibility adapter exists or has VoiceOver evidence.","evidence":[]},
+        {"id":"clipboard_drag_drop","state":"unavailable","reason":"Clipboard and drag and drop seams are not implemented.","evidence":[]},
+        {"id":"multi_window","state":"unavailable","reason":"Window, screen, and scale lifecycle support is not implemented.","evidence":[]},
+        {"id":"packaging","state":"unavailable","reason":"No signed, notarized, installable artifact or packaging gate exists.","evidence":[]},
+        {"id":"auto_backend_selection","state":"unavailable","reason":"There are no eligible Zagkit backends for .auto to select.","evidence":[]}
+      ]
+    },
+    {
+      "id": "windows",
+      "family": "Windows",
+      "architectures": ["x86_64", "arm64"],
+      "beta_os_policy": "Current and previous two supported stable releases when the backend enters beta.",
+      "toolchain_state": "The pinned Zag revision has no PE/COFF or Windows target.",
+      "public_channel": "experimental",
+      "capabilities": [
+        {"id":"platform_shell","state":"unavailable","reason":"The Win32 shell and Windows target are not implemented.","evidence":[]},
+        {"id":"cpu_renderer","state":"unavailable","reason":"The deterministic CPU renderer is not implemented.","evidence":[]},
+        {"id":"gpu_transport","state":"unavailable","reason":"No Zagkit D3D12 transport exists or has device evidence.","evidence":[]},
+        {"id":"text_input","state":"unavailable","reason":"No Core Text input bridge or editing engine exists.","evidence":[]},
+        {"id":"accessibility","state":"unavailable","reason":"No UI Automation adapter exists or has Narrator evidence.","evidence":[]},
+        {"id":"clipboard_drag_drop","state":"unavailable","reason":"Clipboard and drag and drop seams are not implemented.","evidence":[]},
+        {"id":"multi_window","state":"unavailable","reason":"Window, display, and scale lifecycle support is not implemented.","evidence":[]},
+        {"id":"packaging","state":"unavailable","reason":"No signed installable artifact or packaging gate exists.","evidence":[]},
+        {"id":"auto_backend_selection","state":"unavailable","reason":"There are no eligible Zagkit backends for .auto to select.","evidence":[]}
+      ]
+    },
+    {
+      "id": "ios",
+      "family": "iOS",
+      "architectures": ["arm64"],
+      "beta_os_policy": "Current and previous two stable major releases when the backend enters beta.",
+      "toolchain_state": "The pinned Zag revision has no Mach-O, iOS ARM64, or Objective C ABI target.",
+      "public_channel": "experimental",
+      "capabilities": [
+        {"id":"platform_shell","state":"unavailable","reason":"The UIKit shell and iOS target are not implemented.","evidence":[]},
+        {"id":"cpu_renderer","state":"unavailable","reason":"The deterministic CPU renderer is not implemented.","evidence":[]},
+        {"id":"gpu_transport","state":"unavailable","reason":"No Zagkit mobile Metal transport exists or has device evidence.","evidence":[]},
+        {"id":"text_input","state":"unavailable","reason":"No UIKit text input bridge or editing engine exists.","evidence":[]},
+        {"id":"accessibility","state":"unavailable","reason":"No UIKit accessibility adapter exists or has mobile VoiceOver evidence.","evidence":[]},
+        {"id":"clipboard_drag_drop","state":"unavailable","reason":"Clipboard and drag and drop seams are not implemented.","evidence":[]},
+        {"id":"multi_window","state":"unavailable","reason":"Scene, display, rotation, and safe area lifecycle support is not implemented.","evidence":[]},
+        {"id":"packaging","state":"unavailable","reason":"No signed installable device artifact or packaging gate exists.","evidence":[]},
+        {"id":"auto_backend_selection","state":"unavailable","reason":"There are no eligible Zagkit backends for .auto to select.","evidence":[]}
+      ]
+    },
+    {
+      "id": "android",
+      "family": "Android",
+      "architectures": ["arm64"],
+      "beta_os_policy": "Current and previous two stable API generations when the backend enters beta.",
+      "toolchain_state": "The pinned Zag revision has no Android ARM64 or JNI ABI target.",
+      "public_channel": "experimental",
+      "capabilities": [
+        {"id":"platform_shell","state":"unavailable","reason":"The Android shell and target are not implemented.","evidence":[]},
+        {"id":"cpu_renderer","state":"unavailable","reason":"The deterministic CPU renderer is not implemented.","evidence":[]},
+        {"id":"gpu_transport","state":"unavailable","reason":"No Zagkit Android GPU transport exists or has device evidence.","evidence":[]},
+        {"id":"text_input","state":"unavailable","reason":"No Android IME bridge or editing engine exists.","evidence":[]},
+        {"id":"accessibility","state":"unavailable","reason":"No Android accessibility adapter exists or has TalkBack evidence.","evidence":[]},
+        {"id":"clipboard_drag_drop","state":"unavailable","reason":"Clipboard and drag and drop seams are not implemented.","evidence":[]},
+        {"id":"multi_window","state":"unavailable","reason":"Activity, display, rotation, and safe area lifecycle support is not implemented.","evidence":[]},
+        {"id":"packaging","state":"unavailable","reason":"No signed installable device artifact or packaging gate exists.","evidence":[]},
+        {"id":"auto_backend_selection","state":"unavailable","reason":"There are no eligible Zagkit backends for .auto to select.","evidence":[]}
+      ]
+    }
+  ],
+  "one_point_zero": {
+    "blocked": true,
+    "required_platforms": ["linux", "macos", "windows", "ios", "android"],
+    "reason": "No required platform currently has a supported capability set."
+  }
+}

@@ -1,0 +1,116 @@
+{
+  "schema_version": 1,
+  "generated_for": "0.1.0-experimental.0",
+  "result_state": "specifications-only",
+  "warning": "No performance result is recorded or implied by this manifest.",
+  "variant_matrix": {
+    "scale_factors": [1.0, 1.25, 1.5, 2.0, 3.0],
+    "themes": ["light", "dark"],
+    "contrast": ["standard", "high"],
+    "directions": ["ltr", "rtl"],
+    "text_scales": [1.0, 1.3, 2.0],
+    "motion": ["full", "reduced"],
+    "locales": ["en-US", "ar-EG", "he-IL", "hi-IN", "ja-JP", "th-TH", "zh-Hant-TW"]
+  },
+  "global_performance_contract": {
+    "frame_deadline_p99_fraction_max": 1.0,
+    "scroll_refresh_hz_on_supported_reference_hardware": 120,
+    "idle_layouts_per_second_max": 0,
+    "idle_paints_per_second_max": 0,
+    "unexplained_two_frame_stalls_per_ten_minutes_max": 0,
+    "regression_without_reviewed_waiver_percent_max": 5.0,
+    "canonical_run_minutes": 10
+  },
+  "scenes": [
+    {
+      "id": "type-ramp",
+      "name": "International type ramp",
+      "milestone": 2,
+      "status": "specification",
+      "canonical_interaction": "Resize through breakpoints while changing text scale and locale.",
+      "stresses": ["font-fallback", "variable-fonts", "color-fonts", "line-breaking", "intrinsic-layout"],
+      "assertions": ["deterministic-golden", "baseline-stability", "no-missing-glyph-with-declared-fonts", "semantic-reading-order"]
+    },
+    {
+      "id": "bidi-editor",
+      "name": "Bidirectional text editor",
+      "milestone": 2,
+      "status": "specification",
+      "canonical_interaction": "Compose, select, replace, undo, and navigate mixed Arabic, Hebrew, Latin, emoji, and combining text.",
+      "stresses": ["bidi", "segmentation", "ime", "selection", "editing", "malformed-input"],
+      "assertions": ["caret-roundtrip", "selection-stability", "ime-commit", "text-navigation-semantics", "deterministic-replay"]
+    },
+    {
+      "id": "million-row-list",
+      "name": "Million row virtual list",
+      "milestone": 2,
+      "status": "specification",
+      "canonical_interaction": "Fling, reverse, resize, select, and keyboard navigate a variable height million row list.",
+      "stresses": ["virtualization", "scrolling", "reconciliation", "measurement", "focus"],
+      "assertions": ["120hz-reference-scroll", "stable-node-identity", "bounded-live-nodes", "semantic-range", "no-idle-work"]
+    },
+    {
+      "id": "gesture-handoff",
+      "name": "Nested gesture handoff",
+      "milestone": 2,
+      "status": "specification",
+      "canonical_interaction": "Transfer touch and pen motion among nested scroll, drag, zoom, and edge navigation recognizers.",
+      "stresses": ["gesture-arbitration", "velocity", "touch", "pen", "nested-scroll"],
+      "assertions": ["continuous-position", "single-winner", "cancellation-cleanup", "deterministic-replay"]
+    },
+    {
+      "id": "interruptible-transitions",
+      "name": "Interruptible transition lab",
+      "milestone": 2,
+      "status": "specification",
+      "canonical_interaction": "Interrupt, reverse, resize, and hand off spring, keyframe, layout, and shared transitions.",
+      "stresses": ["animation", "layout-transition", "shared-transition", "gesture-handoff", "resize"],
+      "assertions": ["position-continuity", "velocity-continuity", "reduced-motion-substitution", "deterministic-replay", "no-two-frame-stall"]
+    },
+    {
+      "id": "adaptive-dashboard",
+      "name": "Adaptive dashboard",
+      "milestone": 2,
+      "status": "specification",
+      "canonical_interaction": "Resize continuously across compact, medium, and expanded layouts in LTR and RTL.",
+      "stresses": ["grid", "flex", "breakpoints", "safe-areas", "rtl", "large-text"],
+      "assertions": ["no-overflow", "focus-order", "exact-invalidation-reason", "semantic-order", "no-idle-work"]
+    },
+    {
+      "id": "semantic-form",
+      "name": "Semantic settings form",
+      "milestone": 2,
+      "status": "specification",
+      "canonical_interaction": "Complete validation, errors, help, ranges, live updates, and grouped controls with keyboard and automation only.",
+      "stresses": ["semantics", "focus", "live-regions", "forms", "large-text"],
+      "assertions": ["role-name-value", "action-parity", "focus-order", "live-region-order", "screen-reader-script"]
+    },
+    {
+      "id": "cad-viewport",
+      "name": "PrismStudio viewport and chrome",
+      "milestone": 4,
+      "status": "specification",
+      "canonical_interaction": "Orbit, pan, zoom, select, edit properties, use menus, and scrub a dense CAD scene.",
+      "stresses": ["viewport", "canvas", "tables", "menus", "direct-manipulation", "gpu-transport"],
+      "assertions": ["input-latency", "cpu-oracle-tolerance", "backend-event-log", "keyboard-equivalence", "resource-cleanup"]
+    },
+    {
+      "id": "multi-window-scale",
+      "name": "Multi window scale migration",
+      "milestone": 3,
+      "status": "specification",
+      "canonical_interaction": "Create, resize, move, suspend, restore, and close windows across monitors with different scale and refresh rates.",
+      "stresses": ["multi-window", "multi-monitor", "fractional-scale", "surface-loss", "refresh-rate"],
+      "assertions": ["physical-size-continuity", "surface-recovery", "backend-event-log", "resource-cleanup", "no-idle-work"]
+    },
+    {
+      "id": "layer-effects",
+      "name": "Layer and effects stress",
+      "milestone": 2,
+      "status": "specification",
+      "canonical_interaction": "Animate clipped transformed layers with paths, glyphs, images, opacity, blur, and shadows.",
+      "stresses": ["display-list", "clipping", "transforms", "layers", "effects", "rasterization"],
+      "assertions": ["deterministic-golden", "cpu-oracle", "gpu-tolerance", "bounded-resources", "damage-correctness"]
+    }
+  ]
+}
