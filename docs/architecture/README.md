@@ -33,6 +33,7 @@ Detailed experimental contracts:
 - [motion scheduler and tracks](motion.md)
 - [canonical vector paths](paths.md)
 - [canonical decoded images](images.md)
+- [deterministic PNG snapshot bytes](../quality/png-snapshots.md)
 
 The first experimental compiled slice now fixes the initial Zag shapes for
 `NodeKey`, `State<T>`, `Binding<T>`, `Action`, `Environment`, `ViewContext`,

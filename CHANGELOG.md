@@ -47,6 +47,9 @@ include a generated capability record and exact Zag compiler revision.
 - Canonical decoded RGBA8 image resources with overflow-safe dimensional
   validation, exact payload sizing, explicit color-space truth, deterministic
   premultiplied bilinear CPU sampling, fractional-edge coverage, and opacity.
+- Deterministic PNG serialization for CPU surfaces with explicit sRGB intent,
+  exact filter-zero RGBA8 rows, CRC-checked chunks, a pure-Zag stored-zlib IDAT
+  stream, malformed-surface rejection, and byte-identical output evidence.
 - An experimental immutable display list for explicit paints, resources, clips,
   transforms, layers, and effects with deterministic content identity.
 - A versioned canonical display-list codec with bounded validated decoding and

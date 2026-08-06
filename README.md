@@ -160,6 +160,14 @@ clip and transform state, and operation opacity. Unsupported color conversion,
 glyphs, path strokes, skew, layers, and effects fail at the exact operation;
 this subset is not yet the complete CPU renderer required by Milestone 2.
 
+Verified CPU surfaces now serialize to deterministic PNG snapshot bytes with
+an explicit sRGB chunk, exact RGBA8 rows, valid CRC32 chunks, and a pure-Zag
+stored-zlib IDAT stream. Identical pixels produce byte-identical files without
+timestamps or host metadata. Persistence, manifests, golden comparison,
+Talkback evidence bundles, and native screenshot capture remain open, so this
+does not yet claim the snapshot runner or screenshot release gate. See the
+[PNG snapshot contract](docs/quality/png-snapshots.md).
+
 The first input slice resolves full affine transforms back to local coordinates,
 honors local clips and z-order, rejects singular or malformed hit nodes, and
 routes pointer phases through explicit capture and focus truth. Capture loss,
@@ -195,7 +203,7 @@ Run the deterministic headless foundation test with:
 ```
 
 The script compiles every executable contract with strict Zag semantic
-analysis. CI checks out the exact compiler revision from the toolchain contract
+analysis. CI checks out the exact compiler revision from the toolchain contract,
 self-hosts that pinned source to a byte-identical compiler fixed point, and runs
 the same suite before validating repository metadata. The committed upstream
 seed is bootstrap authority, not evidence that it already contains later

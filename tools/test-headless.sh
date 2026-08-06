@@ -42,6 +42,8 @@ cd "$root"
 "$tmp/path-contract"
 "$znc" tests/image_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/image-contract"
 "$tmp/image-contract"
+"$znc" tests/png_encode_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/png-encode-contract"
+"$tmp/png-encode-contract"
 "$znc" tests/display_list_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/display-list-contract"
 "$tmp/display-list-contract"
 "$znc" tests/display_list_codec_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/display-list-codec-contract"
@@ -55,4 +57,4 @@ cd "$root"
 "$znc" tests/motion_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/motion-contract"
 "$tmp/motion-contract"
 
-printf 'headless test: PASS (state, reconciliation, intrinsic measurement, constraints, Flex, Grid, Overlay, scroll, virtual list, Table, Tree, recycling, collection semantics, Talkback, owned render resources, canonical paths and images, display lists, CPU shape and image raster, input, replay, and motion)\n'
+printf 'headless test: PASS (state, reconciliation, intrinsic measurement, constraints, Flex, Grid, Overlay, scroll, virtual list, Table, Tree, recycling, collection semantics, Talkback, owned render resources, canonical paths and images, display lists, CPU shape and image raster, deterministic PNG snapshots, input, replay, and motion)\n'

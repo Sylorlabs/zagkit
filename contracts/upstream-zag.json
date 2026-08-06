@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "audited_repository": "https://github.com/Sylorlabs/zag",
-  "audited_commit": "310e389fbf62b5facab62434e16d38340e978277",
+  "audited_commit": "b5fa3ff7ba016208f21ce8d3fc55da07a61f911a",
   "audited_on": "2026-08-06",
   "state_vocabulary": ["available", "partial", "missing"],
   "evidence_rule": "Available requires native executable conformance at the audited commit. Source presence, a cross compile, or a dirty working tree does not qualify.",
@@ -125,6 +125,14 @@
       "needed_by": [2, 3, 5, 6, 7],
       "evidence": "The pinned zagd architecture documents a checksummed incremental declaration index and background semantic rechecking, but not an in-process incremental parser or stable state-preserving library reload contract.",
       "exit_gate": "Dependency invalidation, state preserving reload, ABI rejection, rollback, file race, crash recovery, and deterministic event hooks pass end to end."
+    },
+    {
+      "id": "checksum-and-stored-zlib",
+      "category": "standard-library",
+      "state": "available",
+      "needed_by": [2, 3, 6, 7],
+      "evidence": "The exact clean pinned commit contains pure-Zag IEEE CRC32, Adler32, and canonical stored-block zlib encode/decode. tests/run_compression_primitives.sh passes published vectors, exact interoperable bytes, empty input, 65535-byte block boundaries, corruption, truncation, trailing-data, bounded-output, and cleanup cases.",
+      "exit_gate": "Keep the focused checksum and stored-zlib suite green at the exact Zag revision pinned by each Zagkit release."
     }
   ]
 }

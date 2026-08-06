@@ -1,0 +1,149 @@
+@import("../src/render/png_encode.zag")
+
+struct TestState { passed: i32, failed: i32 }
+
+fn expect(state: *TestState, condition: i32, name: []u8) void {
+    if (condition != 0) {
+        state.*.passed = state.*.passed + 1;
+        _zag_print("ok  "); _zag_println(name);
+    } else {
+        state.*.failed = state.*.failed + 1;
+        _zag_print("FAIL "); _zag_println(name);
+    }
+}
+
+fn read_u32_be(bytes: ArrayList[u8], offset: i32) i64 {
+    return ((bytes.data[offset] as i64) << 24) |
+        ((bytes.data[offset + 1] as i64) << 16) |
+        ((bytes.data[offset + 2] as i64) << 8) |
+        (bytes.data[offset + 3] as i64);
+}
+
+fn bytes_equal(a: ArrayList[u8], b: ArrayList[u8]) i32 {
+    if (a.len != b.len) { return 0; }
+    let i: i32 = 0;
+    while (i < a.len) {
+        if (a.data[i] != b.data[i]) { return 0; }
+        i = i + 1;
+    }
+    return 1;
+}
+
+fn chunk_crc_valid(bytes: ArrayList[u8], offset: i32) i32 {
+    let length: i32 = read_u32_be(bytes, offset) as i32;
+    if (length < 0 || offset + 12 + length > bytes.len) { return 0; }
+    let crc_input: ArrayList[u8] = make[u8](4 + length);
+    let i: i32 = 0;
+    while (i < 4 + length) {
+        push[u8](&crc_input, bytes.data[offset + 4 + i]);
+        i = i + 1;
+    }
+    let expected: i64 = checksum_crc32(crc_input.data[0..crc_input.len]);
+    free[u8](&crc_input);
+    return (expected == read_u32_be(bytes, offset + 8 + length)) as i32;
+}
+
+fn signature_and_chunks_contract(state: *TestState) void {
+    let surface: CpuSurface = cpu_surface_make(1, 1);
+    surface.pixels.data[0] = 17;
+    surface.pixels.data[1] = 34;
+    surface.pixels.data[2] = 51;
+    surface.pixels.data[3] = 68;
+    let png: PngEncodeResult = png_encode_surface(surface);
+    expect(state, png.error == PngEncodeError.none && png.bytes.len == 86,
+        "one RGBA8 pixel produces the exact canonical PNG size");
+    expect(state, png.bytes.data[0] == 137 && png.bytes.data[1] == 80 &&
+        png.bytes.data[2] == 78 && png.bytes.data[3] == 71 &&
+        png.bytes.data[4] == 13 && png.bytes.data[5] == 10 &&
+        png.bytes.data[6] == 26 && png.bytes.data[7] == 10,
+        "snapshot bytes begin with the PNG signature");
+
+    let ihdr: i32 = 8;
+    let srgb: i32 = ihdr + 25;
+    let idat: i32 = srgb + 13;
+    let idat_length: i32 = read_u32_be(png.bytes, idat) as i32;
+    let iend: i32 = idat + 12 + idat_length;
+    expect(state, read_u32_be(png.bytes, ihdr) == 13 &&
+        png.bytes.data[ihdr + 4] == 73 && png.bytes.data[ihdr + 5] == 72 &&
+        png.bytes.data[ihdr + 6] == 68 && png.bytes.data[ihdr + 7] == 82 &&
+        read_u32_be(png.bytes, ihdr + 8) == 1 &&
+        read_u32_be(png.bytes, ihdr + 12) == 1 &&
+        png.bytes.data[ihdr + 16] == 8 && png.bytes.data[ihdr + 17] == 6,
+        "IHDR declares one by one noninterlaced RGBA8 pixels");
+    expect(state, png.bytes.data[srgb + 4] == 115 &&
+        png.bytes.data[srgb + 5] == 82 && png.bytes.data[srgb + 6] == 71 &&
+        png.bytes.data[srgb + 7] == 66 && png.bytes.data[srgb + 8] == 0,
+        "snapshot color intent is explicitly sRGB perceptual");
+    expect(state, chunk_crc_valid(png.bytes, ihdr) != 0 &&
+        chunk_crc_valid(png.bytes, srgb) != 0 &&
+        chunk_crc_valid(png.bytes, idat) != 0 &&
+        chunk_crc_valid(png.bytes, iend) != 0,
+        "every PNG chunk carries a valid IEEE CRC32");
+    expect(state, png.bytes.data[iend + 4] == 73 &&
+        png.bytes.data[iend + 5] == 69 && png.bytes.data[iend + 6] == 78 &&
+        png.bytes.data[iend + 7] == 68 && iend + 12 == png.bytes.len,
+        "IEND terminates the file with no trailing bytes");
+
+    let decoded: ZlibStoreDecodeResult = zlib_store_decode(
+        png.bytes.data[idat + 8..idat + 8 + idat_length]
+    );
+    expect(state, decoded.error == ZlibStoreError.none && decoded.bytes.len == 5 &&
+        decoded.bytes.data[0] == 0 && decoded.bytes.data[1] == 17 &&
+        decoded.bytes.data[2] == 34 && decoded.bytes.data[3] == 51 &&
+        decoded.bytes.data[4] == 68,
+        "IDAT decodes to filter zero followed by exact RGBA bytes");
+    zlib_store_decode_free(&decoded);
+    png_encode_free(&png);
+    cpu_surface_free(&surface);
+}
+
+fn determinism_contract(state: *TestState) void {
+    let surface: CpuSurface = cpu_surface_make(3, 2);
+    let i: i32 = 0;
+    while (i < surface.pixels.len) {
+        surface.pixels.data[i] = ((i * 29 + 7) % 256) as u8;
+        i = i + 1;
+    }
+    let first: PngEncodeResult = png_encode_surface(surface);
+    let second: PngEncodeResult = png_encode_surface(surface);
+    expect(state, first.error == PngEncodeError.none &&
+        second.error == PngEncodeError.none && bytes_equal(first.bytes, second.bytes) != 0,
+        "identical CPU surfaces produce byte-identical PNG snapshots");
+    png_encode_free(&second);
+    png_encode_free(&first);
+    cpu_surface_free(&surface);
+}
+
+fn rejection_contract(state: *TestState) void {
+    let invalid: CpuSurface = cpu_surface_make(0, 1);
+    let invalid_result: PngEncodeResult = png_encode_surface(invalid);
+    expect(state, invalid_result.error == PngEncodeError.invalid_surface &&
+        invalid_result.bytes.len == 0,
+        "invalid surfaces cannot become screenshot evidence");
+    png_encode_free(&invalid_result);
+    cpu_surface_free(&invalid);
+
+    let mutated: CpuSurface = cpu_surface_make(1, 1);
+    mutated.pixels.len = 3;
+    let mutated_result: PngEncodeResult = png_encode_surface(mutated);
+    expect(state, mutated_result.error == PngEncodeError.invalid_surface,
+        "surface byte-count mutation fails before PNG encoding");
+    png_encode_free(&mutated_result);
+    mutated.pixels.len = 4;
+    cpu_surface_free(&mutated);
+}
+
+fn main() i32 {
+    let state: TestState = TestState{ .passed = 0, .failed = 0 };
+    signature_and_chunks_contract(&state);
+    determinism_contract(&state);
+    rejection_contract(&state);
+    let passed_text: []u8 = _zag_i64_to_str(state.passed as i64);
+    let failed_text: []u8 = _zag_i64_to_str(state.failed as i64);
+    _zag_print("PNG encode contract: pass="); _zag_print(passed_text);
+    _zag_print(" fail="); _zag_println(failed_text);
+    _zag_str_free(passed_text);
+    _zag_str_free(failed_text);
+    if (state.failed == 0) { return 0; }
+    return 1;
+}

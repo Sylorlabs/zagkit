@@ -1,0 +1,115 @@
+@import("std:list")
+@import("std:checksum")
+@import("std:zlib_store")
+@import("cpu_raster.zag")
+
+enum PngEncodeError {
+    none,
+    invalid_surface,
+    input_limit,
+    compression_error,
+}
+
+struct PngEncodeResult {
+    bytes: ArrayList[u8],
+    error: PngEncodeError,
+}
+
+fn png_write_u32_be(bytes: *ArrayList[u8], value: i64) void {
+    push[u8](bytes, ((value >> 24) & 255) as u8);
+    push[u8](bytes, ((value >> 16) & 255) as u8);
+    push[u8](bytes, ((value >> 8) & 255) as u8);
+    push[u8](bytes, (value & 255) as u8);
+}
+
+fn png_write_chunk(output: *ArrayList[u8], chunk_type: []u8, data: []u8) void {
+    png_write_u32_be(output, data.len as i64);
+    let crc_input: ArrayList[u8] = make[u8](4 + data.len);
+    let i: i32 = 0;
+    while (i < 4) {
+        push[u8](output, chunk_type[i]);
+        push[u8](&crc_input, chunk_type[i]);
+        i = i + 1;
+    }
+    i = 0;
+    while (i < data.len) {
+        push[u8](output, data[i]);
+        push[u8](&crc_input, data[i]);
+        i = i + 1;
+    }
+    png_write_u32_be(output,
+        checksum_crc32(crc_input.data[0..crc_input.len]));
+    free[u8](&crc_input);
+}
+
+fn png_encode_fail(error: PngEncodeError) PngEncodeResult {
+    return PngEncodeResult{ .bytes = make[u8](1), .error = error };
+}
+
+fn png_encode_surface(surface: CpuSurface) PngEncodeResult {
+    if (surface.width <= 0 || surface.height <= 0 ||
+        surface.width > 8192 || surface.height > 8192) {
+        return png_encode_fail(PngEncodeError.invalid_surface);
+    }
+    let pixel_bytes: i64 = (surface.width as i64) *
+        (surface.height as i64) * 4;
+    if (pixel_bytes <= 0 || pixel_bytes != surface.pixels.len as i64) {
+        return png_encode_fail(PngEncodeError.invalid_surface);
+    }
+    let scanline_bytes: i64 = pixel_bytes + surface.height as i64;
+    if (scanline_bytes <= 0 || scanline_bytes > zlib_store_input_limit()) {
+        return png_encode_fail(PngEncodeError.input_limit);
+    }
+    let scanlines: ArrayList[u8] = make[u8](scanline_bytes as i32);
+    let y: i32 = 0;
+    while (y < surface.height) {
+        push[u8](&scanlines, 0);
+        let row_start: i32 = y * surface.width * 4;
+        let i: i32 = 0;
+        while (i < surface.width * 4) {
+            push[u8](&scanlines, surface.pixels.data[row_start + i]);
+            i = i + 1;
+        }
+        y = y + 1;
+    }
+    let compressed: ZlibStoreEncodeResult = zlib_store_encode(
+        scanlines.data[0..scanlines.len]
+    );
+    free[u8](&scanlines);
+    if (compressed.error != ZlibStoreError.none) {
+        zlib_store_encode_free(&compressed);
+        return png_encode_fail(PngEncodeError.compression_error);
+    }
+
+    let output: ArrayList[u8] = make[u8](compressed.bytes.len + 64);
+    push[u8](&output, 137); push[u8](&output, 80);
+    push[u8](&output, 78); push[u8](&output, 71);
+    push[u8](&output, 13); push[u8](&output, 10);
+    push[u8](&output, 26); push[u8](&output, 10);
+
+    let header: ArrayList[u8] = make[u8](13);
+    png_write_u32_be(&header, surface.width as i64);
+    png_write_u32_be(&header, surface.height as i64);
+    push[u8](&header, 8);
+    push[u8](&header, 6);
+    push[u8](&header, 0);
+    push[u8](&header, 0);
+    push[u8](&header, 0);
+    png_write_chunk(&output, "IHDR", header.data[0..header.len]);
+    free[u8](&header);
+
+    let srgb: ArrayList[u8] = make[u8](1);
+    push[u8](&srgb, 0);
+    png_write_chunk(&output, "sRGB", srgb.data[0..srgb.len]);
+    free[u8](&srgb);
+
+    png_write_chunk(&output, "IDAT",
+        compressed.bytes.data[0..compressed.bytes.len]);
+    zlib_store_encode_free(&compressed);
+    png_write_chunk(&output, "IEND", "");
+    return PngEncodeResult{ .bytes = output, .error = PngEncodeError.none };
+}
+
+fn png_encode_free(result: *PngEncodeResult) void {
+    free[u8](&result.*.bytes);
+}

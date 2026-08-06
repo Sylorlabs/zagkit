@@ -24,11 +24,12 @@
 
 ## Zag audit boundary
 
-The release pin resolves the clean Zag `zag-v2-machine-control` commit
-`310e389fbf62b5facab62434e16d38340e978277`. It was exported from the exact Git
+The release pin resolves the clean Zag `agent/zagkit-prerequisites` commit
+`b5fa3ff7ba016208f21ce8d3fc55da07a61f911a`. It was exported from the exact Git
 tree, self-hosted to a byte-identical stage-2/stage-3 fixpoint without external
 tools, and passed the resource, aggregate switch value-flow, foreground-cache,
-cache-integration, and tooling gates. The neighboring local Zag checkout still contains extensive unrelated
+cache-integration, tooling, checksum, and stored-zlib gates. The neighboring
+local Zag checkout still contains extensive unrelated
 changes; those changes were not used to claim capabilities or construct this
 release identity.
 
