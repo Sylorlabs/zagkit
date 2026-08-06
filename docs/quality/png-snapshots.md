@@ -15,9 +15,10 @@ chunk CRC, decompressed scanline bytes, ordering, and absence of trailing data
 have executable contracts.
 
 Stored DEFLATE intentionally favors a small deterministic trusted surface over
-file size. PNG decoding is not implemented by this encoder, and a valid PNG
-file does not by itself certify layout, accessibility, interaction, or native
-presentation.
+file size. The separate [`png_decode`](../architecture/images.md) asset path
+accepts bounded stored, fixed, and dynamic DEFLATE PNGs; this snapshot encoder
+does not share its adaptive input policy. A valid PNG file does not by itself
+certify layout, accessibility, interaction, or native presentation.
 
 `tools/render-headless-reference.sh <output.png>` compiles and runs a pure-Zag
 320 by 200 conformance scene and persists its PNG. The normal headless gate

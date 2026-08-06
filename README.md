@@ -144,8 +144,9 @@ The version 2
 binary codec round-trips resource metadata, payloads, revisions, allocation
 policy, and operations byte-identically and rejects malformed, truncated,
 noncanonical, unknown-version, and hash-mismatched input. Scale-adaptive path
-coverage, encoded image and glyph interpretation, damage, complete CPU
-rasterization, GPU transport, schema evolution, and fuzz coverage remain open.
+coverage, remaining encoded-image formats, glyph interpretation, damage,
+complete CPU rasterization, GPU transport, schema evolution, and fuzz coverage
+remain open.
 See the [path contract](docs/architecture/paths.md) and
 [image contract](docs/architecture/images.md).
 
@@ -169,6 +170,18 @@ nonempty size, and byte identity. Manifests, golden comparison, Talkback
 evidence bundles, and native screenshot capture remain open, so this does not
 yet claim the complete snapshot runner or screenshot release gate. See the
 [PNG snapshot contract](docs/quality/png-snapshots.md).
+
+Encoded PNG assets now enter the same canonical image boundary through a
+bounded pure-Zag decoder. It validates chunk spelling, order, CRCs, complete
+termination, and exact decompressed size; supports stored, fixed, and dynamic
+DEFLATE; reverses all five PNG filters; and expands legal noninterlaced
+grayscale, RGB, indexed, grayscale-alpha, and RGBA bit depths with PLTE and
+tRNS into owned sRGB RGBA8. Focused contracts pass identically on x86-64 and
+ARM64/qemu, and an independent 240-file corpus covers every accepted color and
+bit-depth family across five zlib strategies. Adam7, arbitrary ICC/chromaticity
+conversion, scale goldens, and broader fuzzing remain open, so the `G3-PNG`
+completion box remains deliberately unchecked. See the
+[image and PNG ingestion contract](docs/architecture/images.md).
 
 The first input slice resolves full affine transforms back to local coordinates,
 honors local clips and z-order, rejects singular or malformed hit nodes, and

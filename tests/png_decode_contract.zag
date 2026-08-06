@@ -1,0 +1,453 @@
+@import("../src/render/png_decode.zag")
+@import("../src/render/png_encode.zag")
+
+struct TestState { passed: i32, failed: i32 }
+
+fn expect(state: *TestState, condition: i32, name: []u8) void {
+    if (condition != 0) {
+        state.*.passed = state.*.passed + 1;
+        _zag_print("ok  "); _zag_println(name);
+    } else {
+        state.*.failed = state.*.failed + 1;
+        _zag_print("FAIL "); _zag_println(name);
+    }
+}
+
+fn pixels_equal(decoded: PngDecodeResult, surface: CpuSurface) i32 {
+    if (decoded.pixels.len != surface.pixels.len) { return 0; }
+    let i: i32 = 0;
+    while (i < decoded.pixels.len) {
+        if (decoded.pixels.data[i] != surface.pixels.data[i]) { return 0; }
+        i = i + 1;
+    }
+    return 1;
+}
+
+fn fixture_png(width: i32, height: i32, bit_depth: i32, color_type: i32,
+    scanlines: []u8, palette: []u8, transparency: []u8) PngEncodeResult {
+    let compressed: ZlibStoreEncodeResult = zlib_store_encode(scanlines);
+    let output: ArrayList[u8] = make[u8](compressed.bytes.len + 128 +
+        palette.len + transparency.len);
+    push[u8](&output, 137); push[u8](&output, 80);
+    push[u8](&output, 78); push[u8](&output, 71);
+    push[u8](&output, 13); push[u8](&output, 10);
+    push[u8](&output, 26); push[u8](&output, 10);
+    let header: ArrayList[u8] = make[u8](13);
+    png_write_u32_be(&header, width as i64);
+    png_write_u32_be(&header, height as i64);
+    push[u8](&header, bit_depth as u8); push[u8](&header, color_type as u8);
+    push[u8](&header, 0); push[u8](&header, 0); push[u8](&header, 0);
+    png_write_chunk(&output, "IHDR", header.data[0..header.len]);
+    free[u8](&header);
+    if (palette.len > 0) { png_write_chunk(&output, "PLTE", palette); }
+    if (transparency.len > 0) { png_write_chunk(&output, "tRNS", transparency); }
+    png_write_chunk(&output, "IDAT", compressed.bytes.data[0..compressed.bytes.len]);
+    png_write_chunk(&output, "IEND", "");
+    zlib_store_encode_free(&compressed);
+    return PngEncodeResult{ .bytes = output, .error = PngEncodeError.none };
+}
+
+fn fixture_png_compressed(width: i32, height: i32, compressed: []u8) PngEncodeResult {
+    let output: ArrayList[u8] = make[u8](compressed.len + 64);
+    push[u8](&output, 137); push[u8](&output, 80);
+    push[u8](&output, 78); push[u8](&output, 71);
+    push[u8](&output, 13); push[u8](&output, 10);
+    push[u8](&output, 26); push[u8](&output, 10);
+    let header: ArrayList[u8] = make[u8](13);
+    png_write_u32_be(&header, width as i64); png_write_u32_be(&header, height as i64);
+    push[u8](&header, 8); push[u8](&header, 6);
+    push[u8](&header, 0); push[u8](&header, 0); push[u8](&header, 0);
+    png_write_chunk(&output, "IHDR", header.data[0..header.len]);
+    free[u8](&header);
+    png_write_chunk(&output, "IDAT", compressed);
+    png_write_chunk(&output, "IEND", "");
+    return PngEncodeResult{ .bytes = output, .error = PngEncodeError.none };
+}
+
+fn fixture_filtered_rows(raw: ArrayList[u8], width: i32, height: i32,
+    bytes_per_pixel: i32) ArrayList[u8] {
+    let row_bytes: i32 = width * bytes_per_pixel;
+    let filtered: ArrayList[u8] = make[u8](raw.len + height);
+    let y: i32 = 0;
+    while (y < height) {
+        let filter: i32 = y % 5;
+        push[u8](&filtered, filter as u8);
+        let x: i32 = 0;
+        while (x < row_bytes) {
+            let value: i32 = raw.data[y * row_bytes + x] as i32;
+            let left: i32 = 0;
+            let above: i32 = 0;
+            let upper_left: i32 = 0;
+            if (x >= bytes_per_pixel) {
+                left = raw.data[y * row_bytes + x - bytes_per_pixel] as i32;
+            }
+            if (y > 0) { above = raw.data[(y - 1) * row_bytes + x] as i32; }
+            if (y > 0 && x >= bytes_per_pixel) {
+                upper_left = raw.data[(y - 1) * row_bytes +
+                    x - bytes_per_pixel] as i32;
+            }
+            let predictor: i32 = 0;
+            if (filter == 1) { predictor = left; }
+            else if (filter == 2) { predictor = above; }
+            else if (filter == 3) { predictor = (left + above) / 2; }
+            else if (filter == 4) { predictor = png_paeth(left, above, upper_left); }
+            push[u8](&filtered, ((value - predictor) & 255) as u8);
+            x = x + 1;
+        }
+        y = y + 1;
+    }
+    return filtered;
+}
+
+fn fixture_write_u32_be(bytes: *ArrayList[u8], offset: i32, value: i64) void {
+    bytes.*.data[offset] = ((value >> 24) & 255) as u8;
+    bytes.*.data[offset + 1] = ((value >> 16) & 255) as u8;
+    bytes.*.data[offset + 2] = ((value >> 8) & 255) as u8;
+    bytes.*.data[offset + 3] = (value & 255) as u8;
+}
+
+fn fixture_rewrite_crc(bytes: *ArrayList[u8], chunk_offset: i32) void {
+    let length: i32 = png_read_u32_be(
+        bytes.*.data[0..bytes.*.len], chunk_offset
+    ) as i32;
+    let crc_offset: i32 = chunk_offset + 8 + length;
+    let crc: i64 = checksum_crc32(
+        bytes.*.data[chunk_offset + 4..crc_offset]
+    );
+    fixture_write_u32_be(bytes, crc_offset, crc);
+}
+
+fn fixture_profile_png(gamma_count: i32, chromaticity_kind: i32) PngEncodeResult {
+    let compressed: ZlibStoreEncodeResult = zlib_store_encode("\x00\x11\x22\x33\xff");
+    let output: ArrayList[u8] = make[u8](compressed.bytes.len + 160);
+    push[u8](&output, 137); push[u8](&output, 80);
+    push[u8](&output, 78); push[u8](&output, 71);
+    push[u8](&output, 13); push[u8](&output, 10);
+    push[u8](&output, 26); push[u8](&output, 10);
+    let header: ArrayList[u8] = make[u8](13);
+    png_write_u32_be(&header, 1); png_write_u32_be(&header, 1);
+    push[u8](&header, 8); push[u8](&header, 6);
+    push[u8](&header, 0); push[u8](&header, 0); push[u8](&header, 0);
+    png_write_chunk(&output, "IHDR", header.data[0..header.len]);
+    free[u8](&header);
+    let gamma: ArrayList[u8] = make[u8](4);
+    png_write_u32_be(&gamma, 45455);
+    let gamma_index: i32 = 0;
+    while (gamma_index < gamma_count) {
+        png_write_chunk(&output, "gAMA", gamma.data[0..gamma.len]);
+        gamma_index = gamma_index + 1;
+    }
+    free[u8](&gamma);
+    if (chromaticity_kind != 0) {
+        let chromaticity: ArrayList[u8] = make[u8](32);
+        png_write_u32_be(&chromaticity, 31270);
+        png_write_u32_be(&chromaticity, 32900);
+        png_write_u32_be(&chromaticity, 64000);
+        png_write_u32_be(&chromaticity, 33000);
+        png_write_u32_be(&chromaticity, 30000);
+        png_write_u32_be(&chromaticity, 60000);
+        png_write_u32_be(&chromaticity, 15000);
+        png_write_u32_be(&chromaticity, 6000 + (chromaticity_kind - 1));
+        png_write_chunk(&output, "cHRM", chromaticity.data[0..chromaticity.len]);
+        free[u8](&chromaticity);
+    }
+    png_write_chunk(&output, "IDAT", compressed.bytes.data[0..compressed.bytes.len]);
+    png_write_chunk(&output, "IEND", "");
+    zlib_store_encode_free(&compressed);
+    return PngEncodeResult{ .bytes = output, .error = PngEncodeError.none };
+}
+
+fn round_trip_contract(state: *TestState) void {
+    let surface: CpuSurface = cpu_surface_make(3, 2);
+    let i: i32 = 0;
+    while (i < surface.pixels.len) {
+        surface.pixels.data[i] = ((i * 43 + 19) % 256) as u8;
+        i = i + 1;
+    }
+    let encoded: PngEncodeResult = png_encode_surface(surface);
+    let decoded: PngDecodeResult = png_decode(
+        encoded.bytes.data[0..encoded.bytes.len]
+    );
+    expect(state, decoded.error == PngDecodeError.none &&
+        decoded.width == 3 && decoded.height == 2 &&
+        decoded.color_space == RenderColorSpace.srgb &&
+        decoded.profile_assumed == 0 &&
+        pixels_equal(decoded, surface) != 0,
+        "canonical screenshot PNG decodes to exact owned RGBA8 pixels");
+
+    let store: RenderResourceStore = render_resource_store_default();
+    let spec: RenderResourceSpec = png_decode_resource_spec(decoded, 91);
+    expect(state, render_resource_add(&store, spec) == RenderResourceError.none &&
+        store.resources.data[0].width == 3 && store.resources.data[0].height == 2 &&
+        image_resource_validate(store.resources.data[0]) == ImagePayloadError.none,
+        "decoded PNG becomes a canonical owned image resource");
+    render_resource_store_free(&store);
+    png_decode_free(&decoded);
+    png_encode_free(&encoded);
+    cpu_surface_free(&surface);
+}
+
+fn filter_contract(state: *TestState) void {
+    let raw: ArrayList[u8] = make[u8](40);
+    let i: i32 = 0;
+    while (i < 40) { push[u8](&raw, ((i * 31 + 7) % 256) as u8); i = i + 1; }
+    let scanlines: ArrayList[u8] = fixture_filtered_rows(raw, 2, 5, 4);
+    let fixture: PngEncodeResult = fixture_png(
+        2, 5, 8, 6, scanlines.data[0..scanlines.len], "", ""
+    );
+    let decoded: PngDecodeResult = png_decode(
+        fixture.bytes.data[0..fixture.bytes.len]
+    );
+    let exact: i32 = 1;
+    if (decoded.pixels.len != raw.len) { exact = 0; }
+    i = 0;
+    while (i < decoded.pixels.len && i < raw.len) {
+        if (decoded.pixels.data[i] != raw.data[i]) { exact = 0; }
+        i = i + 1;
+    }
+    expect(state, decoded.error == PngDecodeError.none && exact != 0,
+        "None, Sub, Up, Average, and Paeth filters reconstruct exact bytes");
+    png_decode_free(&decoded); png_encode_free(&fixture);
+    free[u8](&scanlines); free[u8](&raw);
+}
+
+fn color_contract(state: *TestState) void {
+    let gray_fixture: PngEncodeResult = fixture_png(
+        8, 1, 1, 0, "\x00\xaa", "", "\x00\x00"
+    );
+    let gray: PngDecodeResult = png_decode(
+        gray_fixture.bytes.data[0..gray_fixture.bytes.len]
+    );
+    expect(state, gray.error == PngDecodeError.none && gray.pixels.len == 32 &&
+        gray.profile_assumed != 0 &&
+        gray.pixels.data[0] == 255 && gray.pixels.data[3] == 255 &&
+        gray.pixels.data[4] == 0 && gray.pixels.data[7] == 0,
+        "packed one-bit grayscale expands and applies transparent gray");
+    png_decode_free(&gray); png_encode_free(&gray_fixture);
+
+    let indexed_fixture: PngEncodeResult = fixture_png(
+        4, 1, 2, 3, "\x00\x1b",
+        "\xff\x00\x00\x00\xff\x00\x00\x00\xff\xff\xff\xff",
+        "\xff\x80\x40\x00"
+    );
+    let indexed: PngDecodeResult = png_decode(
+        indexed_fixture.bytes.data[0..indexed_fixture.bytes.len]
+    );
+    expect(state, indexed.error == PngDecodeError.none && indexed.pixels.len == 16 &&
+        indexed.pixels.data[0] == 255 && indexed.pixels.data[3] == 255 &&
+        indexed.pixels.data[5] == 255 && indexed.pixels.data[7] == 128 &&
+        indexed.pixels.data[10] == 255 && indexed.pixels.data[11] == 64 &&
+        indexed.pixels.data[12] == 255 && indexed.pixels.data[15] == 0,
+        "packed indexed color expands palette entries and per-index alpha");
+    png_decode_free(&indexed); png_encode_free(&indexed_fixture);
+
+    let rgb16_fixture: PngEncodeResult = fixture_png(
+        1, 1, 16, 2, "\x00\x12\x34\x56\x78\x9a\xbc", "",
+        "\x12\x34\x56\x78\x9a\xbc"
+    );
+    let rgb16: PngDecodeResult = png_decode(
+        rgb16_fixture.bytes.data[0..rgb16_fixture.bytes.len]
+    );
+    expect(state, rgb16.error == PngDecodeError.none && rgb16.pixels.len == 4 &&
+        rgb16.pixels.data[0] == 18 && rgb16.pixels.data[1] == 86 &&
+        rgb16.pixels.data[2] == 154 && rgb16.pixels.data[3] == 0,
+        "RGB16 uses deterministic high-byte conversion and exact tRNS matching");
+    png_decode_free(&rgb16); png_encode_free(&rgb16_fixture);
+
+    let gray_alpha_fixture: PngEncodeResult = fixture_png(
+        1, 1, 16, 4, "\x00\xab\xcd\x40\x80", "", ""
+    );
+    let gray_alpha: PngDecodeResult = png_decode(
+        gray_alpha_fixture.bytes.data[0..gray_alpha_fixture.bytes.len]
+    );
+    expect(state, gray_alpha.error == PngDecodeError.none &&
+        gray_alpha.pixels.data[0] == 171 && gray_alpha.pixels.data[1] == 171 &&
+        gray_alpha.pixels.data[2] == 171 && gray_alpha.pixels.data[3] == 64,
+        "grayscale-alpha16 expands to canonical RGBA8");
+    png_decode_free(&gray_alpha); png_encode_free(&gray_alpha_fixture);
+
+    let rgba16_fixture: PngEncodeResult = fixture_png(
+        1, 1, 16, 6, "\x00\x10\x20\x30\x40\x50\x60\x70\x80", "", ""
+    );
+    let rgba16: PngDecodeResult = png_decode(
+        rgba16_fixture.bytes.data[0..rgba16_fixture.bytes.len]
+    );
+    expect(state, rgba16.error == PngDecodeError.none &&
+        rgba16.pixels.data[0] == 16 && rgba16.pixels.data[1] == 48 &&
+        rgba16.pixels.data[2] == 80 && rgba16.pixels.data[3] == 112,
+        "RGBA16 expands each channel with one documented conversion policy");
+    png_decode_free(&rgba16); png_encode_free(&rgba16_fixture);
+}
+
+fn color_profile_contract(state: *TestState) void {
+    let declared_fixture: PngEncodeResult = fixture_profile_png(1, 1);
+    let declared: PngDecodeResult = png_decode(
+        declared_fixture.bytes.data[0..declared_fixture.bytes.len]
+    );
+    expect(state, declared.error == PngDecodeError.none &&
+        declared.profile_assumed == 0 && declared.pixels.data[0] == 17 &&
+        declared.pixels.data[1] == 34 && declared.pixels.data[2] == 51,
+        "exact sRGB gamma and chromaticities decode without an assumed profile");
+    png_decode_free(&declared); png_encode_free(&declared_fixture);
+
+    let gamma_only_fixture: PngEncodeResult = fixture_profile_png(1, 0);
+    let gamma_only: PngDecodeResult = png_decode(
+        gamma_only_fixture.bytes.data[0..gamma_only_fixture.bytes.len]
+    );
+    expect(state, gamma_only.error == PngDecodeError.none &&
+        gamma_only.profile_assumed != 0,
+        "gamma without declared primaries keeps the fallback-profile truth visible");
+    png_decode_free(&gamma_only); png_encode_free(&gamma_only_fixture);
+
+    let duplicate_fixture: PngEncodeResult = fixture_profile_png(2, 0);
+    let duplicate: PngDecodeResult = png_decode(
+        duplicate_fixture.bytes.data[0..duplicate_fixture.bytes.len]
+    );
+    expect(state, duplicate.error == PngDecodeError.duplicate_chunk,
+        "duplicate color metadata fails before image decompression");
+    png_decode_free(&duplicate); png_encode_free(&duplicate_fixture);
+
+    let foreign_fixture: PngEncodeResult = fixture_profile_png(1, 2);
+    let foreign: PngDecodeResult = png_decode(
+        foreign_fixture.bytes.data[0..foreign_fixture.bytes.len]
+    );
+    expect(state, foreign.error == PngDecodeError.unsupported_color_profile,
+        "unconverted chromaticities fail rather than being mislabeled sRGB");
+    png_decode_free(&foreign); png_encode_free(&foreign_fixture);
+}
+
+fn dynamic_inflate_contract(state: *TestState) void {
+    let compressed: []u8 =
+        "\x78\xda\xed\xd0\x4d\x2b\xc3\x71\x00\xc0\xf1\x7f\xcd\x43\x5b\xda\xf2\xb0\x9a\x30\x31\x99\x96\x95\xa1\xa1\xad\x96\x95\x45\x8b\x28\x5a\x91\x87\x3c\xd5\x6a\x21\x4b\x16\x59\x4d\x34\x69\x42\xab\x95\xa7\x3c\x64\x25\x2b\x8b\x16\x4d\x71\xe1\xa0\xe4\xb2\x8b\x94\x03\x17\x0e\x4a\x2e\x2e\x52\x5f\x2f\xc4\xef\xf3\x12\x3e\x92\x24\x49\xc8\xd2\x33\xc9\x50\x28\x91\xab\xd4\x64\xe5\x15\xa2\xca\xd7\x91\xa3\x35\xa0\xd6\x99\xd0\x54\xd4\x53\x60\xb4\xa1\xad\x76\x50\x52\xd7\x4a\x99\xb5\x13\x7d\x63\x0f\x06\xc7\x20\x46\xa7\x9b\xaa\xf6\x09\x6a\xba\xa6\x31\x77\xfb\x69\xe8\x5f\xc4\x3a\x1c\xc2\xe6\x0e\x63\x1f\xdb\xa4\xc9\xbb\x4f\xb3\xef\x08\xe7\x5c\x9c\xb6\xf9\x73\x3a\x82\x57\x74\x86\x6e\x71\xad\xdf\xd3\x1d\x49\xd1\xbb\xf5\xc4\xc0\xde\x0b\x43\xd1\x77\x46\x8f\x3f\x71\xc7\xbf\xf1\x24\x7e\x19\x4f\xca\x98\xbc\x56\x30\x75\x93\x8d\xef\x4e\xc3\xec\x43\x31\xfe\x54\x39\x81\x47\x23\x0b\xcf\xb5\x04\x5f\x2d\x2c\xbf\xd9\x59\xf9\x68\x61\xed\xab\x9d\xf0\xb7\x8b\xc8\x4f\x1f\x1b\x8c\xb0\x9d\xe6\x61\x57\xee\xe5\x40\x39\x43\x34\x37\xc0\x91\x66\x89\x58\xd1\x2a\x27\xa5\x11\x4e\xf5\x3b\x24\x2a\x0f\xb9\x30\xc5\xb8\x34\x9f\x71\x65\x49\x22\x89\x00\x11\x20\x02\x44\x80\x08\x10\x01\x22\x40\x04\x88\x00\x11\x20\x02\x44\x80\x08\x10\x01\xff\x2f\xe0\x0f\xd7\xee\xee\x79";
+    let fixture: PngEncodeResult = fixture_png_compressed(64, 16, compressed);
+    let decoded: PngDecodeResult = png_decode(fixture.bytes.data[0..fixture.bytes.len]);
+    let exact: i32 = decoded.error == PngDecodeError.none && decoded.pixels.len == 4096;
+    let y: i32 = 0;
+    while (y < 16 && exact != 0) {
+        let x: i32 = 0;
+        while (x < 64) {
+            let at: i32 = (y * 64 + x) * 4;
+            if (decoded.pixels.data[at] != ((x * 3) % 256) as u8 ||
+                decoded.pixels.data[at + 1] != ((x * 5) % 256) as u8 ||
+                decoded.pixels.data[at + 2] != ((x * 7) % 256) as u8 ||
+                decoded.pixels.data[at + 3] != 255) { exact = 0; }
+            x = x + 1;
+        }
+        y = y + 1;
+    }
+    expect(state, exact,
+        "PNG IDAT accepts independently generated dynamic-Huffman zlib streams");
+    png_decode_free(&decoded); png_encode_free(&fixture);
+}
+
+fn rejection_contract(state: *TestState) void {
+    let signature: PngDecodeResult = png_decode("not a png");
+    expect(state, signature.error == PngDecodeError.invalid_signature,
+        "invalid signatures fail before chunk parsing");
+    png_decode_free(&signature);
+
+    let surface: CpuSurface = cpu_surface_make(1, 1);
+    let encoded: PngEncodeResult = png_encode_surface(surface);
+    encoded.bytes.data[29] = encoded.bytes.data[29] ^ 1;
+    let crc: PngDecodeResult = png_decode(encoded.bytes.data[0..encoded.bytes.len]);
+    expect(state, crc.error == PngDecodeError.invalid_chunk_crc,
+        "chunk corruption fails CRC validation before decompression");
+    png_decode_free(&crc);
+    encoded.bytes.data[29] = encoded.bytes.data[29] ^ 1;
+
+    push[u8](&encoded.bytes, 0);
+    let trailing: PngDecodeResult = png_decode(encoded.bytes.data[0..encoded.bytes.len]);
+    expect(state, trailing.error == PngDecodeError.trailing_data,
+        "bytes after IEND fail canonical full-file decoding");
+    png_decode_free(&trailing);
+    encoded.bytes.len = encoded.bytes.len - 1;
+
+    let every_prefix_rejected: i32 = 1;
+    let length: i32 = 0;
+    while (length < encoded.bytes.len) {
+        let prefix: PngDecodeResult = png_decode(encoded.bytes.data[0..length]);
+        if (prefix.error == PngDecodeError.none) { every_prefix_rejected = 0; }
+        png_decode_free(&prefix);
+        length = length + 1;
+    }
+    expect(state, every_prefix_rejected,
+        "every strict PNG prefix fails without reading beyond available bytes");
+
+    encoded.bytes.data[28] = 1;
+    fixture_rewrite_crc(&encoded.bytes, 8);
+    let interlace: PngDecodeResult = png_decode(encoded.bytes.data[0..encoded.bytes.len]);
+    expect(state, interlace.error == PngDecodeError.unsupported_interlace,
+        "Adam7 reports an explicit unavailable capability instead of misrendering");
+    png_decode_free(&interlace);
+    encoded.bytes.data[28] = 0;
+    fixture_rewrite_crc(&encoded.bytes, 8);
+
+    let iend_offset: i32 = encoded.bytes.len - 12;
+    encoded.bytes.data[iend_offset + 6] = 'n';
+    fixture_rewrite_crc(&encoded.bytes, iend_offset);
+    let reserved_type: PngDecodeResult = png_decode(
+        encoded.bytes.data[0..encoded.bytes.len]
+    );
+    expect(state, reserved_type.error == PngDecodeError.invalid_chunk_type,
+        "chunk type reserved bits fail even when the attacker repairs the CRC");
+    png_decode_free(&reserved_type);
+    encoded.bytes.data[iend_offset + 6] = 'N';
+    fixture_rewrite_crc(&encoded.bytes, iend_offset);
+
+    fixture_write_u32_be(&encoded.bytes, 16, 9000);
+    fixture_rewrite_crc(&encoded.bytes, 8);
+    let oversized: PngDecodeResult = png_decode(encoded.bytes.data[0..encoded.bytes.len]);
+    expect(state, oversized.error == PngDecodeError.pixel_limit,
+        "oversized dimensions fail before allocation or decompression");
+    png_decode_free(&oversized);
+    png_encode_free(&encoded);
+    cpu_surface_free(&surface);
+
+    let bad_filter_fixture: PngEncodeResult = fixture_png(
+        1, 1, 8, 6, "\x05\x00\x00\x00\xff", "", ""
+    );
+    let bad_filter: PngDecodeResult = png_decode(
+        bad_filter_fixture.bytes.data[0..bad_filter_fixture.bytes.len]
+    );
+    expect(state, bad_filter.error == PngDecodeError.invalid_filter,
+        "unknown scanline filters fail explicitly");
+    png_decode_free(&bad_filter); png_encode_free(&bad_filter_fixture);
+
+    let missing_palette_fixture: PngEncodeResult = fixture_png(
+        1, 1, 1, 3, "\x00\x00", "", ""
+    );
+    let missing_palette: PngDecodeResult = png_decode(
+        missing_palette_fixture.bytes.data[0..missing_palette_fixture.bytes.len]
+    );
+    expect(state, missing_palette.error == PngDecodeError.missing_palette,
+        "indexed images require a palette before inflate");
+    png_decode_free(&missing_palette); png_encode_free(&missing_palette_fixture);
+
+    let bad_index_fixture: PngEncodeResult = fixture_png(
+        1, 1, 1, 3, "\x00\x80", "\xff\x00\x00", ""
+    );
+    let bad_index: PngDecodeResult = png_decode(
+        bad_index_fixture.bytes.data[0..bad_index_fixture.bytes.len]
+    );
+    expect(state, bad_index.error == PngDecodeError.palette_index,
+        "palette indices outside declared entries fail without out-of-bounds access");
+    png_decode_free(&bad_index); png_encode_free(&bad_index_fixture);
+}
+
+fn main() i32 {
+    let state: TestState = TestState{ .passed = 0, .failed = 0 };
+    round_trip_contract(&state);
+    filter_contract(&state);
+    color_contract(&state);
+    color_profile_contract(&state);
+    dynamic_inflate_contract(&state);
+    rejection_contract(&state);
+    _zag_print("PNG decode contract: pass=");
+    let passed: []u8 = _zag_i64_to_str(state.passed as i64);
+    _zag_print(passed); _zag_str_free(passed);
+    _zag_print(" fail=");
+    let failed: []u8 = _zag_i64_to_str(state.failed as i64);
+    _zag_println(failed); _zag_str_free(failed);
+    if (state.failed == 0) { return 0; }
+    return 1;
+}

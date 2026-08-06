@@ -32,7 +32,7 @@ Detailed experimental contracts:
 - [Flex placement and adaptive spacing](flex.md)
 - [motion scheduler and tracks](motion.md)
 - [canonical vector paths](paths.md)
-- [canonical decoded images](images.md)
+- [canonical images and bounded PNG ingestion](images.md)
 - [deterministic PNG snapshot bytes](../quality/png-snapshots.md)
 
 The first experimental compiled slice now fixes the initial Zag shapes for

@@ -44,6 +44,8 @@ cd "$root"
 "$tmp/image-contract"
 "$znc" tests/png_encode_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/png-encode-contract"
 "$tmp/png-encode-contract"
+"$znc" tests/png_decode_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/png-decode-contract"
+"$tmp/png-decode-contract"
 "$znc" tools/render-headless-reference.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/render-headless-reference"
 "$tmp/render-headless-reference" "$tmp/reference-first.png"
 "$tmp/render-headless-reference" "$tmp/reference-second.png"
@@ -64,4 +66,4 @@ printf 'Reference snapshot contract: pass=3 fail=0\n'
 "$znc" tests/motion_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/motion-contract"
 "$tmp/motion-contract"
 
-printf 'headless test: PASS (state, reconciliation, intrinsic measurement, constraints, Flex, Grid, Overlay, scroll, virtual list, Table, Tree, recycling, collection semantics, Talkback, owned render resources, canonical paths and images, display lists, CPU shape and image raster, deterministic PNG snapshots, input, replay, and motion)\n'
+printf 'headless test: PASS (state, reconciliation, intrinsic measurement, constraints, Flex, Grid, Overlay, scroll, virtual list, Table, Tree, recycling, collection semantics, Talkback, owned render resources, canonical paths and images, bounded PNG decode, display lists, CPU shape and image raster, deterministic PNG snapshots, input, replay, and motion)\n'
