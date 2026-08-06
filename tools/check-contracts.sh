@@ -32,6 +32,8 @@ done
 
 grep -q 'Run strict headless contracts' .github/workflows/contracts.yml \
     || fail "CI no longer executes strict headless contracts"
+grep -q 'branches: \[main\]' .github/workflows/contracts.yml \
+    || fail "CI no longer limits duplicate push validation to main"
 grep -q 'contracts/toolchain.json' .github/workflows/contracts.yml \
     || fail "CI no longer resolves its Zag revision from the toolchain contract"
 grep -q 'ZAG_BOOTSTRAP_MEMORY_GUARD=off .toolchain/zag/zag-poc/bootstrap.sh' .github/workflows/contracts.yml \
