@@ -12,7 +12,8 @@ modern materials and asset fidelity, and a complete PrismStudio UI replacement.
 This repository is at **0.1.0-experimental.0**. It currently contains the
 accepted product contract, executable Milestone 0 checks, and the first
 deterministic state, keyed reconciliation, geometry, intrinsic measurement,
-Flex, Grid, Overlay, semantics, Talkback, display-list, CPU-oracle, input, replay, and motion
+Flex, Grid, Overlay, scroll, virtual-list, semantics, Talkback, display-list,
+CPU-oracle, input, replay, and motion
 slices. It does not yet
 contain a usable renderer, window shell, component library, or supported platform
 backend. Nothing in this repository is a Zagkit 1.0 release.
@@ -42,7 +43,7 @@ is normative in [DEPENDENCIES.md](DEPENDENCIES.md).
 | Product and architecture contract | accepted | [RFC index](docs/rfcs/README.md) |
 | Compiler dependency | pinned, prerequisites incomplete | [toolchain lock](contracts/toolchain.json) |
 | Platform shells | unavailable | [support matrix](SUPPORT.md) |
-| Headless core | experimental state, reconciliation, intrinsic measurement, geometry, Flex, Grid, Overlay, semantics, Talkback, display lists, CPU raster, input, replay, and motion | [headless test](tools/test-headless.sh) |
+| Headless core | experimental state, reconciliation, intrinsic measurement, geometry, Flex, Grid, Overlay, scroll, virtual list, semantics, Talkback, display lists, CPU raster, input, replay, and motion | [headless test](tools/test-headless.sh) |
 | Components and visual language | inventory only, visual review pending | [component inventory](contracts/components.json) |
 | Flex and Zagkit Talkback | Flex foundation and in-process ID-first Talkback dispatch executing; native transport remains unavailable | [Talkback contract](docs/automation/talkback.md) |
 | Benchmarks | scene specifications only, no results | [benchmark contract](benchmarks/README.md) |
@@ -65,8 +66,8 @@ experimental. A retained intrinsic tree now aggregates leaf, row, column, and
 overlay size ranges, rejects invalid ownership and unstable same-revision
 measurement, resolves constraints with explicit rules and overflow, and records
 exact state-read layout causes. Typed environment values, reconciliation
-cancellation, retained child lifecycle, replay serialization, scroll and virtualized
-placement, and full breakpoint policy remain open; the corresponding Milestone
+cancellation, retained child lifecycle, replay serialization, Table and Tree
+projection, and full breakpoint policy remain open; the corresponding Milestone
 2 checklist items are not complete. See the
 [measurement contract](docs/architecture/measurement.md).
 
@@ -86,6 +87,16 @@ identity to replay. End-to-end retained invalidation coverage and the full
 adaptive matrix remain open, so `G2-FLEX` and `G2-FLEX-RTL` are not complete.
 See the [Flex contract](docs/architecture/flex.md) and
 [Grid and Overlay contract](docs/architecture/grid-and-overlay.md).
+
+Scroll now retains exact logical offsets, consumed and unconsumed gesture
+deltas, reveal alignment, anchor-preserving content reconciliation, RTL visible
+coordinates, revisions, and deterministic identity. Virtual List performs
+binary visible-range selection across up to one billion stable IDs, supports
+sparse variable extents and anchor correction, and hard-limits live placement
+allocation. The focused proof queries the middle of one million rows with nine
+live placements and fewer than 64 examined records. This is correctness and
+bounded-work evidence, not a 120 Hz hardware result. See the
+[scroll and virtualization contract](docs/architecture/scroll-and-virtualization.md).
 
 The semantics slice owns copied names and values, stable keys, explicit action
 capabilities, deterministic focus order, live-region state, ranges, selection,

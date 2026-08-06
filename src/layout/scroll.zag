@@ -1,0 +1,240 @@
+@import("../core/geometry.zag")
+@import("common.zag")
+
+enum ScrollError {
+    none,
+    invalid_viewport,
+    invalid_content,
+    invalid_offset,
+    invalid_target,
+}
+
+enum ScrollAlignment { nearest, start, center, end }
+
+struct ScrollState {
+    viewport: Size,
+    content: Size,
+    offset_x: i64,
+    offset_y: i64,
+    revision: i64,
+}
+
+struct ScrollAnchor {
+    content_x: i64,
+    content_y: i64,
+    viewport_x: i64,
+    viewport_y: i64,
+    preserve_x: i32,
+    preserve_y: i32,
+}
+
+struct ScrollMutation {
+    old_offset_x: i64,
+    old_offset_y: i64,
+    offset_x: i64,
+    offset_y: i64,
+    consumed_x: i64,
+    consumed_y: i64,
+    unconsumed_x: i64,
+    unconsumed_y: i64,
+    revision: i64,
+    changed: i32,
+    mutation_hash: i64,
+    error: ScrollError,
+}
+
+fn scroll_mix(hash: i64, value: i64) i64 { return (hash * 1099511628211) ^ value; }
+
+fn scroll_size_valid(value: Size) i32 {
+    return (value.width >= 0 && value.height >= 0 &&
+        value.width <= unbounded_extent() && value.height <= unbounded_extent()) as i32;
+}
+
+fn scroll_state(viewport: Size, content: Size) ScrollState {
+    return ScrollState{
+        .viewport = viewport, .content = content,
+        .offset_x = 0, .offset_y = 0, .revision = 0,
+    };
+}
+
+fn scroll_max_x(state: ScrollState) i64 {
+    let value: i64 = state.content.width - state.viewport.width;
+    if (value < 0) { return 0; }
+    return value;
+}
+
+fn scroll_max_y(state: ScrollState) i64 {
+    let value: i64 = state.content.height - state.viewport.height;
+    if (value < 0) { return 0; }
+    return value;
+}
+
+fn scroll_state_valid(state: ScrollState) ScrollError {
+    if (scroll_size_valid(state.viewport) == 0) { return ScrollError.invalid_viewport; }
+    if (scroll_size_valid(state.content) == 0) { return ScrollError.invalid_content; }
+    if (state.revision < 0 || state.offset_x < 0 || state.offset_y < 0 ||
+        state.offset_x > scroll_max_x(state) || state.offset_y > scroll_max_y(state)) {
+        return ScrollError.invalid_offset;
+    }
+    return ScrollError.none;
+}
+
+fn scroll_state_hash(state: ScrollState) i64 {
+    let hash: i64 = scroll_mix(scroll_mix(17, state.viewport.width), state.viewport.height);
+    hash = scroll_mix(hash, state.content.width); hash = scroll_mix(hash, state.content.height);
+    hash = scroll_mix(hash, state.offset_x); hash = scroll_mix(hash, state.offset_y);
+    return scroll_mix(hash, state.revision);
+}
+
+fn scroll_mutation_hash(result: ScrollMutation) i64 {
+    let hash: i64 = scroll_mix(scroll_mix(17, result.old_offset_x), result.old_offset_y);
+    hash = scroll_mix(hash, result.offset_x); hash = scroll_mix(hash, result.offset_y);
+    hash = scroll_mix(hash, result.consumed_x); hash = scroll_mix(hash, result.consumed_y);
+    hash = scroll_mix(hash, result.unconsumed_x); hash = scroll_mix(hash, result.unconsumed_y);
+    hash = scroll_mix(hash, result.revision); hash = scroll_mix(hash, result.changed as i64);
+    return scroll_mix(hash, result.error as i64);
+}
+
+fn scroll_error_mutation(state: ScrollState, error: ScrollError) ScrollMutation {
+    let result: ScrollMutation = ScrollMutation{
+        .old_offset_x = state.offset_x, .old_offset_y = state.offset_y,
+        .offset_x = state.offset_x, .offset_y = state.offset_y,
+        .consumed_x = 0, .consumed_y = 0, .unconsumed_x = 0, .unconsumed_y = 0,
+        .revision = state.revision, .changed = 0, .mutation_hash = 0, .error = error,
+    };
+    result.mutation_hash = scroll_mutation_hash(result);
+    return result;
+}
+
+fn scroll_apply(state: *ScrollState, raw_x: i64, raw_y: i64, requested_x: i64,
+    requested_y: i64) ScrollMutation {
+    let validation: ScrollError = scroll_state_valid(state.*);
+    if (validation != ScrollError.none) { return scroll_error_mutation(state.*, validation); }
+    if (raw_x < 0 - unbounded_extent() || raw_x > unbounded_extent() * 2 ||
+        raw_y < 0 - unbounded_extent() || raw_y > unbounded_extent() * 2 ||
+        requested_x < 0 - unbounded_extent() || requested_x > unbounded_extent() ||
+        requested_y < 0 - unbounded_extent() || requested_y > unbounded_extent()) {
+        return scroll_error_mutation(state.*, ScrollError.invalid_offset);
+    }
+    let old_x: i64 = state.*.offset_x;
+    let old_y: i64 = state.*.offset_y;
+    let next_x: i64 = clamp_i64(raw_x, 0, scroll_max_x(state.*));
+    let next_y: i64 = clamp_i64(raw_y, 0, scroll_max_y(state.*));
+    let changed: i32 = (next_x != old_x || next_y != old_y) as i32;
+    if (changed != 0) { state.*.revision = state.*.revision + 1; }
+    state.*.offset_x = next_x; state.*.offset_y = next_y;
+    let consumed_x: i64 = next_x - old_x;
+    let consumed_y: i64 = next_y - old_y;
+    let result: ScrollMutation = ScrollMutation{
+        .old_offset_x = old_x, .old_offset_y = old_y,
+        .offset_x = next_x, .offset_y = next_y,
+        .consumed_x = consumed_x, .consumed_y = consumed_y,
+        .unconsumed_x = requested_x - consumed_x,
+        .unconsumed_y = requested_y - consumed_y,
+        .revision = state.*.revision, .changed = changed,
+        .mutation_hash = 0, .error = ScrollError.none,
+    };
+    result.mutation_hash = scroll_mutation_hash(result);
+    return result;
+}
+
+fn scroll_to(state: *ScrollState, x: i64, y: i64) ScrollMutation {
+    return scroll_apply(state, x, y, x - state.*.offset_x, y - state.*.offset_y);
+}
+
+fn scroll_by(state: *ScrollState, delta_x: i64, delta_y: i64) ScrollMutation {
+    if (delta_x < 0 - unbounded_extent() || delta_x > unbounded_extent() ||
+        delta_y < 0 - unbounded_extent() || delta_y > unbounded_extent()) {
+        return scroll_error_mutation(state.*, ScrollError.invalid_offset);
+    }
+    return scroll_apply(state, state.*.offset_x + delta_x, state.*.offset_y + delta_y,
+        delta_x, delta_y);
+}
+
+fn scroll_anchor(content_x: i64, content_y: i64, viewport_x: i64, viewport_y: i64) ScrollAnchor {
+    return ScrollAnchor{
+        .content_x = content_x, .content_y = content_y,
+        .viewport_x = viewport_x, .viewport_y = viewport_y,
+        .preserve_x = 1, .preserve_y = 1,
+    };
+}
+
+fn scroll_reconcile(state: *ScrollState, viewport: Size, content: Size,
+    anchor: ScrollAnchor) ScrollMutation {
+    let old: ScrollState = state.*;
+    let old_validation: ScrollError = scroll_state_valid(old);
+    if (old_validation != ScrollError.none) { return scroll_error_mutation(old, old_validation); }
+    if (scroll_size_valid(viewport) == 0) { return scroll_error_mutation(old, ScrollError.invalid_viewport); }
+    if (scroll_size_valid(content) == 0) { return scroll_error_mutation(old, ScrollError.invalid_content); }
+    if ((anchor.preserve_x != 0 && anchor.preserve_x != 1) ||
+        (anchor.preserve_y != 0 && anchor.preserve_y != 1) ||
+        anchor.content_x < 0 || anchor.content_y < 0 ||
+        anchor.viewport_x < 0 - unbounded_extent() || anchor.viewport_x > unbounded_extent() ||
+        anchor.viewport_y < 0 - unbounded_extent() || anchor.viewport_y > unbounded_extent()) {
+        return scroll_error_mutation(old, ScrollError.invalid_target);
+    }
+    state.*.viewport = viewport; state.*.content = content;
+    let raw_x: i64 = old.offset_x;
+    let raw_y: i64 = old.offset_y;
+    if (anchor.preserve_x != 0) { raw_x = anchor.content_x - anchor.viewport_x; }
+    if (anchor.preserve_y != 0) { raw_y = anchor.content_y - anchor.viewport_y; }
+    state.*.offset_x = clamp_i64(raw_x, 0, scroll_max_x(state.*));
+    state.*.offset_y = clamp_i64(raw_y, 0, scroll_max_y(state.*));
+    let changed: i32 = (state.*.viewport.width != old.viewport.width ||
+        state.*.viewport.height != old.viewport.height ||
+        state.*.content.width != old.content.width ||
+        state.*.content.height != old.content.height ||
+        state.*.offset_x != old.offset_x || state.*.offset_y != old.offset_y) as i32;
+    if (changed != 0) { state.*.revision = old.revision + 1; }
+    let result: ScrollMutation = ScrollMutation{
+        .old_offset_x = old.offset_x, .old_offset_y = old.offset_y,
+        .offset_x = state.*.offset_x, .offset_y = state.*.offset_y,
+        .consumed_x = state.*.offset_x - old.offset_x,
+        .consumed_y = state.*.offset_y - old.offset_y,
+        .unconsumed_x = 0, .unconsumed_y = 0,
+        .revision = state.*.revision, .changed = changed,
+        .mutation_hash = 0, .error = ScrollError.none,
+    };
+    result.mutation_hash = scroll_mutation_hash(result);
+    return result;
+}
+
+fn scroll_axis_reveal(current: i64, viewport: i64, target_start: i64,
+    target_extent: i64, alignment: ScrollAlignment) i64 {
+    if (alignment == ScrollAlignment.start) { return target_start; }
+    if (alignment == ScrollAlignment.center) {
+        return target_start + target_extent / 2 - viewport / 2;
+    }
+    if (alignment == ScrollAlignment.end) { return target_start + target_extent - viewport; }
+    if (target_extent >= viewport) { return target_start; }
+    if (target_start < current) { return target_start; }
+    if (target_start + target_extent > current + viewport) {
+        return target_start + target_extent - viewport;
+    }
+    return current;
+}
+
+fn scroll_reveal(state: *ScrollState, target: Rect, horizontal: ScrollAlignment,
+    vertical: ScrollAlignment) ScrollMutation {
+    if (target.x < 0 || target.y < 0 || target.width < 0 || target.height < 0 ||
+        target.x > unbounded_extent() - target.width ||
+        target.y > unbounded_extent() - target.height) {
+        return scroll_error_mutation(state.*, ScrollError.invalid_target);
+    }
+    let raw_x: i64 = scroll_axis_reveal(state.*.offset_x, state.*.viewport.width,
+        target.x, target.width, horizontal);
+    let raw_y: i64 = scroll_axis_reveal(state.*.offset_y, state.*.viewport.height,
+        target.y, target.height, vertical);
+    return scroll_apply(state, raw_x, raw_y,
+        raw_x - state.*.offset_x, raw_y - state.*.offset_y);
+}
+
+fn scroll_visible_rect(state: ScrollState, direction: LayoutDirection) Rect {
+    let width: i64 = state.viewport.width;
+    if (state.content.width < width) { width = state.content.width; }
+    let height: i64 = state.viewport.height;
+    if (state.content.height < height) { height = state.content.height; }
+    let x: i64 = state.offset_x;
+    if (direction == LayoutDirection.rtl) { x = scroll_max_x(state) - state.offset_x; }
+    return rect(x, state.offset_y, width, height);
+}

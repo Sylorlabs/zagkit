@@ -1,0 +1,439 @@
+@import("std:list")
+@import("../core/geometry.zag")
+@import("common.zag")
+
+enum VirtualAxis { vertical, horizontal }
+enum VirtualListError {
+    none,
+    invalid_model,
+    invalid_override,
+    invalid_viewport,
+    invalid_scroll,
+    invalid_style,
+    invalid_anchor,
+    arithmetic_overflow,
+    live_limit_exceeded,
+}
+
+struct VirtualExtentOverride {
+    index: i64,
+    extent: i64,
+    revision: i64,
+}
+
+struct VirtualListModel {
+    count: i64,
+    id_base: i64,
+    default_extent: i64,
+    gap: i64,
+    revision: i64,
+    overrides: ArrayList[VirtualExtentOverride],
+}
+
+struct VirtualListStyle {
+    axis: VirtualAxis,
+    direction: LayoutDirection,
+    padding: Insets,
+    overscan_before: i32,
+    overscan_after: i32,
+    max_live_items: i32,
+}
+
+struct VirtualPlacement {
+    id: i64,
+    index: i64,
+    frame: Rect,
+    extent_revision: i64,
+}
+
+struct VirtualAnchor {
+    id: i64,
+    index: i64,
+    viewport_offset: i64,
+}
+
+struct VirtualAnchorResolution {
+    scroll_offset: i64,
+    changed: i32,
+    error: VirtualListError,
+}
+
+struct VirtualListResult {
+    placements: ArrayList[VirtualPlacement],
+    viewport: Size,
+    content: Size,
+    scroll_offset: i64,
+    max_scroll: i64,
+    first_visible: i64,
+    last_visible: i64,
+    first_live: i64,
+    last_live: i64,
+    semantic_count: i64,
+    examined_items: i32,
+    layout_hash: i64,
+    error: VirtualListError,
+    error_index: i64,
+}
+
+fn virtual_override(index: i64, extent: i64, revision: i64) VirtualExtentOverride {
+    return VirtualExtentOverride{ .index = index, .extent = extent, .revision = revision };
+}
+
+fn virtual_model(count: i64, id_base: i64, default_extent: i64,
+    gap: i64, revision: i64, overrides: ArrayList[VirtualExtentOverride]) VirtualListModel {
+    return VirtualListModel{
+        .count = count, .id_base = id_base, .default_extent = default_extent,
+        .gap = gap, .revision = revision, .overrides = overrides,
+    };
+}
+
+fn virtual_style(axis: VirtualAxis, padding: Insets) VirtualListStyle {
+    return VirtualListStyle{
+        .axis = axis, .direction = LayoutDirection.ltr, .padding = padding,
+        .overscan_before = 2, .overscan_after = 2, .max_live_items = 512,
+    };
+}
+
+fn virtual_free(result: *VirtualListResult) void {
+    free[VirtualPlacement](&result.*.placements);
+}
+
+fn virtual_mix(hash: i64, value: i64) i64 { return (hash * 1099511628211) ^ value; }
+
+fn virtual_error_result(error: VirtualListError, index: i64) VirtualListResult {
+    let result: VirtualListResult = VirtualListResult{
+        .placements = make[VirtualPlacement](1),
+        .viewport = size(0, 0), .content = size(0, 0),
+        .scroll_offset = 0, .max_scroll = 0,
+        .first_visible = 0 - 1, .last_visible = 0 - 1,
+        .first_live = 0 - 1, .last_live = 0 - 1,
+        .semantic_count = 0, .examined_items = 0,
+        .layout_hash = 17, .error = error, .error_index = index,
+    };
+    result.layout_hash = virtual_mix(virtual_mix(17, error as i64), index);
+    return result;
+}
+
+fn virtual_extent_valid(value: i64) i32 {
+    return (value >= 0 && value <= unbounded_extent() / 4) as i32;
+}
+
+fn virtual_insets_valid(value: Insets) i32 {
+    return (virtual_extent_valid(value.top) == 1 && virtual_extent_valid(value.right) == 1 &&
+        virtual_extent_valid(value.bottom) == 1 && virtual_extent_valid(value.left) == 1) as i32;
+}
+
+fn virtual_model_error(model: VirtualListModel) VirtualListError {
+    if (model.count < 0 || model.count > 1000000000 || model.id_base <= 0 ||
+        model.default_extent <= 0 || model.default_extent > unbounded_extent() / 4 ||
+        model.gap < 0 || model.gap > unbounded_extent() / 4 ||
+        model.revision < 0 || model.overrides.len > 4096 ||
+        (model.count > 0 && model.id_base > unbounded_extent() - model.count)) {
+        return VirtualListError.invalid_model;
+    }
+    let i: i32 = 0;
+    while (i < model.overrides.len) {
+        let item: VirtualExtentOverride = model.overrides.data[i];
+        if (item.index < 0 || item.index >= model.count || item.extent <= 0 ||
+            item.extent > unbounded_extent() / 4 || item.revision < 0 ||
+            (i > 0 && model.overrides.data[i - 1].index >= item.index)) {
+            return VirtualListError.invalid_override;
+        }
+        i = i + 1;
+    }
+    return VirtualListError.none;
+}
+
+fn virtual_style_valid(style: VirtualListStyle) i32 {
+    return (virtual_insets_valid(style.padding) == 1 && style.overscan_before >= 0 &&
+        style.overscan_after >= 0 && style.overscan_before <= 4096 &&
+        style.overscan_after <= 4096 && style.max_live_items > 0 &&
+        style.max_live_items <= 4096) as i32;
+}
+
+fn virtual_content_extent(model: VirtualListModel, style: VirtualListStyle) i64 {
+    let leading: i64 = style.padding.top;
+    let trailing: i64 = style.padding.bottom;
+    if (style.axis == VirtualAxis.horizontal) {
+        leading = style.padding.left; trailing = style.padding.right;
+    }
+    let total: i64 = leading + trailing;
+    if (total < 0 || total > unbounded_extent()) { return 0 - 1; }
+    if (model.count == 0) { return total; }
+    let stride: i64 = model.default_extent + model.gap;
+    if (stride <= 0 || model.count > (unbounded_extent() - total) / stride) { return 0 - 1; }
+    total = total + model.count * stride - model.gap;
+    let i: i32 = 0;
+    while (i < model.overrides.len) {
+        total = total + model.overrides.data[i].extent - model.default_extent;
+        if (total < 0 || total > unbounded_extent()) { return 0 - 1; }
+        i = i + 1;
+    }
+    return total;
+}
+
+fn virtual_item_extent(model: VirtualListModel, index: i64) i64 {
+    let i: i32 = 0;
+    while (i < model.overrides.len) {
+        if (model.overrides.data[i].index == index) { return model.overrides.data[i].extent; }
+        if (model.overrides.data[i].index > index) { return model.default_extent; }
+        i = i + 1;
+    }
+    return model.default_extent;
+}
+
+fn virtual_item_revision(model: VirtualListModel, index: i64) i64 {
+    let i: i32 = 0;
+    while (i < model.overrides.len) {
+        if (model.overrides.data[i].index == index) { return model.overrides.data[i].revision; }
+        if (model.overrides.data[i].index > index) { return model.revision; }
+        i = i + 1;
+    }
+    return model.revision;
+}
+
+fn virtual_item_offset(model: VirtualListModel, style: VirtualListStyle, index: i64) i64 {
+    let leading: i64 = style.padding.top;
+    if (style.axis == VirtualAxis.horizontal) {
+        if (style.direction == LayoutDirection.ltr) { leading = style.padding.left; }
+        else { leading = style.padding.right; }
+    }
+    let offset: i64 = leading + index * (model.default_extent + model.gap);
+    let i: i32 = 0;
+    while (i < model.overrides.len && model.overrides.data[i].index < index) {
+        offset = offset + model.overrides.data[i].extent - model.default_extent;
+        i = i + 1;
+    }
+    return offset;
+}
+
+fn virtual_first_end_after(model: VirtualListModel, style: VirtualListStyle,
+    position: i64, steps: *i32) i64 {
+    let low: i64 = 0;
+    let high: i64 = model.count;
+    while (low < high) {
+        let mid: i64 = low + (high - low) / 2;
+        let finish: i64 = virtual_item_offset(model, style, mid) + virtual_item_extent(model, mid);
+        steps.* = steps.* + 1;
+        if (finish <= position) { low = mid + 1; }
+        else { high = mid; }
+    }
+    return low;
+}
+
+fn virtual_first_start_at_or_after(model: VirtualListModel, style: VirtualListStyle,
+    position: i64, steps: *i32) i64 {
+    let low: i64 = 0;
+    let high: i64 = model.count;
+    while (low < high) {
+        let mid: i64 = low + (high - low) / 2;
+        let start: i64 = virtual_item_offset(model, style, mid);
+        steps.* = steps.* + 1;
+        if (start < position) { low = mid + 1; }
+        else { high = mid; }
+    }
+    return low;
+}
+
+fn virtual_input_hash(model: VirtualListModel, viewport: Size, raw_scroll: i64,
+    style: VirtualListStyle) i64 {
+    let hash: i64 = virtual_mix(virtual_mix(17, model.count), model.id_base);
+    hash = virtual_mix(hash, model.default_extent); hash = virtual_mix(hash, model.gap);
+    hash = virtual_mix(hash, model.revision); hash = virtual_mix(hash, viewport.width);
+    hash = virtual_mix(hash, viewport.height); hash = virtual_mix(hash, raw_scroll);
+    hash = virtual_mix(hash, style.axis as i64); hash = virtual_mix(hash, style.direction as i64);
+    hash = virtual_mix(hash, style.padding.top); hash = virtual_mix(hash, style.padding.right);
+    hash = virtual_mix(hash, style.padding.bottom); hash = virtual_mix(hash, style.padding.left);
+    hash = virtual_mix(hash, style.overscan_before as i64);
+    hash = virtual_mix(hash, style.overscan_after as i64);
+    hash = virtual_mix(hash, style.max_live_items as i64);
+    let i: i32 = 0;
+    while (i < model.overrides.len) {
+        hash = virtual_mix(hash, model.overrides.data[i].index);
+        hash = virtual_mix(hash, model.overrides.data[i].extent);
+        hash = virtual_mix(hash, model.overrides.data[i].revision);
+        i = i + 1;
+    }
+    return hash;
+}
+
+fn virtual_output_hash(result: VirtualListResult) i64 {
+    let hash: i64 = virtual_mix(virtual_mix(17, result.content.width), result.content.height);
+    hash = virtual_mix(hash, result.scroll_offset); hash = virtual_mix(hash, result.max_scroll);
+    hash = virtual_mix(hash, result.first_visible); hash = virtual_mix(hash, result.last_visible);
+    hash = virtual_mix(hash, result.first_live); hash = virtual_mix(hash, result.last_live);
+    hash = virtual_mix(hash, result.semantic_count);
+    hash = virtual_mix(hash, result.examined_items as i64);
+    let i: i32 = 0;
+    while (i < result.placements.len) {
+        let placement: VirtualPlacement = result.placements.data[i];
+        hash = virtual_mix(hash, placement.id); hash = virtual_mix(hash, placement.index);
+        hash = virtual_mix(hash, placement.frame.x); hash = virtual_mix(hash, placement.frame.y);
+        hash = virtual_mix(hash, placement.frame.width); hash = virtual_mix(hash, placement.frame.height);
+        hash = virtual_mix(hash, placement.extent_revision);
+        i = i + 1;
+    }
+    return hash;
+}
+
+fn virtual_list_layout(model: VirtualListModel, viewport: Size, raw_scroll: i64,
+    style: VirtualListStyle) VirtualListResult {
+    let model_error: VirtualListError = virtual_model_error(model);
+    if (model_error != VirtualListError.none) {
+        let index: i64 = 0 - 1;
+        if (model_error == VirtualListError.invalid_override) {
+            index = 0;
+            while (index < model.overrides.len && model.overrides.data[index as i32].index >= 0 &&
+                model.overrides.data[index as i32].index < model.count &&
+                model.overrides.data[index as i32].extent > 0 &&
+                model.overrides.data[index as i32].extent <= unbounded_extent() / 4 &&
+                model.overrides.data[index as i32].revision >= 0 &&
+                (index == 0 || model.overrides.data[(index - 1) as i32].index <
+                    model.overrides.data[index as i32].index)) { index = index + 1; }
+        }
+        return virtual_error_result(model_error, index);
+    }
+    if (viewport.width <= 0 || viewport.height <= 0 ||
+        viewport.width > unbounded_extent() || viewport.height > unbounded_extent()) {
+        return virtual_error_result(VirtualListError.invalid_viewport, 0 - 1);
+    }
+    if (virtual_style_valid(style) == 0) {
+        return virtual_error_result(VirtualListError.invalid_style, 0 - 1);
+    }
+    if (raw_scroll < 0 - unbounded_extent() || raw_scroll > unbounded_extent() * 2) {
+        return virtual_error_result(VirtualListError.invalid_scroll, 0 - 1);
+    }
+    let axis_extent: i64 = viewport.height;
+    if (style.axis == VirtualAxis.horizontal) { axis_extent = viewport.width; }
+    let content_extent: i64 = virtual_content_extent(model, style);
+    if (content_extent < 0) { return virtual_error_result(VirtualListError.arithmetic_overflow, 0 - 1); }
+    let max_scroll: i64 = content_extent - axis_extent;
+    if (max_scroll < 0) { max_scroll = 0; }
+    let scroll_offset: i64 = clamp_i64(raw_scroll, 0, max_scroll);
+    let content: Size = size(viewport.width, content_extent);
+    if (style.axis == VirtualAxis.horizontal) { content = size(content_extent, viewport.height); }
+
+    if (model.count == 0) {
+        let empty: VirtualListResult = VirtualListResult{
+            .placements = make[VirtualPlacement](1), .viewport = viewport, .content = content,
+            .scroll_offset = scroll_offset, .max_scroll = max_scroll,
+            .first_visible = 0 - 1, .last_visible = 0 - 1,
+            .first_live = 0 - 1, .last_live = 0 - 1,
+            .semantic_count = 0, .examined_items = 0, .layout_hash = 0,
+            .error = VirtualListError.none, .error_index = 0 - 1,
+        };
+        empty.layout_hash = virtual_mix(virtual_input_hash(model, viewport, raw_scroll, style),
+            virtual_output_hash(empty));
+        return empty;
+    }
+
+    let examined: i32 = 0;
+    let first_visible: i64 = virtual_first_end_after(model, style, scroll_offset, &examined);
+    let after_visible: i64 = virtual_first_start_at_or_after(
+        model, style, scroll_offset + axis_extent, &examined);
+    if (first_visible >= model.count ||
+        virtual_item_offset(model, style, first_visible) >= scroll_offset + axis_extent) {
+        let padding_only: VirtualListResult = VirtualListResult{
+            .placements = make[VirtualPlacement](1), .viewport = viewport, .content = content,
+            .scroll_offset = scroll_offset, .max_scroll = max_scroll,
+            .first_visible = 0 - 1, .last_visible = 0 - 1,
+            .first_live = 0 - 1, .last_live = 0 - 1,
+            .semantic_count = model.count, .examined_items = examined, .layout_hash = 0,
+            .error = VirtualListError.none, .error_index = 0 - 1,
+        };
+        padding_only.layout_hash = virtual_mix(
+            virtual_input_hash(model, viewport, raw_scroll, style),
+            virtual_output_hash(padding_only)
+        );
+        return padding_only;
+    }
+    let last_visible: i64 = after_visible - 1;
+    if (last_visible < first_visible) { last_visible = first_visible; }
+    if (last_visible >= model.count) { last_visible = model.count - 1; }
+    let first_live: i64 = first_visible - style.overscan_before as i64;
+    if (first_live < 0) { first_live = 0; }
+    let last_live: i64 = last_visible + style.overscan_after as i64;
+    if (last_live >= model.count) { last_live = model.count - 1; }
+    let live_count: i64 = last_live - first_live + 1;
+    if (live_count > style.max_live_items as i64) {
+        return virtual_error_result(VirtualListError.live_limit_exceeded, first_visible);
+    }
+    let placements: ArrayList[VirtualPlacement] = make[VirtualPlacement](live_count as i32);
+    let index: i64 = first_live;
+    while (index <= last_live) {
+        let offset: i64 = virtual_item_offset(model, style, index);
+        let extent: i64 = virtual_item_extent(model, index);
+        let frame: Rect = rect(0, 0, 0, 0);
+        if (style.axis == VirtualAxis.vertical) {
+            frame.x = style.padding.left;
+            frame.y = offset - scroll_offset;
+            frame.width = viewport.width - style.padding.left - style.padding.right;
+            if (frame.width < 0) { frame.width = 0; }
+            frame.height = extent;
+        } else {
+            frame.y = style.padding.top;
+            frame.height = viewport.height - style.padding.top - style.padding.bottom;
+            if (frame.height < 0) { frame.height = 0; }
+            frame.width = extent;
+            frame.x = offset - scroll_offset;
+            if (style.direction == LayoutDirection.rtl) {
+                frame.x = viewport.width - (offset - scroll_offset) - extent;
+            }
+        }
+        push[VirtualPlacement](&placements, VirtualPlacement{
+            .id = model.id_base + index, .index = index, .frame = frame,
+            .extent_revision = virtual_item_revision(model, index),
+        });
+        examined = examined + 1;
+        index = index + 1;
+    }
+    let result: VirtualListResult = VirtualListResult{
+        .placements = placements, .viewport = viewport, .content = content,
+        .scroll_offset = scroll_offset, .max_scroll = max_scroll,
+        .first_visible = first_visible, .last_visible = last_visible,
+        .first_live = first_live, .last_live = last_live,
+        .semantic_count = model.count, .examined_items = examined,
+        .layout_hash = 0, .error = VirtualListError.none, .error_index = 0 - 1,
+    };
+    result.layout_hash = virtual_mix(virtual_input_hash(model, viewport, raw_scroll, style),
+        virtual_output_hash(result));
+    return result;
+}
+
+fn virtual_anchor_at(model: VirtualListModel, style: VirtualListStyle,
+    index: i64, scroll_offset: i64) VirtualAnchor {
+    if (index < 0 || index >= model.count) {
+        return VirtualAnchor{ .id = 0, .index = 0 - 1, .viewport_offset = 0 };
+    }
+    return VirtualAnchor{
+        .id = model.id_base + index, .index = index,
+        .viewport_offset = virtual_item_offset(model, style, index) - scroll_offset,
+    };
+}
+
+fn virtual_resolve_anchor(model: VirtualListModel, style: VirtualListStyle,
+    anchor: VirtualAnchor, viewport_extent: i64, old_scroll: i64) VirtualAnchorResolution {
+    if (virtual_model_error(model) != VirtualListError.none ||
+        virtual_style_valid(style) == 0 ||
+        anchor.index < 0 || anchor.index >= model.count ||
+        anchor.id != model.id_base + anchor.index || viewport_extent <= 0 ||
+        viewport_extent > unbounded_extent()) {
+        return VirtualAnchorResolution{
+            .scroll_offset = old_scroll, .changed = 0, .error = VirtualListError.invalid_anchor,
+        };
+    }
+    let content_extent: i64 = virtual_content_extent(model, style);
+    if (content_extent < 0) {
+        return VirtualAnchorResolution{
+            .scroll_offset = old_scroll, .changed = 0, .error = VirtualListError.arithmetic_overflow,
+        };
+    }
+    let max_scroll: i64 = content_extent - viewport_extent;
+    if (max_scroll < 0) { max_scroll = 0; }
+    let raw: i64 = virtual_item_offset(model, style, anchor.index) - anchor.viewport_offset;
+    let resolved: i64 = clamp_i64(raw, 0, max_scroll);
+    return VirtualAnchorResolution{
+        .scroll_offset = resolved, .changed = (resolved != old_scroll) as i32,
+        .error = VirtualListError.none,
+    };
+}

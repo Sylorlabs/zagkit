@@ -5,6 +5,8 @@
 @import("../layout/flex_wrap.zag")
 @import("../layout/grid.zag")
 @import("../layout/overlay.zag")
+@import("../layout/scroll.zag")
+@import("../layout/virtual_list.zag")
 @import("../semantics/semantics.zag")
 @import("../render/cpu_raster.zag")
 @import("../motion/motion.zag")
@@ -458,11 +460,47 @@ fn replay_build_scene(state_value: i64, backend_generation: i64) ReplayResult {
         semantics_tree_free(&semantics);
         return replay_result_error(ReplayError.scene_error, 0 - 1, 0);
     }
+    let virtual_overrides: ArrayList[VirtualExtentOverride] = make[VirtualExtentOverride](1);
+    let virtual_model_value: VirtualListModel = virtual_model(
+        1000, 2000, unit_scale(), 0, magnitude, virtual_overrides
+    );
+    let virtual_style_value: VirtualListStyle = virtual_style(
+        VirtualAxis.vertical, insets_all(0)
+    );
+    let virtual_result: VirtualListResult = virtual_list_layout(
+        virtual_model_value, size(8 * unit_scale(), 6 * unit_scale()),
+        magnitude * unit_scale(), virtual_style_value
+    );
+    free[VirtualExtentOverride](&virtual_overrides);
+    if (virtual_result.error != VirtualListError.none) {
+        virtual_free(&virtual_result);
+        grid_free(&grid_layout_result);
+        overlay_free(&overlay_layout_result);
+        flex_wrap_free(&layout);
+        semantics_tree_free(&semantics);
+        return replay_result_error(ReplayError.scene_error, 0 - 1, 0);
+    }
+    let replay_scroll: ScrollState = scroll_state(virtual_result.viewport, virtual_result.content);
+    let replay_scroll_mutation: ScrollMutation = scroll_to(
+        &replay_scroll, 0, virtual_result.scroll_offset
+    );
+    if (replay_scroll_mutation.error != ScrollError.none) {
+        virtual_free(&virtual_result);
+        grid_free(&grid_layout_result);
+        overlay_free(&overlay_layout_result);
+        flex_wrap_free(&layout);
+        semantics_tree_free(&semantics);
+        return replay_result_error(ReplayError.scene_error, 0 - 1, 0);
+    }
     result.layout_hash = display_mix(
-        display_mix(layout.layout_hash, overlay_layout_result.layout_hash),
-        grid_layout_result.layout_hash
+        display_mix(
+            display_mix(layout.layout_hash, overlay_layout_result.layout_hash),
+            grid_layout_result.layout_hash
+        ),
+        display_mix(virtual_result.layout_hash, scroll_state_hash(replay_scroll))
     );
     result.layout_lines = layout.lines.len;
+    virtual_free(&virtual_result);
     grid_free(&grid_layout_result);
     overlay_free(&overlay_layout_result);
 

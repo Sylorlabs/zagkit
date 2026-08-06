@@ -99,7 +99,6 @@ the placement and line arrays.
 
 The following remain required before either Flex checklist item can complete:
 
-- grid and overlay placement;
 - safe-area and density matrices driven by real platform shells;
 - end-to-end state, environment, and platform-input invalidation reasons across
   retained components;

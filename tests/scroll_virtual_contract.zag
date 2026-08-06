@@ -1,0 +1,243 @@
+@import("std:list")
+@import("../src/layout/scroll.zag")
+@import("../src/layout/virtual_list.zag")
+
+struct TestState { passed: i32, failed: i32 }
+
+fn expect(state: *TestState, condition: i32, name: []u8) void {
+    if (condition != 0) {
+        state.*.passed = state.*.passed + 1;
+        _zag_print("ok  "); _zag_println(name);
+    } else {
+        state.*.failed = state.*.failed + 1;
+        _zag_print("FAIL "); _zag_println(name);
+    }
+}
+
+fn scroll_contract(state: *TestState) void {
+    let value: ScrollState = scroll_state(size(100, 80), size(300, 200));
+    let first: ScrollMutation = scroll_by(&value, 50, 30);
+    expect(state, first.error == ScrollError.none && first.consumed_x == 50 &&
+        first.consumed_y == 30 && first.unconsumed_x == 0 && first.unconsumed_y == 0 &&
+        value.offset_x == 50 && value.offset_y == 30 && value.revision == 1,
+        "scroll consumes exact in-bounds deltas and advances one revision");
+    let after_first_hash: i64 = scroll_state_hash(value);
+    let edge: ScrollMutation = scroll_by(&value, 500, 500);
+    expect(state, edge.offset_x == 200 && edge.offset_y == 120 &&
+        edge.consumed_x == 150 && edge.consumed_y == 90 &&
+        edge.unconsumed_x == 350 && edge.unconsumed_y == 410 && value.revision == 2,
+        "scroll exposes unconsumed boundary deltas for nested gesture handoff");
+    let stopped: ScrollMutation = scroll_by(&value, 10, 10);
+    expect(state, stopped.changed == 0 && stopped.consumed_x == 0 && stopped.consumed_y == 0 &&
+        stopped.unconsumed_x == 10 && stopped.unconsumed_y == 10 && value.revision == 2,
+        "boundary pressure performs no phantom state revision");
+    let repeated: ScrollState = scroll_state(size(100, 80), size(300, 200));
+    let repeated_result: ScrollMutation = scroll_by(&repeated, 50, 30);
+    expect(state, repeated_result.mutation_hash == first.mutation_hash &&
+        scroll_state_hash(repeated) == after_first_hash,
+        "identical scroll inputs produce identical mutation and retained-state identity");
+}
+
+fn reveal_anchor_and_rtl_contract(state: *TestState) void {
+    let value: ScrollState = scroll_state(size(100, 80), size(300, 200));
+    let reveal: ScrollMutation = scroll_reveal(
+        &value, rect(150, 90, 20, 10), ScrollAlignment.nearest, ScrollAlignment.nearest
+    );
+    expect(state, reveal.error == ScrollError.none && value.offset_x == 70 && value.offset_y == 20,
+        "nearest reveal moves only enough to expose the complete target");
+    let centered: ScrollMutation = scroll_reveal(
+        &value, rect(200, 100, 20, 20), ScrollAlignment.center, ScrollAlignment.center
+    );
+    expect(state, centered.offset_x == 160 && centered.offset_y == 70,
+        "center reveal resolves both axes against the authoritative viewport");
+    let logical: ScrollMutation = scroll_to(&value, 20, 40);
+    let ltr: Rect = scroll_visible_rect(value, LayoutDirection.ltr);
+    let rtl: Rect = scroll_visible_rect(value, LayoutDirection.rtl);
+    expect(state, logical.error == ScrollError.none && ltr.x == 20 && rtl.x == 180 &&
+        ltr.y == rtl.y && ltr.width == 100 && ltr.height == 80,
+        "logical horizontal scroll start mirrors to the physical RTL content edge");
+
+    let anchor: ScrollAnchor = scroll_anchor(40, 160, 20, 20);
+    let reconciled: ScrollMutation = scroll_reconcile(&value, size(120, 90), size(360, 260), anchor);
+    expect(state, reconciled.error == ScrollError.none && value.offset_x == 20 && value.offset_y == 140 &&
+        value.viewport.width == 120 && value.content.height == 260 && reconciled.changed == 1,
+        "content reconciliation preserves an explicit anchor viewport position");
+    let before_hash: i64 = scroll_state_hash(value);
+    let same: ScrollMutation = scroll_reconcile(&value, value.viewport, value.content,
+        scroll_anchor(value.offset_x, value.offset_y, 0, 0));
+    expect(state, same.changed == 0 && same.revision == value.revision &&
+        scroll_state_hash(value) == before_hash,
+        "identical anchored reconciliation stays completely idle");
+
+    let malformed: ScrollState = scroll_state(size(0 - 1, 20), size(30, 30));
+    let rejected: ScrollMutation = scroll_by(&malformed, 1, 1);
+    expect(state, rejected.error == ScrollError.invalid_viewport && rejected.changed == 0,
+        "malformed scroll state fails before mutation");
+    let bad_target: ScrollMutation = scroll_reveal(&value, rect(0 - 1, 0, 2, 2),
+        ScrollAlignment.nearest, ScrollAlignment.nearest);
+    expect(state, bad_target.error == ScrollError.invalid_target,
+        "malformed reveal geometry fails closed");
+}
+
+fn million_row_contract(state: *TestState) void {
+    let overrides: ArrayList[VirtualExtentOverride] = make[VirtualExtentOverride](1);
+    let model: VirtualListModel = virtual_model(1000000, 1000, 40, 2, 7, overrides);
+    let style: VirtualListStyle = virtual_style(VirtualAxis.vertical,
+        Insets{ .top = 10, .right = 5, .bottom = 10, .left = 5 });
+    let target_offset: i64 = virtual_item_offset(model, style, 500000) + 5;
+    let result: VirtualListResult = virtual_list_layout(model, size(300, 200), target_offset, style);
+    expect(state, result.error == VirtualListError.none && result.semantic_count == 1000000 &&
+        result.first_visible == 500000 && result.last_visible == 500004,
+        "million-row layout finds the exact semantic visible range without a linear scan");
+    expect(state, result.first_live == 499998 && result.last_live == 500006 &&
+        result.placements.len == 9 && result.examined_items < 64,
+        "million-row virtualization keeps live nodes and examined work independently bounded");
+    expect(state, result.placements.data[2].id == 501000 &&
+        result.placements.data[2].index == 500000 && result.placements.data[2].frame.y == 0 - 5 &&
+        result.placements.data[2].frame.x == 5 && result.placements.data[2].frame.width == 290,
+        "virtual placement retains stable IDs and exact viewport-local geometry");
+    let repeated: VirtualListResult = virtual_list_layout(model, size(300, 200), target_offset, style);
+    expect(state, repeated.layout_hash == result.layout_hash && result.layout_hash != 0,
+        "identical million-row inputs produce bit-identical virtual layout identity");
+    virtual_free(&repeated); virtual_free(&result); free[VirtualExtentOverride](&overrides);
+}
+
+fn variable_anchor_contract(state: *TestState) void {
+    let overrides: ArrayList[VirtualExtentOverride] = make[VirtualExtentOverride](2);
+    push[VirtualExtentOverride](&overrides, virtual_override(2, 30, 1));
+    push[VirtualExtentOverride](&overrides, virtual_override(5, 5, 1));
+    let model: VirtualListModel = virtual_model(100, 10, 10, 1, 1, overrides);
+    let style: VirtualListStyle = virtual_style(VirtualAxis.vertical, insets_all(0));
+    let old_scroll: i64 = virtual_item_offset(model, style, 5);
+    let first: VirtualListResult = virtual_list_layout(model, size(100, 25), old_scroll, style);
+    let anchor: VirtualAnchor = virtual_anchor_at(model, style, 5, old_scroll);
+    expect(state, first.error == VirtualListError.none && first.first_visible == 5 &&
+        first.placements.data[(first.first_visible - first.first_live) as i32].frame.height == 5 &&
+        anchor.id == 15 && anchor.viewport_offset == 0,
+        "sparse variable extents preserve stable item identity and measured height revisions");
+    overrides.data[0].extent = 50; overrides.data[0].revision = 2;
+    let changed: VirtualListModel = virtual_model(100, 10, 10, 1, 2, overrides);
+    let resolution: VirtualAnchorResolution = virtual_resolve_anchor(
+        changed, style, anchor, 25, old_scroll
+    );
+    let second: VirtualListResult = virtual_list_layout(
+        changed, size(100, 25), resolution.scroll_offset, style
+    );
+    expect(state, resolution.error == VirtualListError.none && resolution.changed == 1 &&
+        resolution.scroll_offset == old_scroll + 20 && second.first_visible == 5 &&
+        second.placements.data[(5 - second.first_live) as i32].frame.y == 0,
+        "anchor reconciliation absorbs size changes above the viewport without visible jumps");
+    expect(state, second.layout_hash != first.layout_hash,
+        "extent revisions and changed geometry alter deterministic virtual identity");
+    virtual_free(&second); virtual_free(&first); free[VirtualExtentOverride](&overrides);
+}
+
+fn rtl_empty_and_failure_contract(state: *TestState) void {
+    let overrides: ArrayList[VirtualExtentOverride] = make[VirtualExtentOverride](1);
+    let model: VirtualListModel = virtual_model(3, 1, 10, 2, 0, overrides);
+    let ltr_style: VirtualListStyle = virtual_style(VirtualAxis.horizontal, insets_all(1));
+    let ltr: VirtualListResult = virtual_list_layout(model, size(30, 20), 0, ltr_style);
+    let rtl_style: VirtualListStyle = ltr_style; rtl_style.direction = LayoutDirection.rtl;
+    let rtl: VirtualListResult = virtual_list_layout(model, size(30, 20), 0, rtl_style);
+    expect(state, ltr.error == VirtualListError.none && rtl.error == VirtualListError.none &&
+        ltr.placements.data[0].frame.x == 1 && rtl.placements.data[0].frame.x == 19 &&
+        rtl.placements.data[1].frame.x == 7 && rtl.layout_hash != ltr.layout_hash,
+        "horizontal virtualization mirrors logical item order under RTL");
+    virtual_free(&rtl); virtual_free(&ltr);
+
+    let empty_model: VirtualListModel = virtual_model(0, 1, 10, 0, 0, overrides);
+    let empty: VirtualListResult = virtual_list_layout(empty_model, size(40, 30), 50,
+        virtual_style(VirtualAxis.vertical, insets_all(3)));
+    expect(state, empty.error == VirtualListError.none && empty.placements.len == 0 &&
+        empty.content.height == 6 && empty.scroll_offset == 0 && empty.first_visible == 0 - 1,
+        "empty virtual collections retain padding and canonical empty semantic ranges");
+    virtual_free(&empty);
+
+    let padded_model: VirtualListModel = virtual_model(1, 1, 10, 0, 0, overrides);
+    let padded_style: VirtualListStyle = virtual_style(VirtualAxis.vertical,
+        Insets{ .top = 50, .right = 0, .bottom = 0, .left = 0 });
+    let padding_only: VirtualListResult = virtual_list_layout(
+        padded_model, size(40, 30), 0, padded_style
+    );
+    expect(state, padding_only.error == VirtualListError.none &&
+        padding_only.semantic_count == 1 && padding_only.placements.len == 0 &&
+        padding_only.first_visible == 0 - 1,
+        "a viewport containing only leading padding reports no phantom visible item");
+    virtual_free(&padding_only);
+
+    let dense_model: VirtualListModel = virtual_model(1000, 1, 1, 0, 0, overrides);
+    let dense_style: VirtualListStyle = virtual_style(VirtualAxis.vertical, insets_all(0));
+    dense_style.max_live_items = 10;
+    let limited: VirtualListResult = virtual_list_layout(dense_model, size(30, 100), 0, dense_style);
+    expect(state, limited.error == VirtualListError.live_limit_exceeded && limited.error_index == 0,
+        "live-node ceilings fail before unbounded viewport allocation");
+    virtual_free(&limited);
+    free[VirtualExtentOverride](&overrides);
+
+    let malformed_overrides: ArrayList[VirtualExtentOverride] = make[VirtualExtentOverride](2);
+    push[VirtualExtentOverride](&malformed_overrides, virtual_override(5, 10, 0));
+    push[VirtualExtentOverride](&malformed_overrides, virtual_override(4, 10, 0));
+    let malformed_model: VirtualListModel = virtual_model(10, 1, 10, 0, 0, malformed_overrides);
+    let malformed: VirtualListResult = virtual_list_layout(malformed_model, size(30, 30), 0,
+        virtual_style(VirtualAxis.vertical, insets_all(0)));
+    expect(state, malformed.error == VirtualListError.invalid_override && malformed.error_index == 1,
+        "unsorted sparse extent overrides fail at the exact record");
+    virtual_free(&malformed); free[VirtualExtentOverride](&malformed_overrides);
+
+    let huge_overrides: ArrayList[VirtualExtentOverride] = make[VirtualExtentOverride](1);
+    let huge_model: VirtualListModel = virtual_model(1000000000, 1,
+        unbounded_extent() / 4, 0, 0, huge_overrides);
+    let huge: VirtualListResult = virtual_list_layout(huge_model, size(30, 30), 0,
+        virtual_style(VirtualAxis.vertical, insets_all(0)));
+    expect(state, huge.error == VirtualListError.arithmetic_overflow,
+        "billion-row content extent overflow fails before multiplication or allocation");
+    virtual_free(&huge); free[VirtualExtentOverride](&huge_overrides);
+
+    let scroll_overrides: ArrayList[VirtualExtentOverride] = make[VirtualExtentOverride](1);
+    let scroll_model: VirtualListModel = virtual_model(2, 1, 10, 0, 0, scroll_overrides);
+    let bad_scroll: VirtualListResult = virtual_list_layout(scroll_model, size(30, 30),
+        unbounded_extent() * 2 + 1, virtual_style(VirtualAxis.vertical, insets_all(0)));
+    expect(state, bad_scroll.error == VirtualListError.invalid_scroll,
+        "out-of-contract scroll coordinates fail with an exact typed reason");
+    virtual_free(&bad_scroll); free[VirtualExtentOverride](&scroll_overrides);
+}
+
+fn property_contract(state: *TestState) void {
+    let overrides: ArrayList[VirtualExtentOverride] = make[VirtualExtentOverride](1);
+    let model: VirtualListModel = virtual_model(10000, 100, 8, 1, 3, overrides);
+    let style: VirtualListStyle = virtual_style(VirtualAxis.vertical, insets_all(1));
+    let valid: i32 = 1;
+    let index: i64 = 0;
+    while (index < 1000) {
+        let offset: i64 = virtual_item_offset(model, style, index);
+        let result: VirtualListResult = virtual_list_layout(model, size(80, 64), offset, style);
+        if (result.error != VirtualListError.none || result.first_visible != index ||
+            result.placements.len > 12 || result.examined_items > 48 ||
+            result.placements.data[(index - result.first_live) as i32].id != 100 + index ||
+            result.placements.data[(index - result.first_live) as i32].frame.y != 0) {
+            valid = 0;
+        }
+        virtual_free(&result);
+        index = index + 37;
+    }
+    expect(state, valid == 1,
+        "28-position virtual sweep preserves stable IDs exact anchors and logarithmic bounded work");
+    free[VirtualExtentOverride](&overrides);
+}
+
+fn main() i32 {
+    let state: TestState = TestState{ .passed = 0, .failed = 0 };
+    scroll_contract(&state);
+    reveal_anchor_and_rtl_contract(&state);
+    million_row_contract(&state);
+    variable_anchor_contract(&state);
+    rtl_empty_and_failure_contract(&state);
+    property_contract(&state);
+    let passed_text: []u8 = _zag_i64_to_str(state.passed as i64);
+    let failed_text: []u8 = _zag_i64_to_str(state.failed as i64);
+    _zag_print("Scroll/virtual contract: pass="); _zag_print(passed_text);
+    _zag_print(" fail="); _zag_println(failed_text);
+    _zag_str_free(passed_text); _zag_str_free(failed_text);
+    if (state.failed == 0) { return 0; }
+    return 1;
+}

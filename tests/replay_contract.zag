@@ -159,7 +159,7 @@ fn differential_contract(state: *TestState) void {
     expect(state, a.output_hash != b.output_hash && a.motion_hash != b.motion_hash &&
         a.semantics_hash != b.semantics_hash && a.measure_hash != b.measure_hash &&
         a.layout_hash != b.layout_hash && a.display_hash != b.display_hash && a.cpu_hash != b.cpu_hash,
-        "state changes propagate through motion semantics measurement Flex display and CPU output");
+        "state changes propagate through motion semantics measurement layout display and CPU output");
     expect(state, a.layout_lines != b.layout_lines,
         "state replay crosses Flex wrapping boundaries deterministically");
     expect(state, a.input_hash != c.input_hash && a.motion_hash == c.motion_hash &&

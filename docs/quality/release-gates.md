@@ -43,6 +43,12 @@ closed unless overlap is explicit, and every primitive reports quantified
 overflow plus deterministic identity. Every layout change reports its exact
 state read and rule.
 
+Virtualization conformance requires stable semantic identity independent of
+live-node residency, variable-extent anchor stability, bounded overscan,
+fail-closed allocation ceilings, focus restoration, and no linear work per
+scroll frame. A million-row range proof is necessary but does not replace the
+120 Hz reference-hardware and ten-minute stall gates.
+
 Zagkit Talkback conformance drives canonical applications by stable ID and
 checks discovery, query, action, wait, assertion, screenshot, timeline,
 capability, snapshot, and replay behavior. Pixel fallback is separately
