@@ -16,8 +16,10 @@ fn expect(state: *TestState, condition: i32, name: []u8) void {
 }
 
 fn report_i64(label: []u8, value: i64) void {
+    let text: []u8 = _zag_i64_to_str(value);
     _zag_print(label);
-    _zag_println(_zag_i64_to_str(value));
+    _zag_println(text);
+    _zag_str_free(text);
 }
 
 fn item(id: i64, basis: i64, cross: i64) FlexItem { return flex_item(id, basis, cross); }
@@ -139,8 +141,12 @@ fn main() i32 {
     distribution(&state);
     safety_contracts(&state);
     property_sweep(&state);
-    _zag_print("Flex contract: pass="); _zag_print(_zag_i64_to_str(state.passed as i64));
-    _zag_print(" fail="); _zag_println(_zag_i64_to_str(state.failed as i64));
+    let passed_text: []u8 = _zag_i64_to_str(state.passed as i64);
+    let failed_text: []u8 = _zag_i64_to_str(state.failed as i64);
+    _zag_print("Flex contract: pass="); _zag_print(passed_text);
+    _zag_print(" fail="); _zag_println(failed_text);
+    _zag_str_free(passed_text);
+    _zag_str_free(failed_text);
     if (state.failed == 0) { return 0; }
     return 1;
 }

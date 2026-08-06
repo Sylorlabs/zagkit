@@ -16,5 +16,7 @@ trap cleanup EXIT
 cd "$root"
 "$znc" tests/flex_contract.zag --no-zagd --no-analyze --no-foreground-cache -o "$tmp/flex-contract"
 "$tmp/flex-contract"
+"$znc" tests/state_reconcile_contract.zag --no-zagd --no-analyze --no-foreground-cache -o "$tmp/state-reconcile-contract"
+"$tmp/state-reconcile-contract"
 
-printf 'headless test: PASS (constraints and Flex)\n'
+printf 'headless test: PASS (state, reconciliation, constraints, and Flex)\n'

@@ -12,6 +12,11 @@ include a generated capability record and exact Zag compiler revision.
 - Machine readable platform, component, benchmark, compiler, and upstream
   prerequisite records.
 - An executable repository contract gate.
+- Experimental typed state and binding primitives with exact dependency-read
+  invalidation evidence.
+- Experimental keyed reconciliation with stable reorder identity and
+  fail-visible duplicate-key handling.
+- Deterministic fixed-point geometry, constraints, and single-line Flex.
 
 ## 0.1.0-experimental.0 (unreleased)
 

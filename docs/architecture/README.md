@@ -26,6 +26,11 @@ Normative decisions:
 - [platform seams and backend truth](../rfcs/0004-platform-seams-and-backend-truth.md)
 - [quality and release](../rfcs/0005-quality-and-release-contract.md)
 
-The public API names in RFC 0002 are semantic reservations, not compiled API.
-The first implementation RFC will fix Zag syntax, ownership, threading, error,
-and serialization details after the required upstream primitives are proven.
+The first experimental compiled slice now fixes the initial Zag shapes for
+`NodeKey`, `State<T>`, `Binding<T>`, `Action`, `Environment`, `ViewContext`,
+`ViewSpec`, and `RenderNode`. State reads record their reader and revision;
+invalidation reports the exact read and revision edge; keyed reconciliation
+preserves retained identity through reorder and fails visibly on duplicate
+keys. Ownership, threading, serialization, typed environment values,
+cancellation, and deterministic replay are still open contracts rather than
+stable API.

@@ -1,0 +1,122 @@
+@import("std:list")
+@import("view_contract.zag")
+
+struct ViewSpec {
+    key: NodeKey,
+    kind: i64,
+    fingerprint: i64,
+}
+
+struct RenderNode {
+    key: NodeKey,
+    kind: i64,
+    fingerprint: i64,
+    instance_id: i64,
+    generation: i64,
+}
+
+struct ReconcileResult {
+    nodes: ArrayList[RenderNode],
+    inserted: i32,
+    reused: i32,
+    updated: i32,
+    removed: i32,
+    duplicate_keys: i32,
+}
+
+fn view_spec(key: NodeKey, kind: i64, fingerprint: i64) ViewSpec {
+    return ViewSpec{ .key = key, .kind = kind, .fingerprint = fingerprint };
+}
+
+fn render_node(key: NodeKey, kind: i64, fingerprint: i64, instance_id: i64) RenderNode {
+    return RenderNode{
+        .key = key,
+        .kind = kind,
+        .fingerprint = fingerprint,
+        .instance_id = instance_id,
+        .generation = 0,
+    };
+}
+
+fn reconcile_free(result: *ReconcileResult) void {
+    free[RenderNode](&result.*.nodes);
+}
+
+fn reconcile_has_earlier_key(next: ArrayList[ViewSpec], index: i32) i32 {
+    let i: i32 = 0;
+    while (i < index) {
+        if (node_key_equal(next.data[i].key, next.data[index].key) == 1) { return 1; }
+        i = i + 1;
+    }
+    return 0;
+}
+
+fn reconcile(previous: ArrayList[RenderNode], next: ArrayList[ViewSpec], next_instance_id: *i64) ReconcileResult {
+    let output: ArrayList[RenderNode] = make[RenderNode](next.len);
+    let matched: ArrayList[i32] = make[i32](previous.len);
+    let i: i32 = 0;
+    while (i < previous.len) { push[i32](&matched, 0); i = i + 1; }
+
+    let inserted: i32 = 0;
+    let reused: i32 = 0;
+    let updated: i32 = 0;
+    let removed: i32 = 0;
+    let duplicate_keys: i32 = 0;
+
+    i = 0;
+    while (i < next.len) {
+        let spec: ViewSpec = next.data[i];
+        if (reconcile_has_earlier_key(next, i) == 1) {
+            duplicate_keys = duplicate_keys + 1;
+            i = i + 1;
+            continue;
+        }
+
+        let found: i32 = 0 - 1;
+        let j: i32 = 0;
+        while (j < previous.len) {
+            if (matched.data[j] == 0 && node_key_equal(previous.data[j].key, spec.key) == 1) {
+                found = j;
+                break;
+            }
+            j = j + 1;
+        }
+
+        if (found >= 0 && previous.data[found].kind == spec.kind) {
+            let node: RenderNode = previous.data[found];
+            matched.data[found] = 1;
+            reused = reused + 1;
+            if (node.fingerprint != spec.fingerprint) {
+                node.fingerprint = spec.fingerprint;
+                node.generation = node.generation + 1;
+                updated = updated + 1;
+            }
+            push[RenderNode](&output, node);
+        } else {
+            if (found >= 0) {
+                matched.data[found] = 1;
+                removed = removed + 1;
+            }
+            let instance_id: i64 = next_instance_id.*;
+            next_instance_id.* = next_instance_id.* + 1;
+            push[RenderNode](&output, render_node(spec.key, spec.kind, spec.fingerprint, instance_id));
+            inserted = inserted + 1;
+        }
+        i = i + 1;
+    }
+
+    i = 0;
+    while (i < previous.len) {
+        if (matched.data[i] == 0) { removed = removed + 1; }
+        i = i + 1;
+    }
+    free[i32](&matched);
+    return ReconcileResult{
+        .nodes = output,
+        .inserted = inserted,
+        .reused = reused,
+        .updated = updated,
+        .removed = removed,
+        .duplicate_keys = duplicate_keys,
+    };
+}

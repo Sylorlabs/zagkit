@@ -1,0 +1,51 @@
+@import("view_contract.zag")
+
+struct State[T] {
+    id: i64,
+    revision: i64,
+    value: T,
+}
+
+struct Binding[T] {
+    target: *State[T],
+    action_id: i64,
+}
+
+fn state_make[T](id: i64, value: T) State[T] {
+    return State[T]{ .id = id, .revision = 0, .value = value };
+}
+
+fn state_read[T](state: *State[T], ctx: *ViewContext) T {
+    view_context_record_read(ctx, state.*.id, state.*.revision);
+    return state.*.value;
+}
+
+fn state_set[T](state: *State[T], value: T) StateChange {
+    let from_revision: i64 = state.*.revision;
+    state.*.value = value;
+    state.*.revision = state.*.revision + 1;
+    return StateChange{
+        .state_id = state.*.id,
+        .from_revision = from_revision,
+        .to_revision = state.*.revision,
+    };
+}
+
+fn binding_make[T](state: *State[T], action_id: i64) Binding[T] {
+    return Binding[T]{ .target = state, .action_id = action_id };
+}
+
+fn binding_read[T](binding: Binding[T], ctx: *ViewContext) T {
+    return state_read[T](binding.target, ctx);
+}
+
+fn binding_set[T](binding: Binding[T], value: T, source: NodeKey) Action {
+    let change: StateChange = state_set[T](binding.target, value);
+    return Action{
+        .id = binding.action_id,
+        .source = source,
+        .target_state_id = change.state_id,
+        .from_revision = change.from_revision,
+        .to_revision = change.to_revision,
+    };
+}
