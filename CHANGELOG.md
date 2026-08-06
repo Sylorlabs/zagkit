@@ -36,6 +36,9 @@ include a generated capability record and exact Zag compiler revision.
   with protocol 0.2 query evidence for semantic geometry, collection metadata,
   tree state, owned-text lengths, state flags, deterministic hashes, ID-first
   targeting, and explicit scale-aware pixel fallback.
+- A bounded owned render-resource store with typed stable IDs, canonical order,
+  exact replacement revisions, copied payloads, byte accounting, sealing,
+  mutation detection, and explicit decoder and serialization boundaries.
 - An experimental immutable display list for explicit paints, resources, clips,
   transforms, layers, and effects with deterministic content identity.
 - A versioned canonical display-list codec with bounded validated decoding and

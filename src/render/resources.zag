@@ -1,0 +1,357 @@
+@import("std:list")
+
+enum RenderResourceKind {
+    path,
+    image,
+    glyph_run,
+    effect,
+    font_data,
+    svg_source,
+    png_source,
+}
+
+enum RenderColorSpace {
+    none,
+    srgb,
+    display_p3,
+    linear_srgb,
+}
+
+enum RenderResourceError {
+    none,
+    invalid_configuration,
+    invalid_id,
+    invalid_payload,
+    invalid_metadata,
+    duplicate_id,
+    missing_resource,
+    kind_mismatch,
+    revision_conflict,
+    too_many_resources,
+    payload_limit,
+    total_limit,
+    sealed,
+    not_sealed,
+    content_mutated,
+}
+
+struct RenderResourceSpec {
+    id: i64,
+    kind: RenderResourceKind,
+    payload: []u8,
+    revision: i64,
+    format_tag: i64,
+    width: i64,
+    height: i64,
+    color_space: RenderColorSpace,
+}
+
+struct RenderResource {
+    id: i64,
+    kind: RenderResourceKind,
+    payload: ArrayList[u8],
+    revision: i64,
+    format_tag: i64,
+    width: i64,
+    height: i64,
+    color_space: RenderColorSpace,
+    content_hash: i64,
+}
+
+struct RenderResourceStore {
+    resources: ArrayList[RenderResource],
+    max_resources: i32,
+    max_total_bytes: i64,
+    max_payload_bytes: i64,
+    total_bytes: i64,
+    revision: i64,
+    content_hash: i64,
+    sealed: i32,
+    last_error: RenderResourceError,
+    error_id: i64,
+}
+
+fn render_resource_hard_count_limit() i32 { return 65536; }
+fn render_resource_hard_total_limit() i64 { return 536870912; }
+fn render_resource_hard_payload_limit() i64 { return 67108864; }
+
+fn render_resource_mix(hash: i64, value: i64) i64 {
+    let modulus: i64 = 2147483647;
+    let component: i64 = value % modulus;
+    if (component < 0) { component = component + modulus; }
+    return (hash * 131 + component) % modulus;
+}
+
+fn render_resource_hash_bytes(hash: i64, payload: ArrayList[u8]) i64 {
+    let result: i64 = render_resource_mix(hash, payload.len as i64);
+    let i: i32 = 0;
+    while (i < payload.len) {
+        result = render_resource_mix(result, payload.data[i] as i64);
+        i = i + 1;
+    }
+    return result;
+}
+
+fn render_resource_hash(resource: RenderResource) i64 {
+    let hash: i64 = render_resource_mix(17, resource.id);
+    hash = render_resource_mix(hash, resource.kind as i64);
+    hash = render_resource_mix(hash, resource.revision);
+    hash = render_resource_mix(hash, resource.format_tag);
+    hash = render_resource_mix(hash, resource.width);
+    hash = render_resource_mix(hash, resource.height);
+    hash = render_resource_mix(hash, resource.color_space as i64);
+    return render_resource_hash_bytes(hash, resource.payload);
+}
+
+fn render_resource_store_hash(store: RenderResourceStore) i64 {
+    let hash: i64 = render_resource_mix(17, store.resources.len as i64);
+    hash = render_resource_mix(hash, store.max_resources as i64);
+    hash = render_resource_mix(hash, store.max_total_bytes);
+    hash = render_resource_mix(hash, store.max_payload_bytes);
+    hash = render_resource_mix(hash, store.total_bytes);
+    hash = render_resource_mix(hash, store.revision);
+    let i: i32 = 0;
+    while (i < store.resources.len) {
+        hash = render_resource_mix(hash, store.resources.data[i].content_hash);
+        i = i + 1;
+    }
+    return hash;
+}
+
+fn render_resource_store_make(max_resources: i32, max_total_bytes: i64,
+    max_payload_bytes: i64) RenderResourceStore {
+    let store: RenderResourceStore = RenderResourceStore{
+        .resources = make[RenderResource](8),
+        .max_resources = max_resources,
+        .max_total_bytes = max_total_bytes,
+        .max_payload_bytes = max_payload_bytes,
+        .total_bytes = 0,
+        .revision = 0,
+        .content_hash = 0,
+        .sealed = 0,
+        .last_error = RenderResourceError.none,
+        .error_id = 0,
+    };
+    store.content_hash = render_resource_store_hash(store);
+    return store;
+}
+
+fn render_resource_store_default() RenderResourceStore {
+    return render_resource_store_make(4096, 268435456, 33554432);
+}
+
+fn render_resource_store_configuration_valid(store: RenderResourceStore) i32 {
+    return (store.max_resources > 0 &&
+        store.max_resources <= render_resource_hard_count_limit() &&
+        store.max_total_bytes > 0 &&
+        store.max_total_bytes <= render_resource_hard_total_limit() &&
+        store.max_payload_bytes > 0 &&
+        store.max_payload_bytes <= render_resource_hard_payload_limit() &&
+        store.max_payload_bytes <= store.max_total_bytes) as i32;
+}
+
+fn render_resource_spec(id: i64, kind: RenderResourceKind,
+    payload: []u8, format_tag: i64) RenderResourceSpec {
+    return RenderResourceSpec{
+        .id = id, .kind = kind, .payload = payload, .revision = 0,
+        .format_tag = format_tag, .width = 0, .height = 0,
+        .color_space = RenderColorSpace.none,
+    };
+}
+
+fn render_resource_fail(store: *RenderResourceStore,
+    error: RenderResourceError, id: i64) RenderResourceError {
+    store.*.last_error = error;
+    store.*.error_id = id;
+    return error;
+}
+
+fn render_resource_spec_valid(spec: RenderResourceSpec) RenderResourceError {
+    if (spec.id <= 0) { return RenderResourceError.invalid_id; }
+    if (spec.payload.len <= 0) { return RenderResourceError.invalid_payload; }
+    if (spec.revision < 0 || spec.format_tag <= 0 || spec.width < 0 ||
+        spec.height < 0 || spec.width > 1048576 || spec.height > 1048576) {
+        return RenderResourceError.invalid_metadata;
+    }
+    if (spec.kind == RenderResourceKind.image &&
+        (spec.width <= 0 || spec.height <= 0 ||
+         spec.color_space == RenderColorSpace.none)) {
+        return RenderResourceError.invalid_metadata;
+    }
+    return RenderResourceError.none;
+}
+
+fn render_resource_payload_copy(payload: []u8) ArrayList[u8] {
+    let owned: ArrayList[u8] = make[u8](payload.len);
+    let i: i32 = 0;
+    while (i < payload.len) {
+        push[u8](&owned, payload[i]);
+        i = i + 1;
+    }
+    return owned;
+}
+
+fn render_resource_from_spec(spec: RenderResourceSpec) RenderResource {
+    let resource: RenderResource = RenderResource{
+        .id = spec.id, .kind = spec.kind,
+        .payload = render_resource_payload_copy(spec.payload),
+        .revision = spec.revision, .format_tag = spec.format_tag,
+        .width = spec.width, .height = spec.height,
+        .color_space = spec.color_space, .content_hash = 0,
+    };
+    resource.content_hash = render_resource_hash(resource);
+    return resource;
+}
+
+fn render_resource_find_index(store: RenderResourceStore, id: i64) i32 {
+    let low: i32 = 0;
+    let high: i32 = store.resources.len - 1;
+    while (low <= high) {
+        let middle: i32 = low + (high - low) / 2;
+        let candidate: i64 = store.resources.data[middle].id;
+        if (candidate == id) { return middle; }
+        if (candidate < id) { low = middle + 1; } else { high = middle - 1; }
+    }
+    return 0 - 1;
+}
+
+fn render_resource_insert_index(store: RenderResourceStore, id: i64) i32 {
+    let i: i32 = 0;
+    while (i < store.resources.len && store.resources.data[i].id < id) { i = i + 1; }
+    return i;
+}
+
+fn render_resource_store_rehash(store: *RenderResourceStore) void {
+    store.*.content_hash = render_resource_store_hash(store.*);
+}
+
+fn render_resource_add(store: *RenderResourceStore,
+    spec: RenderResourceSpec) RenderResourceError {
+    if (store.*.sealed != 0) {
+        return render_resource_fail(store, RenderResourceError.sealed, spec.id);
+    }
+    if (render_resource_store_configuration_valid(store.*) == 0) {
+        return render_resource_fail(store, RenderResourceError.invalid_configuration, spec.id);
+    }
+    let valid: RenderResourceError = render_resource_spec_valid(spec);
+    if (valid != RenderResourceError.none) { return render_resource_fail(store, valid, spec.id); }
+    if (spec.revision != 0) {
+        return render_resource_fail(store, RenderResourceError.revision_conflict, spec.id);
+    }
+    if (render_resource_find_index(store.*, spec.id) >= 0) {
+        return render_resource_fail(store, RenderResourceError.duplicate_id, spec.id);
+    }
+    if (store.*.resources.len >= store.*.max_resources) {
+        return render_resource_fail(store, RenderResourceError.too_many_resources, spec.id);
+    }
+    if (spec.payload.len as i64 > store.*.max_payload_bytes) {
+        return render_resource_fail(store, RenderResourceError.payload_limit, spec.id);
+    }
+    if (spec.payload.len as i64 > store.*.max_total_bytes - store.*.total_bytes) {
+        return render_resource_fail(store, RenderResourceError.total_limit, spec.id);
+    }
+
+    let resource: RenderResource = render_resource_from_spec(spec);
+    let index: i32 = render_resource_insert_index(store.*, spec.id);
+    push[RenderResource](&store.*.resources, resource);
+    let i: i32 = store.*.resources.len - 1;
+    while (i > index) {
+        store.*.resources.data[i] = store.*.resources.data[i - 1];
+        i = i - 1;
+    }
+    store.*.resources.data[index] = resource;
+    store.*.total_bytes = store.*.total_bytes + spec.payload.len as i64;
+    store.*.revision = store.*.revision + 1;
+    render_resource_store_rehash(store);
+    store.*.last_error = RenderResourceError.none;
+    store.*.error_id = 0;
+    return RenderResourceError.none;
+}
+
+fn render_resource_replace(store: *RenderResourceStore,
+    spec: RenderResourceSpec) RenderResourceError {
+    if (store.*.sealed != 0) {
+        return render_resource_fail(store, RenderResourceError.sealed, spec.id);
+    }
+    if (render_resource_store_configuration_valid(store.*) == 0) {
+        return render_resource_fail(store, RenderResourceError.invalid_configuration, spec.id);
+    }
+    let valid: RenderResourceError = render_resource_spec_valid(spec);
+    if (valid != RenderResourceError.none) { return render_resource_fail(store, valid, spec.id); }
+    let index: i32 = render_resource_find_index(store.*, spec.id);
+    if (index < 0) {
+        return render_resource_fail(store, RenderResourceError.missing_resource, spec.id);
+    }
+    let old: RenderResource = store.*.resources.data[index];
+    if (old.kind != spec.kind) {
+        return render_resource_fail(store, RenderResourceError.kind_mismatch, spec.id);
+    }
+    if (spec.revision <= old.revision || spec.revision - old.revision != 1) {
+        return render_resource_fail(store, RenderResourceError.revision_conflict, spec.id);
+    }
+    if (spec.payload.len as i64 > store.*.max_payload_bytes) {
+        return render_resource_fail(store, RenderResourceError.payload_limit, spec.id);
+    }
+    let next_total: i64 = store.*.total_bytes - old.payload.len as i64 + spec.payload.len as i64;
+    if (next_total > store.*.max_total_bytes) {
+        return render_resource_fail(store, RenderResourceError.total_limit, spec.id);
+    }
+    let resource: RenderResource = render_resource_from_spec(spec);
+    free[u8](&store.*.resources.data[index].payload);
+    store.*.resources.data[index] = resource;
+    store.*.total_bytes = next_total;
+    store.*.revision = store.*.revision + 1;
+    render_resource_store_rehash(store);
+    store.*.last_error = RenderResourceError.none;
+    store.*.error_id = 0;
+    return RenderResourceError.none;
+}
+
+fn render_resource_store_seal(store: *RenderResourceStore) RenderResourceError {
+    if (store.*.sealed != 0) { return RenderResourceError.none; }
+    if (render_resource_store_configuration_valid(store.*) == 0) {
+        return render_resource_fail(store, RenderResourceError.invalid_configuration, 0);
+    }
+    store.*.sealed = 1;
+    if (render_resource_store_verify(store.*) != RenderResourceError.none) {
+        store.*.sealed = 0;
+        return render_resource_fail(store, RenderResourceError.content_mutated, 0);
+    }
+    store.*.last_error = RenderResourceError.none;
+    store.*.error_id = 0;
+    return RenderResourceError.none;
+}
+
+fn render_resource_store_verify(store: RenderResourceStore) RenderResourceError {
+    if (store.sealed == 0) { return RenderResourceError.not_sealed; }
+    if (render_resource_store_configuration_valid(store) == 0 ||
+        store.resources.len > store.max_resources) { return RenderResourceError.content_mutated; }
+    let total: i64 = 0;
+    let i: i32 = 0;
+    while (i < store.resources.len) {
+        let resource: RenderResource = store.resources.data[i];
+        if (resource.id <= 0 || resource.payload.len <= 0 ||
+            resource.payload.len as i64 > store.max_payload_bytes ||
+            (i > 0 && store.resources.data[i - 1].id >= resource.id) ||
+            render_resource_hash(resource) != resource.content_hash) {
+            return RenderResourceError.content_mutated;
+        }
+        total = total + resource.payload.len as i64;
+        if (total > store.max_total_bytes) { return RenderResourceError.content_mutated; }
+        i = i + 1;
+    }
+    if (total != store.total_bytes || store.revision < store.resources.len as i64 ||
+        render_resource_store_hash(store) != store.content_hash) {
+        return RenderResourceError.content_mutated;
+    }
+    return RenderResourceError.none;
+}
+
+fn render_resource_store_free(store: *RenderResourceStore) void {
+    let i: i32 = 0;
+    while (i < store.*.resources.len) {
+        free[u8](&store.*.resources.data[i].payload);
+        i = i + 1;
+    }
+    free[RenderResource](&store.*.resources);
+}

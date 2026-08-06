@@ -71,6 +71,13 @@ Balanced lists seal with deterministic content identity, and verification
 detects mutation outside the builder contract before rendering. Resource
 storage, serialization, damage, the CPU oracle, and GPU transports remain open.
 
+The first [render resource ownership layer](render-resources.md) copies opaque
+typed payloads behind positive stable IDs, canonicalizes insertion order,
+enforces configurable byte and count ceilings, requires exact replacement
+revisions, and verifies sealed byte-level identity. It is not yet attached to
+the display list and does not claim path, SVG, PNG, font, image, or glyph
+decoding.
+
 Display-list replay uses the versioned little-endian `ZKDL` codec. Decoding is
 bounded to one million operations, reconstructs operations only through the
 same validation path as live building, requires balanced seal state, verifies
