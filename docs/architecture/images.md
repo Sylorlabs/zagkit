@@ -48,17 +48,19 @@ transparency comparisons use the original full sample before conversion. Files
 without explicit color metadata use Zagkit's documented sRGB fallback policy;
 this is an assumption
 recorded by the asset pipeline, not a claim that the source declared sRGB. An
-explicit `sRGB` chunk records sRGB directly. The conventional 45455 `gAMA`
-plus standard sRGB `cHRM` pair records a declared approximate profile and is
-converted rather than mislabeled as the piecewise sRGB transfer. A gamma chunk
-without declared primaries still records the fallback as assumed. All nonzero
+explicit `sRGB` chunk records sRGB directly. Valid `cHRM` primaries are converted
+through a bounded linear RGB-to-XYZ matrix, Bradford white-point adaptation,
+and the canonical linear-sRGB matrix. Singular, non-finite, or out-of-domain
+chromaticities fail before decompression. A gamma chunk without declared
+primaries still records the fallback as assumed. All nonzero
 [`gAMA`](https://www.w3.org/TR/png-3/#11gAMA) transfer curves are
 converted into canonical sRGB by deterministic fixed-point log, power, and
 sRGB-transfer operations. When `cHRM` is absent, that conversion explicitly
 assumes sRGB primaries; an `sRGB` chunk takes precedence over accompanying
-gamma metadata. A meaningless zero gamma is ignored without becoming declared
-profile truth. Eight complete 256-value ramps match independently calculated
-references exactly on both compiled architectures.
+gamma and chromaticity metadata. A meaningless zero gamma is ignored without
+becoming declared profile truth. Eight complete 256-value ramps plus Display P3
+and non-D65 fixtures match independently calculated references exactly on both
+compiled architectures.
 
 `png_decode_resource_spec`
 adapts a successful owned result to the normal copying resource-store API, so
@@ -76,12 +78,12 @@ success or failure ownership invariants. Coverage-guided sanitizer campaigns
 and a larger published malformed corpus remain additional required evidence.
 
 Dimension, encoded-data, decompressed-scanline, output-pixel, palette-index,
-filter, and arithmetic limits fail before out-of-bounds access. Explicit iCCP,
-and non-sRGB chromaticity conversion still fail as unsupported color profiles.
-Unknown interlace methods fail before decompression. These
-unavailable paths keep `G3-PNG` open until general profile conversion and
+filter, color-matrix, and arithmetic limits fail before out-of-bounds access.
+Explicit iCCP still fails as an unsupported color profile. Unknown interlace
+methods fail before decompression. This unavailable path keeps `G3-PNG` open
+until ICC profile conversion and
 coverage-guided malformed-input evidence land.
 
-Linear-light filtering, Display P3 conversion, wide-gamut surfaces, mipmapping,
+Linear-light filtering, wide-gamut output surfaces, mipmapping,
 high-quality downsampling, image tiling, and GPU upload caches also remain
 unavailable.

@@ -47,6 +47,24 @@ struct PngScanlineResult {
     error_offset: i64,
 }
 
+struct PngMatrixF64 {
+    m00: f64, m01: f64, m02: f64,
+    m10: f64, m11: f64, m12: f64,
+    m20: f64, m21: f64, m22: f64,
+}
+
+struct PngMatrixF64Result { matrix: PngMatrixF64, valid: i32 }
+
+struct PngVectorF64 { x: f64, y: f64, z: f64 }
+
+struct PngColorTransform {
+    m00: i64, m01: i64, m02: i64,
+    m10: i64, m11: i64, m12: i64,
+    m20: i64, m21: i64, m22: i64,
+    active: i32,
+    valid: i32,
+}
+
 fn png_decode_input_limit() i64 { return 134217728; }
 fn png_decode_pixel_byte_limit() i64 { return 67108864; }
 fn png_decode_dimension_limit() i32 { return 8192; }
@@ -112,6 +130,242 @@ fn png_chrm_is_srgb(bytes: []u8, offset: i32, length: i32) i32 {
         png_read_u32_be(bytes, offset + 20) == 60000 &&
         png_read_u32_be(bytes, offset + 24) == 15000 &&
         png_read_u32_be(bytes, offset + 28) == 6000) as i32;
+}
+
+fn png_matrix_zero() PngMatrixF64 {
+    return PngMatrixF64{
+        .m00 = 0.0, .m01 = 0.0, .m02 = 0.0,
+        .m10 = 0.0, .m11 = 0.0, .m12 = 0.0,
+        .m20 = 0.0, .m21 = 0.0, .m22 = 0.0,
+    };
+}
+
+fn png_matrix_identity() PngMatrixF64 {
+    return PngMatrixF64{
+        .m00 = 1.0, .m01 = 0.0, .m02 = 0.0,
+        .m10 = 0.0, .m11 = 1.0, .m12 = 0.0,
+        .m20 = 0.0, .m21 = 0.0, .m22 = 1.0,
+    };
+}
+
+fn png_matrix_multiply(left: PngMatrixF64,
+    right: PngMatrixF64) PngMatrixF64 {
+    return PngMatrixF64{
+        .m00 = left.m00 * right.m00 + left.m01 * right.m10 + left.m02 * right.m20,
+        .m01 = left.m00 * right.m01 + left.m01 * right.m11 + left.m02 * right.m21,
+        .m02 = left.m00 * right.m02 + left.m01 * right.m12 + left.m02 * right.m22,
+        .m10 = left.m10 * right.m00 + left.m11 * right.m10 + left.m12 * right.m20,
+        .m11 = left.m10 * right.m01 + left.m11 * right.m11 + left.m12 * right.m21,
+        .m12 = left.m10 * right.m02 + left.m11 * right.m12 + left.m12 * right.m22,
+        .m20 = left.m20 * right.m00 + left.m21 * right.m10 + left.m22 * right.m20,
+        .m21 = left.m20 * right.m01 + left.m21 * right.m11 + left.m22 * right.m21,
+        .m22 = left.m20 * right.m02 + left.m21 * right.m12 + left.m22 * right.m22,
+    };
+}
+
+fn png_matrix_vector(matrix: PngMatrixF64,
+    vector: PngVectorF64) PngVectorF64 {
+    return PngVectorF64{
+        .x = matrix.m00 * vector.x + matrix.m01 * vector.y + matrix.m02 * vector.z,
+        .y = matrix.m10 * vector.x + matrix.m11 * vector.y + matrix.m12 * vector.z,
+        .z = matrix.m20 * vector.x + matrix.m21 * vector.y + matrix.m22 * vector.z,
+    };
+}
+
+fn png_f64_abs(value: f64) f64 {
+    if (value < 0.0) { return 0.0 - value; }
+    return value;
+}
+
+fn png_matrix_finite_bounded(matrix: PngMatrixF64, bound: f64) i32 {
+    if (matrix.m00 != matrix.m00 || matrix.m01 != matrix.m01 ||
+        matrix.m02 != matrix.m02 || matrix.m10 != matrix.m10 ||
+        matrix.m11 != matrix.m11 || matrix.m12 != matrix.m12 ||
+        matrix.m20 != matrix.m20 || matrix.m21 != matrix.m21 ||
+        matrix.m22 != matrix.m22) { return 0; }
+    return (png_f64_abs(matrix.m00) <= bound &&
+        png_f64_abs(matrix.m01) <= bound &&
+        png_f64_abs(matrix.m02) <= bound &&
+        png_f64_abs(matrix.m10) <= bound &&
+        png_f64_abs(matrix.m11) <= bound &&
+        png_f64_abs(matrix.m12) <= bound &&
+        png_f64_abs(matrix.m20) <= bound &&
+        png_f64_abs(matrix.m21) <= bound &&
+        png_f64_abs(matrix.m22) <= bound) as i32;
+}
+
+fn png_matrix_inverse(matrix: PngMatrixF64) PngMatrixF64Result {
+    let determinant: f64 = matrix.m00 *
+            (matrix.m11 * matrix.m22 - matrix.m12 * matrix.m21) -
+        matrix.m01 * (matrix.m10 * matrix.m22 - matrix.m12 * matrix.m20) +
+        matrix.m02 * (matrix.m10 * matrix.m21 - matrix.m11 * matrix.m20);
+    if (png_f64_abs(determinant) < 0.000000000001) {
+        return PngMatrixF64Result{ .matrix = png_matrix_zero(), .valid = 0 };
+    }
+    let inverse: f64 = 1.0 / determinant;
+    return PngMatrixF64Result{
+        .matrix = PngMatrixF64{
+            .m00 = (matrix.m11 * matrix.m22 - matrix.m12 * matrix.m21) * inverse,
+            .m01 = (matrix.m02 * matrix.m21 - matrix.m01 * matrix.m22) * inverse,
+            .m02 = (matrix.m01 * matrix.m12 - matrix.m02 * matrix.m11) * inverse,
+            .m10 = (matrix.m12 * matrix.m20 - matrix.m10 * matrix.m22) * inverse,
+            .m11 = (matrix.m00 * matrix.m22 - matrix.m02 * matrix.m20) * inverse,
+            .m12 = (matrix.m02 * matrix.m10 - matrix.m00 * matrix.m12) * inverse,
+            .m20 = (matrix.m10 * matrix.m21 - matrix.m11 * matrix.m20) * inverse,
+            .m21 = (matrix.m01 * matrix.m20 - matrix.m00 * matrix.m21) * inverse,
+            .m22 = (matrix.m00 * matrix.m11 - matrix.m01 * matrix.m10) * inverse,
+        },
+        .valid = 1,
+    };
+}
+
+fn png_chromaticity_vector(x: i64, y: i64) PngVectorF64 {
+    let xf: f64 = x as f64 / 100000.0;
+    let yf: f64 = y as f64 / 100000.0;
+    return PngVectorF64{
+        .x = xf / yf, .y = 1.0, .z = (1.0 - xf - yf) / yf,
+    };
+}
+
+fn png_rgb_to_xyz(red_x: i64, red_y: i64, green_x: i64, green_y: i64,
+    blue_x: i64, blue_y: i64, white_x: i64,
+    white_y: i64) PngMatrixF64Result {
+    let red: PngVectorF64 = png_chromaticity_vector(red_x, red_y);
+    let green: PngVectorF64 = png_chromaticity_vector(green_x, green_y);
+    let blue: PngVectorF64 = png_chromaticity_vector(blue_x, blue_y);
+    let primaries: PngMatrixF64 = PngMatrixF64{
+        .m00 = red.x, .m01 = green.x, .m02 = blue.x,
+        .m10 = red.y, .m11 = green.y, .m12 = blue.y,
+        .m20 = red.z, .m21 = green.z, .m22 = blue.z,
+    };
+    let inverse: PngMatrixF64Result = png_matrix_inverse(primaries);
+    if (inverse.valid == 0) { return inverse; }
+    let scale: PngVectorF64 = png_matrix_vector(
+        inverse.matrix, png_chromaticity_vector(white_x, white_y)
+    );
+    return PngMatrixF64Result{
+        .matrix = PngMatrixF64{
+            .m00 = primaries.m00 * scale.x,
+            .m01 = primaries.m01 * scale.y,
+            .m02 = primaries.m02 * scale.z,
+            .m10 = primaries.m10 * scale.x,
+            .m11 = primaries.m11 * scale.y,
+            .m12 = primaries.m12 * scale.z,
+            .m20 = primaries.m20 * scale.x,
+            .m21 = primaries.m21 * scale.y,
+            .m22 = primaries.m22 * scale.z,
+        },
+        .valid = 1,
+    };
+}
+
+fn png_quantize_matrix_value(value: f64) i64 {
+    if (value >= 0.0) { return (value * 16777216.0 + 0.5) as i64; }
+    return (value * 16777216.0 - 0.5) as i64;
+}
+
+fn png_color_transform_identity() PngColorTransform {
+    return PngColorTransform{
+        .m00 = 16777216, .m01 = 0, .m02 = 0,
+        .m10 = 0, .m11 = 16777216, .m12 = 0,
+        .m20 = 0, .m21 = 0, .m22 = 16777216,
+        .active = 0, .valid = 1,
+    };
+}
+
+fn png_chrm_values_valid(values: []i64) i32 {
+    if (values.len != 8) { return 0; }
+    let pair: i32 = 0;
+    while (pair < 4) {
+        let x: i64 = values[pair * 2];
+        let y: i64 = values[pair * 2 + 1];
+        if (x <= 0 || y <= 0 || x >= 100000 || y >= 100000 ||
+            x + y > 100000) { return 0; }
+        pair = pair + 1;
+    }
+    return 1;
+}
+
+fn png_chrm_transform(bytes: []u8, offset: i32,
+    length: i32) PngColorTransform {
+    if (length != 32) {
+        let invalid: PngColorTransform = png_color_transform_identity();
+        invalid.valid = 0; return invalid;
+    }
+    if (png_chrm_is_srgb(bytes, offset, length) != 0) {
+        return png_color_transform_identity();
+    }
+    let values: ArrayList[i64] = make[i64](8);
+    let index: i32 = 0;
+    while (index < 8) {
+        push[i64](&values, png_read_u32_be(bytes, offset + index * 4));
+        index = index + 1;
+    }
+    if (png_chrm_values_valid(values.data[0..values.len]) == 0) {
+        free[i64](&values);
+        let invalid: PngColorTransform = png_color_transform_identity();
+        invalid.valid = 0; return invalid;
+    }
+    let source: PngMatrixF64Result = png_rgb_to_xyz(
+        values.data[2], values.data[3], values.data[4], values.data[5],
+        values.data[6], values.data[7], values.data[0], values.data[1]
+    );
+    let target: PngMatrixF64Result = png_rgb_to_xyz(
+        64000, 33000, 30000, 60000, 15000, 6000, 31270, 32900
+    );
+    let bradford: PngMatrixF64 = PngMatrixF64{
+        .m00 = 0.8951, .m01 = 0.2664, .m02 = -0.1614,
+        .m10 = -0.7502, .m11 = 1.7135, .m12 = 0.0367,
+        .m20 = 0.0389, .m21 = -0.0685, .m22 = 1.0296,
+    };
+    let bradford_inverse: PngMatrixF64Result = png_matrix_inverse(bradford);
+    let target_inverse: PngMatrixF64Result = png_matrix_inverse(target.matrix);
+    if (source.valid == 0 || target.valid == 0 ||
+        bradford_inverse.valid == 0 || target_inverse.valid == 0) {
+        free[i64](&values);
+        let invalid: PngColorTransform = png_color_transform_identity();
+        invalid.valid = 0; return invalid;
+    }
+    let source_white: PngVectorF64 = png_chromaticity_vector(
+        values.data[0], values.data[1]
+    );
+    let target_white: PngVectorF64 = png_chromaticity_vector(31270, 32900);
+    free[i64](&values);
+    let source_cone: PngVectorF64 = png_matrix_vector(bradford, source_white);
+    let target_cone: PngVectorF64 = png_matrix_vector(bradford, target_white);
+    if (png_f64_abs(source_cone.x) < 0.000000000001 ||
+        png_f64_abs(source_cone.y) < 0.000000000001 ||
+        png_f64_abs(source_cone.z) < 0.000000000001) {
+        let invalid: PngColorTransform = png_color_transform_identity();
+        invalid.valid = 0; return invalid;
+    }
+    let cone_scale: PngMatrixF64 = PngMatrixF64{
+        .m00 = target_cone.x / source_cone.x, .m01 = 0.0, .m02 = 0.0,
+        .m10 = 0.0, .m11 = target_cone.y / source_cone.y, .m12 = 0.0,
+        .m20 = 0.0, .m21 = 0.0, .m22 = target_cone.z / source_cone.z,
+    };
+    let adaptation: PngMatrixF64 = png_matrix_multiply(
+        bradford_inverse.matrix, png_matrix_multiply(cone_scale, bradford)
+    );
+    let final_matrix: PngMatrixF64 = png_matrix_multiply(
+        target_inverse.matrix, png_matrix_multiply(adaptation, source.matrix)
+    );
+    if (png_matrix_finite_bounded(final_matrix, 8.0) == 0) {
+        let invalid: PngColorTransform = png_color_transform_identity();
+        invalid.valid = 0; return invalid;
+    }
+    return PngColorTransform{
+        .m00 = png_quantize_matrix_value(final_matrix.m00),
+        .m01 = png_quantize_matrix_value(final_matrix.m01),
+        .m02 = png_quantize_matrix_value(final_matrix.m02),
+        .m10 = png_quantize_matrix_value(final_matrix.m10),
+        .m11 = png_quantize_matrix_value(final_matrix.m11),
+        .m12 = png_quantize_matrix_value(final_matrix.m12),
+        .m20 = png_quantize_matrix_value(final_matrix.m20),
+        .m21 = png_quantize_matrix_value(final_matrix.m21),
+        .m22 = png_quantize_matrix_value(final_matrix.m22),
+        .active = 1, .valid = 1,
+    };
 }
 
 fn png_color_channels(color_type: i32) i32 {
@@ -456,12 +710,10 @@ fn png_pow_q30(value: i64, exponent_q20: i64) i64 {
         png_q20_one());
 }
 
-fn png_gamma_sample_to_srgb(sample: u8, gamma: i64) u8 {
-    if (sample == 0 || gamma <= 0) { return 0; }
-    if (sample == 255) { return 255; }
-    let encoded: i64 = ((sample as i64) * png_q30_one() + 127) / 255;
-    let decode_exponent: i64 = (100000 * png_q20_one() + gamma / 2) / gamma;
-    let linear: i64 = png_pow_q30(encoded, decode_exponent);
+fn png_linear_q30_to_srgb(linear_input: i64) u8 {
+    let linear: i64 = linear_input;
+    if (linear <= 0) { return 0; }
+    if (linear >= png_q30_one()) { return 255; }
     let srgb: i64 = 0;
     if (linear <= 3361671) {
         srgb = (linear * 1292 + 50) / 100;
@@ -474,13 +726,57 @@ fn png_gamma_sample_to_srgb(sample: u8, gamma: i64) u8 {
     return ((srgb * 255 + png_q30_one() / 2) / png_q30_one()) as u8;
 }
 
+fn png_srgb_sample_to_linear_q30(sample: u8) i64 {
+    if (sample == 0) { return 0; }
+    if (sample == 255) { return png_q30_one(); }
+    let encoded: i64 = ((sample as i64) * png_q30_one() + 127) / 255;
+    if (encoded <= 43432857) {
+        return (encoded * 100 + 646) / 1292;
+    }
+    let adjusted: i64 = ((encoded + 59055800) * png_q30_one() +
+        1132797624 / 2) / 1132797624;
+    return png_pow_q30(adjusted, 2516582);
+}
+
+fn png_source_sample_to_linear_q30(sample: u8, gamma: i64) i64 {
+    if (sample == 0) { return 0; }
+    if (sample == 255) { return png_q30_one(); }
+    if (gamma == 0) { return png_srgb_sample_to_linear_q30(sample); }
+    let encoded: i64 = ((sample as i64) * png_q30_one() + 127) / 255;
+    let decode_exponent: i64 = (100000 * png_q20_one() + gamma / 2) / gamma;
+    return png_pow_q30(encoded, decode_exponent);
+}
+
+fn png_gamma_sample_to_srgb(sample: u8, gamma: i64) u8 {
+    if (sample == 0 || gamma <= 0) { return 0; }
+    if (sample == 255) { return 255; }
+    return png_linear_q30_to_srgb(
+        png_source_sample_to_linear_q30(sample, gamma)
+    );
+}
+
+fn png_transform_linear_channel(a: i64, b: i64, c: i64,
+    red: i64, green: i64, blue: i64) i64 {
+    return (a * red + b * green + c * blue) / 16777216;
+}
+
 fn png_expand_rgba(raw: []u8, width: i32, height: i32, row_bytes: i32,
     bit_depth: i32, color_type: i32, palette: ArrayList[u8],
     transparency: ArrayList[u8], source_gamma: i64,
+    color_transform: PngColorTransform,
     profile_assumed: i32) PngDecodeResult {
     let pixels: ArrayList[u8] = make[u8](width * height * 4);
     let gamma_table: ArrayList[u8] = make[u8](256);
-    if (source_gamma != 0) {
+    let linear_table: ArrayList[i64] = make[i64](256);
+    if (color_transform.active != 0) {
+        let linear_sample: i32 = 0;
+        while (linear_sample < 256) {
+            push[i64](&linear_table, png_source_sample_to_linear_q30(
+                linear_sample as u8, source_gamma
+            ));
+            linear_sample = linear_sample + 1;
+        }
+    } else if (source_gamma != 0) {
         let gamma_sample: i32 = 0;
         while (gamma_sample < 256) {
             push[u8](&gamma_table,
@@ -528,7 +824,8 @@ fn png_expand_rgba(raw: []u8, width: i32, height: i32, row_bytes: i32,
             } else if (color_type == 3) {
                 let index: i32 = png_sample(row, x, bit_depth);
                 if (index * 3 + 2 >= palette.len) {
-                    free[u8](&gamma_table); free[u8](&pixels);
+                    free[i64](&linear_table); free[u8](&gamma_table);
+                    free[u8](&pixels);
                     return png_decode_fail(PngDecodeError.palette_index,
                         (y * width + x) as i64);
                 }
@@ -547,7 +844,23 @@ fn png_expand_rgba(raw: []u8, width: i32, height: i32, row_bytes: i32,
                 blue = png_sample_u8(png_sample(row, x * 4 + 2, bit_depth), bit_depth);
                 alpha = png_sample_u8(png_sample(row, x * 4 + 3, bit_depth), bit_depth);
             }
-            if (gamma_table.len == 256) {
+            if (linear_table.len == 256) {
+                let linear_red: i64 = linear_table.data[red as i32];
+                let linear_green: i64 = linear_table.data[green as i32];
+                let linear_blue: i64 = linear_table.data[blue as i32];
+                red = png_linear_q30_to_srgb(png_transform_linear_channel(
+                    color_transform.m00, color_transform.m01, color_transform.m02,
+                    linear_red, linear_green, linear_blue
+                ));
+                green = png_linear_q30_to_srgb(png_transform_linear_channel(
+                    color_transform.m10, color_transform.m11, color_transform.m12,
+                    linear_red, linear_green, linear_blue
+                ));
+                blue = png_linear_q30_to_srgb(png_transform_linear_channel(
+                    color_transform.m20, color_transform.m21, color_transform.m22,
+                    linear_red, linear_green, linear_blue
+                ));
+            } else if (gamma_table.len == 256) {
                 red = gamma_table.data[red as i32];
                 green = gamma_table.data[green as i32];
                 blue = gamma_table.data[blue as i32];
@@ -558,6 +871,7 @@ fn png_expand_rgba(raw: []u8, width: i32, height: i32, row_bytes: i32,
         }
         y = y + 1;
     }
+    free[i64](&linear_table);
     free[u8](&gamma_table);
     return PngDecodeResult{
         .pixels = pixels, .width = width, .height = height,
@@ -594,6 +908,7 @@ fn png_decode(bytes: []u8) PngDecodeResult {
     let saw_gamma: i32 = 0;
     let saw_chrm: i32 = 0;
     let source_gamma: i64 = 0;
+    let color_transform: PngColorTransform = png_color_transform_identity();
     let offset: i32 = 8;
 
     while (offset < bytes.len && saw_end == 0) {
@@ -751,7 +1066,8 @@ fn png_decode(bytes: []u8) PngDecodeResult {
                 return png_decode_parse_fail(&idat, &palette, &transparency,
                     PngDecodeError.invalid_chunk_order, offset as i64);
             }
-            if (png_chrm_is_srgb(bytes, data_offset, length) == 0) {
+            color_transform = png_chrm_transform(bytes, data_offset, length);
+            if (color_transform.valid == 0) {
                 return png_decode_parse_fail(&idat, &palette, &transparency,
                     PngDecodeError.unsupported_color_profile, offset as i64);
             }
@@ -828,11 +1144,15 @@ fn png_decode(bytes: []u8) PngDecodeResult {
         return png_decode_fail(error, error_offset);
     }
     let conversion_gamma: i64 = source_gamma;
-    if (saw_srgb != 0) { conversion_gamma = 0; }
+    let effective_transform: PngColorTransform = color_transform;
+    if (saw_srgb != 0) {
+        conversion_gamma = 0;
+        effective_transform = png_color_transform_identity();
+    }
     let result: PngDecodeResult = png_expand_rgba(
         scanlines.bytes.data[0..scanlines.bytes.len], width, height,
         row_bytes64 as i32, bit_depth, color_type, palette, transparency,
-        conversion_gamma,
+        conversion_gamma, effective_transform,
         (saw_srgb == 0 && !(source_gamma != 0 && saw_chrm != 0)) as i32
     );
     free[u8](&scanlines.bytes); free[u8](&palette); free[u8](&transparency);

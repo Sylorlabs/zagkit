@@ -226,14 +226,26 @@ fn fixture_profile_png(gamma_count: i32, chromaticity_kind: i32,
     free[u8](&gamma);
     if (chromaticity_kind != 0) {
         let chromaticity: ArrayList[u8] = make[u8](32);
-        png_write_u32_be(&chromaticity, 31270);
-        png_write_u32_be(&chromaticity, 32900);
-        png_write_u32_be(&chromaticity, 64000);
-        png_write_u32_be(&chromaticity, 33000);
-        png_write_u32_be(&chromaticity, 30000);
-        png_write_u32_be(&chromaticity, 60000);
-        png_write_u32_be(&chromaticity, 15000);
-        png_write_u32_be(&chromaticity, 6000 + (chromaticity_kind - 1));
+        let white_x: i64 = 31270; let white_y: i64 = 32900;
+        let red_x: i64 = 64000; let red_y: i64 = 33000;
+        let green_x: i64 = 30000; let green_y: i64 = 60000;
+        let blue_x: i64 = 15000; let blue_y: i64 = 6000;
+        if (chromaticity_kind == 2) {
+            red_x = 68000; red_y = 32000;
+            green_x = 26500; green_y = 69000;
+        } else if (chromaticity_kind == 3) {
+            white_x = 34567; white_y = 35850;
+        } else if (chromaticity_kind == 4) {
+            green_x = red_x; green_y = red_y;
+        }
+        png_write_u32_be(&chromaticity, white_x);
+        png_write_u32_be(&chromaticity, white_y);
+        png_write_u32_be(&chromaticity, red_x);
+        png_write_u32_be(&chromaticity, red_y);
+        png_write_u32_be(&chromaticity, green_x);
+        png_write_u32_be(&chromaticity, green_y);
+        png_write_u32_be(&chromaticity, blue_x);
+        png_write_u32_be(&chromaticity, blue_y);
         png_write_chunk(&output, "cHRM", chromaticity.data[0..chromaticity.len]);
         free[u8](&chromaticity);
     }
@@ -454,14 +466,44 @@ fn color_profile_contract(state: *TestState) void {
         "meaningless zero gamma is ignored while fallback truth stays visible");
     png_decode_free(&zero); png_encode_free(&zero_fixture);
 
-    let precedence_fixture: PngEncodeResult = fixture_profile_png(1, 0, 100000, 1);
+    let p3_fixture: PngEncodeResult = fixture_profile_png(1, 2, 100000, 0);
+    let p3: PngDecodeResult = png_decode(
+        p3_fixture.bytes.data[0..p3_fixture.bytes.len]
+    );
+    expect(state, p3.error == PngDecodeError.none &&
+        p3.profile_assumed == 0 && p3.pixels.data[0] == 64 &&
+        p3.pixels.data[1] == 103 && p3.pixels.data[2] == 126,
+        "Display P3 primaries convert through the bounded linear matrix path");
+    png_decode_free(&p3); png_encode_free(&p3_fixture);
+
+    let adapted_fixture: PngEncodeResult = fixture_profile_png(1, 3, 100000, 0);
+    let adapted: PngDecodeResult = png_decode(
+        adapted_fixture.bytes.data[0..adapted_fixture.bytes.len]
+    );
+    expect(state, adapted.error == PngDecodeError.none &&
+        adapted.profile_assumed == 0 && adapted.pixels.data[0] == 69 &&
+        adapted.pixels.data[1] == 102 && adapted.pixels.data[2] == 123,
+        "non-D65 white points use deterministic Bradford adaptation");
+    png_decode_free(&adapted); png_encode_free(&adapted_fixture);
+
+    let assumed_fixture: PngEncodeResult = fixture_profile_png(0, 2, 0, 0);
+    let assumed: PngDecodeResult = png_decode(
+        assumed_fixture.bytes.data[0..assumed_fixture.bytes.len]
+    );
+    expect(state, assumed.error == PngDecodeError.none &&
+        assumed.profile_assumed != 0 && assumed.pixels.data[0] == 11 &&
+        assumed.pixels.data[1] == 35 && assumed.pixels.data[2] == 53,
+        "chromaticities without a transfer curve preserve fallback-profile truth");
+    png_decode_free(&assumed); png_encode_free(&assumed_fixture);
+
+    let precedence_fixture: PngEncodeResult = fixture_profile_png(1, 2, 100000, 1);
     let precedence: PngDecodeResult = png_decode(
         precedence_fixture.bytes.data[0..precedence_fixture.bytes.len]
     );
     expect(state, precedence.error == PngDecodeError.none &&
         precedence.profile_assumed == 0 && precedence.pixels.data[0] == 17 &&
         precedence.pixels.data[1] == 34 && precedence.pixels.data[2] == 51,
-        "explicit sRGB takes precedence over accompanying gamma metadata");
+        "explicit sRGB takes precedence over accompanying gamma and chromaticities");
     png_decode_free(&precedence); png_encode_free(&precedence_fixture);
 
     let duplicate_fixture: PngEncodeResult = fixture_profile_png(2, 0, 45455, 0);
@@ -472,13 +514,13 @@ fn color_profile_contract(state: *TestState) void {
         "duplicate color metadata fails before image decompression");
     png_decode_free(&duplicate); png_encode_free(&duplicate_fixture);
 
-    let foreign_fixture: PngEncodeResult = fixture_profile_png(1, 2, 45455, 0);
-    let foreign: PngDecodeResult = png_decode(
-        foreign_fixture.bytes.data[0..foreign_fixture.bytes.len]
+    let singular_fixture: PngEncodeResult = fixture_profile_png(1, 4, 45455, 0);
+    let singular: PngDecodeResult = png_decode(
+        singular_fixture.bytes.data[0..singular_fixture.bytes.len]
     );
-    expect(state, foreign.error == PngDecodeError.unsupported_color_profile,
-        "unconverted chromaticities fail rather than being mislabeled sRGB");
-    png_decode_free(&foreign); png_encode_free(&foreign_fixture);
+    expect(state, singular.error == PngDecodeError.unsupported_color_profile,
+        "singular chromaticities fail before decompression or conversion");
+    png_decode_free(&singular); png_encode_free(&singular_fixture);
 
     let ramp: ArrayList[u8] = make[u8](256);
     let sample: i32 = 0;

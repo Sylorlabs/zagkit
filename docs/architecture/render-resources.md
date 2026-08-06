@@ -53,8 +53,10 @@ the display-list revision and content identity. `ZKDL` version 2 serializes the
 canonical resource section before operations and reconstructs it through the
 same bounded validation path; decoding and re-encoding are byte identical.
 
-The current executable contract still does not decode SVG or PNG, validate font
-tables, interpret glyph payload schemas, rasterize path strokes, convert wide
-gamut images, cache platform uploads, or implement memory-pressure eviction. Those
+The current executable contract decodes bounded PNG assets into canonical owned
+RGBA8 resources, including arbitrary valid `cHRM` conversion, but does not yet
+decode SVG, execute ICC profiles, validate font tables, interpret glyph payload
+schemas, rasterize path strokes, target wide-gamut output surfaces, cache
+platform uploads, or implement memory-pressure eviction. Those
 capabilities remain unavailable until their own malformed-input, rendering,
 replacement, and cleanup suites pass.
