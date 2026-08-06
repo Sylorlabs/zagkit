@@ -46,6 +46,7 @@ route.
 
 Fixed-subdivision flattening is an experimental correctness step, not the final
 curve-quality contract. Scale-adaptive or analytic curve coverage, exact curve
-extrema, strokes, joins, caps, dashes, boolean path operations, and SVG path
-syntax remain unavailable until their deterministic, malformed-input, golden,
-fidelity, and cleanup suites pass.
+extrema, path strokes, joins, caps, dashes, boolean path operations, and SVG
+path syntax remain unavailable until their deterministic, malformed-input,
+golden, fidelity, and cleanup suites pass. Axis-aligned rectangle strokes are a
+separate implemented CPU primitive.

@@ -305,6 +305,9 @@ fn display_list_push(list: *DisplayList, op: DisplayOp) DisplayError {
         op.parameter < 0 || display_fixed_value_valid(op.parameter) == 0) {
         return display_fail(list, DisplayError.invalid_parameter);
     }
+    if (op.kind == DisplayOpKind.stroke_rect && op.paint.stroke_width <= 0) {
+        return display_fail(list, DisplayError.invalid_parameter);
+    }
     if (op.kind == DisplayOpKind.begin_layer && (op.parameter < 0 || op.parameter > 65535)) {
         return display_fail(list, DisplayError.invalid_parameter);
     }

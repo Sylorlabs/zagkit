@@ -446,6 +446,78 @@ fn cpu_fill_rect(surface: *CpuSurface, raw_bounds: Rect, clip: Rect, paint: Pain
     return touched;
 }
 
+fn cpu_rect_pixel_coverage(bounds: Rect, x: i32, y: i32) i64 {
+    if (bounds.width <= 0 || bounds.height <= 0) { return 0; }
+    let pixel_left: i64 = (x as i64) * unit_scale();
+    let pixel_top: i64 = (y as i64) * unit_scale();
+    let overlap_left: i64 = bounds.x;
+    if (pixel_left > overlap_left) { overlap_left = pixel_left; }
+    let overlap_top: i64 = bounds.y;
+    if (pixel_top > overlap_top) { overlap_top = pixel_top; }
+    let overlap_right: i64 = bounds.x + bounds.width;
+    if (pixel_left + unit_scale() < overlap_right) {
+        overlap_right = pixel_left + unit_scale();
+    }
+    let overlap_bottom: i64 = bounds.y + bounds.height;
+    if (pixel_top + unit_scale() < overlap_bottom) {
+        overlap_bottom = pixel_top + unit_scale();
+    }
+    if (overlap_right <= overlap_left || overlap_bottom <= overlap_top) { return 0; }
+    return (overlap_right - overlap_left) * (overlap_bottom - overlap_top);
+}
+
+fn cpu_stroke_rect(surface: *CpuSurface, raw_bounds: Rect, clip: Rect,
+    transform: Transform, paint: Paint) i64 {
+    let low: i64 = paint.stroke_width / 2;
+    let high: i64 = paint.stroke_width - low;
+    let outer_local: Rect = rect(
+        raw_bounds.x - low,
+        raw_bounds.y - low,
+        raw_bounds.width + paint.stroke_width,
+        raw_bounds.height + paint.stroke_width
+    );
+    let inner_local: Rect = rect(
+        raw_bounds.x + high,
+        raw_bounds.y + high,
+        raw_bounds.width - paint.stroke_width,
+        raw_bounds.height - paint.stroke_width
+    );
+    let outer: Rect = cpu_rect_intersection(
+        cpu_rect_intersection(cpu_transform_rect(outer_local, transform), clip),
+        rect(0, 0, (surface.*.width as i64) * unit_scale(),
+            (surface.*.height as i64) * unit_scale())
+    );
+    let inner: Rect = rect(0, 0, 0, 0);
+    if (inner_local.width > 0 && inner_local.height > 0) {
+        inner = cpu_rect_intersection(
+            cpu_rect_intersection(cpu_transform_rect(inner_local, transform), clip),
+            rect(0, 0, (surface.*.width as i64) * unit_scale(),
+                (surface.*.height as i64) * unit_scale())
+        );
+    }
+    if (outer.width <= 0 || outer.height <= 0) { return 0; }
+    let first_x: i32 = (outer.x / unit_scale()) as i32;
+    let first_y: i32 = (outer.y / unit_scale()) as i32;
+    let last_x: i32 = ((outer.x + outer.width + unit_scale() - 1) / unit_scale()) as i32;
+    let last_y: i32 = ((outer.y + outer.height + unit_scale() - 1) / unit_scale()) as i32;
+    let touched: i64 = 0;
+    let y: i32 = first_y;
+    while (y < last_y) {
+        let x: i32 = first_x;
+        while (x < last_x) {
+            let coverage: i64 = cpu_rect_pixel_coverage(outer, x, y) -
+                cpu_rect_pixel_coverage(inner, x, y);
+            if (coverage > 0) {
+                cpu_blend_pixel(surface, x, y, paint, coverage);
+                touched = touched + 1;
+            }
+            x = x + 1;
+        }
+        y = y + 1;
+    }
+    return touched;
+}
+
 fn cpu_rasterize(list: DisplayList, width: i32, height: i32) CpuRasterResult {
     let surface: CpuSurface = cpu_surface_make(width, height);
     if (surface.width == 0 || surface.height == 0) {
@@ -504,6 +576,30 @@ fn cpu_rasterize(list: DisplayList, width: i32, height: i32) CpuRasterResult {
                 return cpu_result(surface, CpuRasterError.invalid_geometry, i, rendered_ops, pixels_touched);
             }
             pixels_touched = pixels_touched + cpu_fill_rect(&surface, transformed, current.clip, op.paint);
+        } else if (op.kind == DisplayOpKind.stroke_rect) {
+            let low: i64 = op.paint.stroke_width / 2;
+            let expanded: Rect = rect(
+                op.bounds.x - low,
+                op.bounds.y - low,
+                op.bounds.width + op.paint.stroke_width,
+                op.bounds.height + op.paint.stroke_width
+            );
+            if (cpu_fixed_safe(expanded.x) == 0 || cpu_fixed_safe(expanded.y) == 0 ||
+                cpu_fixed_safe(expanded.width) == 0 || cpu_fixed_safe(expanded.height) == 0) {
+                free[CpuRasterState](&stack);
+                return cpu_result(surface, CpuRasterError.invalid_geometry,
+                    i, rendered_ops, pixels_touched);
+            }
+            let transformed: Rect = cpu_transform_rect(expanded, current.transform);
+            if (cpu_fixed_safe(transformed.x) == 0 || cpu_fixed_safe(transformed.y) == 0 ||
+                cpu_fixed_safe(transformed.width) == 0 || cpu_fixed_safe(transformed.height) == 0) {
+                free[CpuRasterState](&stack);
+                return cpu_result(surface, CpuRasterError.invalid_geometry,
+                    i, rendered_ops, pixels_touched);
+            }
+            pixels_touched = pixels_touched + cpu_stroke_rect(
+                &surface, op.bounds, current.clip, current.transform, op.paint
+            );
         } else if (op.kind == DisplayOpKind.draw_path) {
             let resource_index: i32 = render_resource_find_index(list.resources, op.resource_id);
             if (resource_index < 0) {

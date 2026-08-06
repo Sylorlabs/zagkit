@@ -146,6 +146,12 @@ fn rejection_contract(state: *TestState) void {
     bad_paint.paint.red = 65536;
     expect(state, display_list_push(&list, bad_paint) == DisplayError.invalid_parameter, "raw paint channels outside RGBA16 fail before mutation");
 
+    let zero_stroke: DisplayOp = display_op(DisplayOpKind.stroke_rect, node_key(1));
+    zero_stroke.bounds = rect(0, 0, 10, 10);
+    zero_stroke.paint.stroke_width = 0;
+    expect(state, display_list_push(&list, zero_stroke) == DisplayError.invalid_parameter,
+        "rectangle strokes require a positive logical width");
+
     _ = display_list_push(&list, display_op(DisplayOpKind.save, node_key(1)));
     expect(state, display_list_seal(&list) == DisplayError.unbalanced_stack && list.sealed == 0, "unbalanced save state cannot seal");
     _ = display_list_push(&list, display_op(DisplayOpKind.restore, node_key(1)));

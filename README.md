@@ -148,13 +148,14 @@ rasterization, other payload interpretation, damage, complete CPU rasterization,
 GPU transport, schema evolution, and fuzz coverage remain open. See the
 [path contract](docs/architecture/paths.md).
 
-The first CPU-oracle subset rasterizes fixed-point rectangle and canonical path
-fills with exact clip and axis-aligned transform state, area-based rectangle
-edges, deterministic 8 by 8 path coverage, non-zero and even-odd winding,
-bounded curve flattening, and source-over alpha into owned RGBA8 surfaces.
-Path edge and work budgets fail before pixel mutation. Unsupported images,
-glyphs, strokes, skew, layers, and effects fail at the exact operation; this
-subset is not yet the complete CPU renderer required by Milestone 2.
+The first CPU-oracle subset rasterizes fixed-point rectangle fills, centered
+rectangle strokes, and canonical path fills with exact clip and axis-aligned
+transform state, analytic rectangle coverage, deterministic 8 by 8 path
+coverage, non-zero and even-odd winding, bounded curve flattening, and
+source-over alpha into owned RGBA8 surfaces. Path edge and work budgets fail
+before pixel mutation. Unsupported images, glyphs, path strokes, skew, layers,
+and effects fail at the exact operation; this subset is not yet the complete
+CPU renderer required by Milestone 2.
 
 The first input slice resolves full affine transforms back to local coordinates,
 honors local clips and z-order, rejects singular or malformed hit nodes, and

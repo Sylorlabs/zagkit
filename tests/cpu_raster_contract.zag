@@ -126,6 +126,30 @@ fn deterministic_contract(state: *TestState) void {
     display_list_free(&list);
 }
 
+fn stroke_rect_contract(state: *TestState) void {
+    let list: DisplayList = display_list_make();
+    let stroke: DisplayOp = display_op(DisplayOpKind.stroke_rect, node_key(5));
+    stroke.bounds = rect(unit_scale(), unit_scale(),
+        4 * unit_scale(), 4 * unit_scale());
+    stroke.paint = paint_rgba16(65535, 0, 65535, 65535);
+    stroke.paint.stroke_width = unit_scale();
+    _ = display_list_push(&list, stroke);
+    _ = display_list_seal(&list);
+    let result: CpuRasterResult = cpu_rasterize(list, 6, 6);
+    expect(state, result.error == CpuRasterError.none && result.rendered_ops == 1 &&
+        result.pixels_touched == 32,
+        "centered rectangle strokes rasterize as bounded analytic rings");
+    expect(state, pixel(result.surface, 0, 2, 3) == 128 &&
+        pixel(result.surface, 1, 2, 3) == 128 &&
+        pixel(result.surface, 2, 2, 3) == 0,
+        "one logical pixel strokes split exact coverage across inner and outer edges");
+    expect(state, pixel(result.surface, 0, 0, 3) == 64 &&
+        pixel(result.surface, 1, 1, 3) == 191,
+        "stroke corners subtract inner area with deterministic rounding");
+    cpu_raster_free(&result);
+    display_list_free(&list);
+}
+
 fn path_fill_contract(state: *TestState) void {
     let triangle: PathData = path_make(PathFillRule.non_zero);
     _ = path_move_to(&triangle, path_point(0, 0));
@@ -256,14 +280,16 @@ fn failure_contract(state: *TestState) void {
     display_list_free(&unsealed);
 
     let unsupported: DisplayList = display_list_make();
-    let stroke: DisplayOp = display_op(DisplayOpKind.stroke_rect, node_key(1));
-    stroke.bounds = rect(0, 0, unit_scale(), unit_scale());
-    _ = display_list_push(&unsupported, stroke);
+    let layer: DisplayOp = display_op(DisplayOpKind.begin_layer, node_key(1));
+    layer.bounds = rect(0, 0, unit_scale(), unit_scale());
+    layer.parameter = 65535;
+    _ = display_list_push(&unsupported, layer);
+    _ = display_list_push(&unsupported, display_op(DisplayOpKind.end_layer, node_key(1)));
     _ = display_list_seal(&unsupported);
     let unsupported_result: CpuRasterResult = cpu_rasterize(unsupported, 2, 2);
     expect(state, unsupported_result.error == CpuRasterError.unsupported_operation &&
         unsupported_result.error_op == 0,
-        "unimplemented stroke rasterization fails closed at the exact operation");
+        "unimplemented layer compositing fails closed at the exact operation");
     cpu_raster_free(&unsupported_result);
     display_list_free(&unsupported);
 
@@ -286,6 +312,7 @@ fn main() i32 {
     coverage_and_blend_contract(&state);
     clip_and_transform_contract(&state);
     deterministic_contract(&state);
+    stroke_rect_contract(&state);
     path_fill_contract(&state);
     path_work_limit_contract(&state);
     path_clip_transform_contract(&state);

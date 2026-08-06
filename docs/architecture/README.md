@@ -88,10 +88,11 @@ the stored content identity and revision, and rejects trailing bytes so one
 scene has one canonical encoding. A bounded variable-length resource section
 preserves allocation policy, typed metadata, revisions, and exact owned bytes.
 
-The CPU oracle begins with deterministic RGBA8 rectangle and canonical path
-fills from 26.6 fixed-point geometry. Clip and positive axis-aligned transform
-state, fractional rectangle edges, 8 by 8 path coverage, non-zero and even-odd
-winding, fixed curve flattening, and source-over alpha are integer-only.
+The CPU oracle begins with deterministic RGBA8 rectangle fills, centered
+rectangle strokes, and canonical path fills from 26.6 fixed-point geometry.
+Clip and positive axis-aligned transform state, analytic rectangle coverage,
+8 by 8 path coverage, non-zero and even-odd winding, fixed curve flattening,
+and source-over alpha are integer-only.
 Explicit edge and work ceilings reject pathological path scenes before pixel
 mutation. Every unsupported display operation fails at its exact index instead
 of silently degrading or claiming a visual result.
