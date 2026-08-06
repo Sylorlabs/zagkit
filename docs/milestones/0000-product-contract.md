@@ -25,16 +25,19 @@
 ## Zag audit boundary
 
 The release pin resolves the clean Zag `zag-v2-machine-control` commit
-`67cad46feb6a6d912b8d599d7ed3ade7e81175c5`. The neighboring local Zag checkout
-contains extensive unrelated changes on another branch. Those changes were not
-used to claim capabilities or construct a release identity.
+`fe465ead349bc92353dcc82e7ce398665241a568`. It was exported from the exact Git
+tree, self-hosted to a byte-identical stage-2/stage-3 fixpoint without external
+tools, and passed the resource, foreground-cache, cache-integration, and tooling
+gates. The neighboring local Zag checkout still contains extensive unrelated
+changes; those changes were not used to claim capabilities or construct this
+release identity.
 
 At the pinned commit, Zag documents x86-64 Linux as supported and ARM64 Linux as
 experimental through qemu-user execution. Mach-O, PE/COFF, iOS, Android, the
-platform ABIs, general foreign callbacks and aggregates, resource embedding,
-cross-platform dynamic loading, complete concurrency, package resolution, and
-stable reload hooks remain missing or partial as recorded in the upstream
-ledger.
+platform ABIs, general foreign callbacks and aggregates, cross-platform resource
+object formats, cross-platform dynamic loading, complete concurrency, package
+resolution, and stable reload hooks remain missing or partial as recorded in the
+upstream ledger.
 
 ## Completion meaning
 

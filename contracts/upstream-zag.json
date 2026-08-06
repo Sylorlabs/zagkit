@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "audited_repository": "https://github.com/Sylorlabs/zag",
-  "audited_commit": "67cad46feb6a6d912b8d599d7ed3ade7e81175c5",
+  "audited_commit": "fe465ead349bc92353dcc82e7ce398665241a568",
   "audited_on": "2026-08-06",
   "state_vocabulary": ["available", "partial", "missing"],
   "evidence_rule": "Available requires native executable conformance at the audited commit. Source presence, a cross compile, or a dirty working tree does not qualify.",
@@ -89,9 +89,9 @@
     {
       "id": "resource-embedding",
       "category": "build-system",
-      "state": "missing",
+      "state": "partial",
       "needed_by": [3, 5, 6, 7],
-      "evidence": "No compiler owned resource embedding contract or conformance suite exists at the pinned commit.",
+      "evidence": "The exact clean pinned commit defines compiler-owned #embed, source-relative identity, binary and empty resources, structured E0017 failures, foreground-cache byte identity, deterministic x86-64 execution, and qemu-user ARM64 execution through zag-poc/tests/run_resource_embed.sh. The clean tree also reached a byte-identical self-host fixpoint.",
       "exit_gate": "Deterministic byte resources embed into every supported object format with identity, alignment, lookup, reproducibility, and malformed input tests."
     },
     {
