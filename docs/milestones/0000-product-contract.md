@@ -25,10 +25,11 @@
 ## Zag audit boundary
 
 The release pin resolves the clean Zag `agent/zagkit-prerequisites` commit
-`b5fa3ff7ba016208f21ce8d3fc55da07a61f911a`. It was exported from the exact Git
+`63e3979d91bfd06f53ee317bd6bf428673814bdf`. It was exported from the exact Git
 tree, self-hosted to a byte-identical stage-2/stage-3 fixpoint without external
 tools, and passed the resource, aggregate switch value-flow, foreground-cache,
-cache-integration, tooling, checksum, and stored-zlib gates. The neighboring
+cache-integration, tooling, checksum, stored-zlib, and general DEFLATE gates on
+x86-64 and qemu-user ARM64. The neighboring
 local Zag checkout still contains extensive unrelated
 changes; those changes were not used to claim capabilities or construct this
 release identity.

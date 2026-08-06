@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "audited_repository": "https://github.com/Sylorlabs/zag",
-  "audited_commit": "b5fa3ff7ba016208f21ce8d3fc55da07a61f911a",
+  "audited_commit": "63e3979d91bfd06f53ee317bd6bf428673814bdf",
   "audited_on": "2026-08-06",
   "state_vocabulary": ["available", "partial", "missing"],
   "evidence_rule": "Available requires native executable conformance at the audited commit. Source presence, a cross compile, or a dirty working tree does not qualify.",
@@ -127,12 +127,12 @@
       "exit_gate": "Dependency invalidation, state preserving reload, ABI rejection, rollback, file race, crash recovery, and deterministic event hooks pass end to end."
     },
     {
-      "id": "checksum-and-stored-zlib",
+      "id": "checksum-and-zlib-inflate",
       "category": "standard-library",
       "state": "available",
       "needed_by": [2, 3, 6, 7],
-      "evidence": "The exact clean pinned commit contains pure-Zag IEEE CRC32, Adler32, and canonical stored-block zlib encode/decode. tests/run_compression_primitives.sh passes published vectors, exact interoperable bytes, empty input, 65535-byte block boundaries, corruption, truncation, trailing-data, bounded-output, and cleanup cases.",
-      "exit_gate": "Keep the focused checksum and stored-zlib suite green at the exact Zag revision pinned by each Zagkit release."
+      "evidence": "The exact clean pinned commit contains pure-Zag IEEE CRC32, Adler32, canonical stored-block zlib encode/decode, and bounded general stored/fixed/dynamic DEFLATE inflate. The 12-check primitive suite and 14-check inflater suite pass on x86-64; the same 14 checks pass in a Zag-generated ARM64 ELF under qemu-user, including independent Python-zlib fixtures, mixed blocks, every strict prefix, and single-bit mutations.",
+      "exit_gate": "Keep the focused checksum, stored-zlib, and cross-target general-inflate suites green at the exact Zag revision pinned by each Zagkit release."
     }
   ]
 }
