@@ -69,8 +69,8 @@ matrix profile using XYZ PCS and the D50 PCS illuminant. Zagkit validates the
 declared profile size, header signature, reserved header bytes, rendering intent,
 bounded aligned tag table, unique required tags, XYZ tag types, and transfer
 curve types before executing it. The current executable subset accepts the six
-required RGB matrix/TRC tags when all three curves are the same identity curve,
-single gamma curve, or parametric curve type 0 through 4. Each piecewise function
+required RGB matrix/TRC tags with independent per-channel identity curves,
+single gamma curves, or parametric curve types 0 through 4. Each piecewise function
 executes from bounded fixed-point coefficients and clips to its declared range;
 undefined or unsafe coefficient domains fail before pixels are touched. Matrix
 columns are converted
@@ -96,11 +96,11 @@ and a larger published malformed corpus remain additional required evidence.
 
 Dimension, encoded-data, decompressed-scanline, output-pixel, palette-index,
 filter, color-matrix, ICC inflate, ICC tag-table, and arithmetic limits fail
-before out-of-bounds access. Sampled or differing per-channel curves, monochrome
-profiles, LUT profiles, device-link profiles, and
+before out-of-bounds access. Sampled curves, monochrome profiles, LUT profiles,
+device-link profiles, and
 unsupported `cICP` metadata fail as unsupported color profiles. Unknown interlace
-methods fail before decompression. These paths keep `G3-PNG` open until sampled,
-per-channel, and LUT ICC execution plus coverage-guided malformed-input evidence land.
+methods fail before decompression. These paths keep `G3-PNG` open until sampled
+and LUT ICC execution plus coverage-guided malformed-input evidence land.
 
 Linear-light filtering, wide-gamut output surfaces, mipmapping,
 high-quality downsampling, image tiling, and GPU upload caches also remain

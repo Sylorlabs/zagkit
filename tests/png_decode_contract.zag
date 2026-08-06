@@ -302,6 +302,17 @@ fn fixture_matrix_icc(kind: i32) ArrayList[u8] {
             fixture_write_u32_be(&bytes, 300, 0);
         }
     }
+    if (kind == 17) {
+        fixture_icc_tag(&bytes, 168, "rTRC", 264, 16);
+        fixture_icc_tag(&bytes, 180, "gTRC", 280, 16);
+        fixture_icc_tag(&bytes, 192, "bTRC", 296, 16);
+        fixture_write_signature(&bytes, 264, "para");
+        fixture_write_u32_be(&bytes, 276, 65536);
+        fixture_write_signature(&bytes, 280, "para");
+        fixture_write_u32_be(&bytes, 292, 131072);
+        fixture_write_signature(&bytes, 296, "para");
+        fixture_write_u32_be(&bytes, 308, 32768);
+    }
     return bytes;
 }
 
@@ -782,6 +793,20 @@ fn color_profile_contract(state: *TestState) void {
     png_decode_free(&type1_curve); png_encode_free(&type1_fixture);
     png_decode_free(&type2_curve); png_encode_free(&type2_fixture);
     png_decode_free(&type4_curve); png_encode_free(&type4_fixture);
+
+    let channel_curve_fixture: PngEncodeResult = fixture_profile_png(
+        0, 0, 0, 0, 17
+    );
+    let channel_curve: PngDecodeResult = png_decode(
+        channel_curve_fixture.bytes.data[0..channel_curve_fixture.bytes.len]
+    );
+    expect(state, channel_curve.error == PngDecodeError.none &&
+        channel_curve.profile_assumed == 0 &&
+        channel_curve.pixels.data[0] == 73 &&
+        channel_curve.pixels.data[1] == 36 &&
+        channel_curve.pixels.data[2] == 178,
+        "differing ICC channel TRCs execute independently before matrix conversion");
+    png_decode_free(&channel_curve); png_encode_free(&channel_curve_fixture);
 
     let cicp_fixture: PngEncodeResult = fixture_profile_png(0, 0, 0, 0, 9);
     let cicp: PngDecodeResult = png_decode(
