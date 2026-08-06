@@ -50,6 +50,8 @@ include a generated capability record and exact Zag compiler revision.
 - Deterministic PNG serialization for CPU surfaces with explicit sRGB intent,
   exact filter-zero RGBA8 rows, CRC-checked chunks, a pure-Zag stored-zlib IDAT
   stream, malformed-surface rejection, and byte-identical output evidence.
+- A pure-Zag persisted headless reference scene whose PNG signature, substantial
+  output, and two-run byte identity execute in the normal repository gate.
 - An experimental immutable display list for explicit paints, resources, clips,
   transforms, layers, and effects with deterministic content identity.
 - A versioned canonical display-list codec with bounded validated decoding and

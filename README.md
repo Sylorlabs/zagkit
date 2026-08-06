@@ -163,9 +163,11 @@ this subset is not yet the complete CPU renderer required by Milestone 2.
 Verified CPU surfaces now serialize to deterministic PNG snapshot bytes with
 an explicit sRGB chunk, exact RGBA8 rows, valid CRC32 chunks, and a pure-Zag
 stored-zlib IDAT stream. Identical pixels produce byte-identical files without
-timestamps or host metadata. Persistence, manifests, golden comparison,
-Talkback evidence bundles, and native screenshot capture remain open, so this
-does not yet claim the snapshot runner or screenshot release gate. See the
+timestamps or host metadata. The pure-Zag headless reference runner persists a
+320 by 200 conformance scene twice and the standard gate verifies signature,
+nonempty size, and byte identity. Manifests, golden comparison, Talkback
+evidence bundles, and native screenshot capture remain open, so this does not
+yet claim the complete snapshot runner or screenshot release gate. See the
 [PNG snapshot contract](docs/quality/png-snapshots.md).
 
 The first input slice resolves full affine transforms back to local coordinates,

@@ -44,6 +44,13 @@ cd "$root"
 "$tmp/image-contract"
 "$znc" tests/png_encode_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/png-encode-contract"
 "$tmp/png-encode-contract"
+"$znc" tools/render-headless-reference.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/render-headless-reference"
+"$tmp/render-headless-reference" "$tmp/reference-first.png"
+"$tmp/render-headless-reference" "$tmp/reference-second.png"
+[ "$(wc -c < "$tmp/reference-first.png")" -gt 100000 ]
+[ "$(od -An -tx1 -N8 "$tmp/reference-first.png" | tr -d ' \n')" = "89504e470d0a1a0a" ]
+cmp -s "$tmp/reference-first.png" "$tmp/reference-second.png"
+printf 'Reference snapshot contract: pass=3 fail=0\n'
 "$znc" tests/display_list_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/display-list-contract"
 "$tmp/display-list-contract"
 "$znc" tests/display_list_codec_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/display-list-codec-contract"

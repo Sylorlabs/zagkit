@@ -19,7 +19,15 @@ file size. PNG decoding is not implemented by this encoder, and a valid PNG
 file does not by itself certify layout, accessibility, interaction, or native
 presentation.
 
-File persistence, manifest naming, golden comparison, tolerances, retained
-Talkback evidence bundles, and actual native screenshot capture remain open.
-Until those land, this primitive is deterministic snapshot serialization rather
-than the complete snapshot runner or screenshot gate.
+`tools/render-headless-reference.sh <output.png>` compiles and runs a pure-Zag
+320 by 200 conformance scene and persists its PNG. The normal headless gate
+renders it twice, requires byte identity, checks the PNG signature, and rejects
+unexpectedly empty output. The scene exercises fixed-point fills, centered
+strokes, alpha composition, a curved path, decoded image scaling, CPU raster,
+PNG encoding, and file output. It deliberately contains no product typography
+or selected design direction.
+
+Manifest naming, golden comparison, tolerances, retained Talkback evidence
+bundles, and actual native screenshot capture remain open. Until those land,
+this is a deterministic headless reference runner rather than the complete
+snapshot runner or screenshot gate.
