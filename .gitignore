@@ -2,6 +2,7 @@
 zag-out/
 .zag-cache/
 .zagd.lock
+.zagd.semantic-ready
 
 # Contract and benchmark output
 artifacts/

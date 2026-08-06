@@ -1,0 +1,146 @@
+@import("std:list")
+@import("../src/layout/flex.zag")
+
+struct TestState { passed: i32, failed: i32 }
+
+fn expect(state: *TestState, condition: i32, name: []u8) void {
+    if (condition != 0) {
+        state.*.passed = state.*.passed + 1;
+        _zag_print("ok  ");
+        _zag_println(name);
+    } else {
+        state.*.failed = state.*.failed + 1;
+        _zag_print("FAIL ");
+        _zag_println(name);
+    }
+}
+
+fn report_i64(label: []u8, value: i64) void {
+    _zag_print(label);
+    _zag_println(_zag_i64_to_str(value));
+}
+
+fn item(id: i64, basis: i64, cross: i64) FlexItem { return flex_item(id, basis, cross); }
+
+fn fixed_row(state: *TestState) void {
+    let items: ArrayList[FlexItem] = make[FlexItem](3);
+    push[FlexItem](&items, item(1, 20, 10));
+    push[FlexItem](&items, item(2, 30, 12));
+    push[FlexItem](&items, item(3, 10, 8));
+    let style: FlexStyle = flex_style(FlexAxis.row, 5, insets_all(4));
+    let result: FlexResult = flex_layout(items, tight_constraints(78, 20), style);
+    expect(state, result.container.width == 78 && result.container.height == 20, "tight constraints define the container");
+    expect(state, result.placements.data[0].frame.x == 4, "leading padding is exact");
+    expect(state, result.placements.data[1].frame.x == 29, "gap is exact");
+    expect(state, result.placements.data[2].frame.x == 64, "third placement is deterministic");
+    flex_free(&result);
+    free[FlexItem](&items);
+}
+
+fn growing_row(state: *TestState) void {
+    let items: ArrayList[FlexItem] = make[FlexItem](2);
+    let first: FlexItem = item(10, 20, 10); first.grow = 1;
+    let second: FlexItem = item(11, 20, 10); second.grow = 2;
+    push[FlexItem](&items, first); push[FlexItem](&items, second);
+    let result: FlexResult = flex_layout(items, tight_constraints(100, 10), flex_style(FlexAxis.row, 0, insets_all(0)));
+    expect(state, result.placements.data[0].frame.width == 40, "grow weight one receives one third");
+    expect(state, result.placements.data[1].frame.width == 60, "last grow item receives exact remainder");
+    expect(state, result.placements.data[1].frame.x == 40, "growth conserves the main extent");
+    flex_free(&result); free[FlexItem](&items);
+}
+
+fn rtl_row(state: *TestState) void {
+    let items: ArrayList[FlexItem] = make[FlexItem](2);
+    push[FlexItem](&items, item(1, 20, 10)); push[FlexItem](&items, item(2, 30, 10));
+    let style: FlexStyle = flex_style(FlexAxis.row, 5, Insets{ .top = 0, .right = 7, .bottom = 0, .left = 3 });
+    style.direction = LayoutDirection.rtl;
+    let result: FlexResult = flex_layout(items, tight_constraints(65, 10), style);
+    expect(state, result.placements.data[0].frame.x == 38, "RTL starts at the physical right inset");
+    expect(state, result.placements.data[1].frame.x == 3, "RTL preserves logical order and exact gap");
+    flex_free(&result); free[FlexItem](&items);
+}
+
+fn alignment(state: *TestState) void {
+    let items: ArrayList[FlexItem] = make[FlexItem](2);
+    let a: FlexItem = item(1, 20, 12); a.baseline = 8;
+    let b: FlexItem = item(2, 20, 18); b.baseline = 14;
+    push[FlexItem](&items, a); push[FlexItem](&items, b);
+    let style: FlexStyle = flex_style(FlexAxis.row, 0, insets_all(2));
+    style.cross_alignment = CrossAlignment.baseline;
+    expect(state, style.cross_alignment == CrossAlignment.baseline, "baseline style mutation persists before layout");
+    let result: FlexResult = flex_layout(items, tight_constraints(40, 24), style);
+    if (result.placements.data[0].baseline != result.placements.data[1].baseline ||
+        result.placements.data[0].frame.y != 8 || result.placements.data[1].frame.y != 2) {
+        report_i64("  first y=", result.placements.data[0].frame.y);
+        report_i64("  first baseline=", result.placements.data[0].baseline);
+        report_i64("  second y=", result.placements.data[1].frame.y);
+        report_i64("  second baseline=", result.placements.data[1].baseline);
+    }
+    expect(state, result.placements.data[0].baseline == result.placements.data[1].baseline, "baseline alignment is exact");
+    expect(state, result.placements.data[0].frame.y == 8 && result.placements.data[1].frame.y == 2, "baseline offsets remain deterministic");
+    flex_free(&result); free[FlexItem](&items);
+}
+
+fn distribution(state: *TestState) void {
+    let items: ArrayList[FlexItem] = make[FlexItem](3);
+    push[FlexItem](&items, item(1, 10, 10)); push[FlexItem](&items, item(2, 10, 10)); push[FlexItem](&items, item(3, 10, 10));
+    let style: FlexStyle = flex_style(FlexAxis.row, 0, insets_all(0));
+    style.main_alignment = MainAlignment.space_between;
+    let result: FlexResult = flex_layout(items, tight_constraints(90, 10), style);
+    expect(state, result.placements.data[0].frame.x == 0, "space-between keeps first edge");
+    expect(state, result.placements.data[1].frame.x == 40, "space-between distributes the first interval");
+    expect(state, result.placements.data[2].frame.x == 80, "space-between keeps last edge");
+    flex_free(&result); free[FlexItem](&items);
+}
+
+fn safety_contracts(state: *TestState) void {
+    let normalized: Constraints = normalize_constraints(Constraints{ .min_width = 20, .max_width = 10, .min_height = -5, .max_height = -10 });
+    expect(state, normalized.min_width == 20 && normalized.max_width == 20, "invalid width constraints collapse safely");
+    expect(state, normalized.min_height == 0 && normalized.max_height == 0, "negative height constraints clamp safely");
+
+    let items: ArrayList[FlexItem] = make[FlexItem](2);
+    let a: FlexItem = item(7, 50, 10); a.min_main = 40;
+    let b: FlexItem = item(7, 50, 10); b.min_main = 40;
+    push[FlexItem](&items, a); push[FlexItem](&items, b);
+    let result: FlexResult = flex_layout(items, tight_constraints(60, 10), flex_style(FlexAxis.row, 0, insets_all(0)));
+    expect(state, result.duplicate_ids == 1, "duplicate stable IDs fail visibly");
+    expect(state, result.overflow == 20, "min-size overflow is explicit");
+    flex_free(&result); free[FlexItem](&items);
+}
+
+fn property_sweep(state: *TestState) void {
+    let width: i64 = 64;
+    let all_valid: i32 = 1;
+    while (width <= 256) {
+        let items: ArrayList[FlexItem] = make[FlexItem](3);
+        let a: FlexItem = item(1, 8, 10); a.grow = 1;
+        let b: FlexItem = item(2, 13, 10); b.grow = 2;
+        let c: FlexItem = item(3, 5, 10); c.grow = 1;
+        push[FlexItem](&items, a); push[FlexItem](&items, b); push[FlexItem](&items, c);
+        let result: FlexResult = flex_layout(items, tight_constraints(width, 10), flex_style(FlexAxis.row, 2, insets_all(1)));
+        let last: Rect = result.placements.data[2].frame;
+        if (result.overflow != 0 || last.x + last.width != width - 1 ||
+            rect_intersects(result.placements.data[0].frame, result.placements.data[1].frame) != 0 ||
+            rect_intersects(result.placements.data[1].frame, result.placements.data[2].frame) != 0) {
+            all_valid = 0;
+        }
+        flex_free(&result); free[FlexItem](&items);
+        width = width + 1;
+    }
+    expect(state, all_valid, "193-width property sweep conserves bounds and gaps");
+}
+
+fn main() i32 {
+    let state: TestState = TestState{ .passed = 0, .failed = 0 };
+    fixed_row(&state);
+    growing_row(&state);
+    rtl_row(&state);
+    alignment(&state);
+    distribution(&state);
+    safety_contracts(&state);
+    property_sweep(&state);
+    _zag_print("Flex contract: pass="); _zag_print(_zag_i64_to_str(state.passed as i64));
+    _zag_print(" fail="); _zag_println(_zag_i64_to_str(state.failed as i64));
+    if (state.failed == 0) { return 0; }
+    return 1;
+}

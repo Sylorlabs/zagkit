@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "audited_repository": "https://github.com/Sylorlabs/zag",
-  "audited_commit": "fe465ead349bc92353dcc82e7ce398665241a568",
+  "audited_commit": "310e389fbf62b5facab62434e16d38340e978277",
   "audited_on": "2026-08-06",
   "state_vocabulary": ["available", "partial", "missing"],
   "evidence_rule": "Available requires native executable conformance at the audited commit. Source presence, a cross compile, or a dirty working tree does not qualify.",
