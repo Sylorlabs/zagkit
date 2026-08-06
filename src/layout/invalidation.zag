@@ -1,0 +1,115 @@
+@import("std:list")
+@import("../core/view_contract.zag")
+
+enum LayoutPhase { measure, layout, paint, semantics }
+enum LayoutReason {
+    intrinsic_content,
+    constraints,
+    child_measurement,
+    flex_priority,
+    gap,
+    padding,
+    direction,
+    safe_area,
+    density,
+    text_scale,
+    breakpoint,
+}
+
+struct LayoutDependency {
+    node: NodeKey,
+    ancestor: NodeKey,
+    state_id: i64,
+    read_revision: i64,
+    phase: LayoutPhase,
+    reason: LayoutReason,
+}
+
+struct LayoutInvalidationCause {
+    node: NodeKey,
+    ancestor: NodeKey,
+    state_id: i64,
+    read_revision: i64,
+    from_revision: i64,
+    to_revision: i64,
+    phase: LayoutPhase,
+    reason: LayoutReason,
+}
+
+struct LayoutTrace {
+    dependencies: ArrayList[LayoutDependency],
+}
+
+struct LayoutInvalidationResult {
+    causes: ArrayList[LayoutInvalidationCause],
+}
+
+fn layout_trace_make() LayoutTrace {
+    return LayoutTrace{ .dependencies = make[LayoutDependency](16) };
+}
+
+fn layout_trace_free(trace: *LayoutTrace) void {
+    free[LayoutDependency](&trace.*.dependencies);
+}
+
+fn layout_trace_record(
+    trace: *LayoutTrace,
+    context: ViewContext,
+    ancestor: NodeKey,
+    phase: LayoutPhase,
+    reason: LayoutReason,
+) void {
+    let i: i32 = 0;
+    while (i < context.reads.len) {
+        let read: StateRead = context.reads.data[i];
+        let existing: i32 = 0;
+        while (existing < trace.*.dependencies.len && !(
+            node_key_equal(trace.*.dependencies.data[existing].node, read.reader) == 1 &&
+            node_key_equal(trace.*.dependencies.data[existing].ancestor, ancestor) == 1 &&
+            trace.*.dependencies.data[existing].state_id == read.state_id &&
+            trace.*.dependencies.data[existing].phase == phase &&
+            trace.*.dependencies.data[existing].reason == reason
+        )) { existing = existing + 1; }
+        if (existing < trace.*.dependencies.len) {
+            trace.*.dependencies.data[existing].read_revision = read.revision;
+        } else {
+            push[LayoutDependency](&trace.*.dependencies, LayoutDependency{
+                .node = read.reader,
+                .ancestor = ancestor,
+                .state_id = read.state_id,
+                .read_revision = read.revision,
+                .phase = phase,
+                .reason = reason,
+            });
+        }
+        i = i + 1;
+    }
+}
+
+fn layout_trace_invalidate(trace: LayoutTrace, change: StateChange) LayoutInvalidationResult {
+    let result: LayoutInvalidationResult = LayoutInvalidationResult{
+        .causes = make[LayoutInvalidationCause](4),
+    };
+    let i: i32 = 0;
+    while (i < trace.dependencies.len) {
+        let dependency: LayoutDependency = trace.dependencies.data[i];
+        if (dependency.state_id == change.state_id && dependency.read_revision < change.to_revision) {
+            push[LayoutInvalidationCause](&result.causes, LayoutInvalidationCause{
+                .node = dependency.node,
+                .ancestor = dependency.ancestor,
+                .state_id = dependency.state_id,
+                .read_revision = dependency.read_revision,
+                .from_revision = change.from_revision,
+                .to_revision = change.to_revision,
+                .phase = dependency.phase,
+                .reason = dependency.reason,
+            });
+        }
+        i = i + 1;
+    }
+    return result;
+}
+
+fn layout_invalidation_free(result: *LayoutInvalidationResult) void {
+    free[LayoutInvalidationCause](&result.*.causes);
+}

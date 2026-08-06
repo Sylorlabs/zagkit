@@ -36,7 +36,14 @@ affected Zagkit conformance.
 
 ## 2. Headless core
 
-**Status: not started.**
+**Status: experimental foundation in progress.**
+
+Strict native Zag contracts currently execute state and dependency tracking,
+keyed reconciliation, bounded geometry, retained intrinsic measurement,
+adaptive and wrapped Flex, semantics, ID-first in-process Talkback dispatch,
+immutable display lists and their codec, a rectangle CPU-oracle subset,
+transformed pointer routing, deterministic replay, and motion kernels. This is
+real headless execution but does not satisfy the milestone exit gate yet.
 
 Implement state dependencies, reconciliation, layout, semantics, immutable
 display lists, deterministic CPU rasterization, Unicode and OpenType text,

@@ -46,6 +46,18 @@ Text scale is bounded from 1x through 4x for breakpoint calculation. Larger
 text therefore selects a roomier composition without distorting the primitive
 spacing scale.
 
+## Intrinsic items and priorities
+
+`flex_item_intrinsic` retains a measured node's main-axis minimum, preferred,
+and maximum bounds plus preferred cross extent and baseline instead of
+flattening it to an unexplained size.
+`FlexPriority` provides lowest, low, normal, high, and required policies with
+explicit grow and shrink weights. Lower priorities yield more under pressure;
+required items neither grow nor shrink. Remaining pressure after intrinsic
+bounds is reported as overflow. See the
+[measurement contract](measurement.md) for the exact mapping and retained
+intrinsic tree.
+
 ## Wrapping
 
 `FlexWrapStyle` adds line gap, line alignment, and a wrapping switch to a
@@ -87,10 +99,10 @@ the placement and line arrays.
 
 The following remain required before either Flex checklist item can complete:
 
-- intrinsic measurement and priorities;
 - grid and overlay placement;
 - safe-area and density matrices driven by real platform shells;
-- exact state-read and rule reasons for every layout invalidation;
+- end-to-end state, environment, and platform-input invalidation reasons across
+  retained components;
 - layout-transition orchestration;
 - full RTL, large-text, and adaptive component conformance;
 - visual-direction acceptance and screenshot goldens.

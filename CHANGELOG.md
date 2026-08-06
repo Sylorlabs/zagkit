@@ -17,6 +17,10 @@ include a generated capability record and exact Zag compiler revision.
 - Experimental keyed reconciliation with stable reorder identity and
   fail-visible duplicate-key handling.
 - Deterministic fixed-point geometry, constraints, and single-line Flex.
+- Experimental retained intrinsic measurement for leaf, row, column, and
+  overlay trees with explicit constraint rules, priorities, baselines,
+  overflow, revision stability, ownership failures, deterministic identity,
+  and exact state-read layout invalidation causes.
 - Experimental adaptive Flex primitives with tokenized density-aware spacing,
   physical safe areas, text-scale-aware breakpoints, deterministic row and
   column wrapping, RTL line bands, baseline-safe extents, per-line growth,
@@ -37,7 +41,8 @@ include a generated capability record and exact Zag compiler revision.
   z-order, capture, focus, stale-target recovery, and ordered evidence.
 - A sealed deterministic replay tape and conformance executor covering exact
   state revisions, pointer input, monotonic time, backend activation, loss,
-  recovery, and regenerated motion, semantics, Flex, display-list, and CPU identities.
+  recovery, and regenerated motion, semantics, measurement, Flex, display-list,
+  and CPU identities.
 - A refresh-aware deterministic motion scheduler with fixed-step integer
   springs, owned keyframes, explicit frame reasons, interruption, reversal,
   resize continuity, gesture velocity handoff, and semantic reduced-motion

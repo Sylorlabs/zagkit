@@ -1,11 +1,13 @@
 @import("std:list")
 @import("../core/geometry.zag")
+@import("measure.zag")
 
 enum FlexAxis { row, column }
 enum LayoutDirection { ltr, rtl }
 enum MainAlignment { start, center, end, space_between, space_around, space_evenly }
 enum CrossAlignment { start, center, end, stretch, baseline }
 enum FlexError { none, invalid_constraints, invalid_style, invalid_item, arithmetic_overflow }
+enum FlexPriority { lowest, low, normal, high, required }
 
 struct FlexItem {
     id: i64,
@@ -53,6 +55,35 @@ fn flex_item(id: i64, basis: i64, cross: i64) FlexItem {
         .cross = cross,
         .baseline = cross,
     };
+}
+
+fn flex_item_intrinsic(
+    id: i64,
+    metrics: IntrinsicMetrics,
+    axis: FlexAxis,
+    priority: FlexPriority,
+) FlexItem {
+    let item: FlexItem = switch (axis) {
+        .row => flex_item(id, metrics.preferred.width, metrics.preferred.height),
+        .column => flex_item(id, metrics.preferred.height, metrics.preferred.width),
+    };
+    if (axis == FlexAxis.row) {
+        item.min_main = metrics.minimum.width;
+        item.max_main = metrics.maximum.width;
+        item.baseline = metrics.baseline;
+    } else {
+        item.min_main = metrics.minimum.height;
+        item.max_main = metrics.maximum.height;
+        item.baseline = metrics.preferred.width;
+    }
+    switch (priority) {
+        .lowest => { item.grow = 0; item.shrink = 8; }
+        .low => { item.grow = 1; item.shrink = 4; }
+        .normal => { item.grow = 2; item.shrink = 2; }
+        .high => { item.grow = 4; item.shrink = 1; }
+        .required => { item.grow = 0; item.shrink = 0; }
+    }
+    return item;
 }
 
 fn flex_style(axis: FlexAxis, gap: i64, padding: Insets) FlexStyle {

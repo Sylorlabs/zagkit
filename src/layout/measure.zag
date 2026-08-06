@@ -1,0 +1,653 @@
+@import("std:list")
+@import("../core/geometry.zag")
+
+enum IntrinsicKind { leaf, row, column, overlay }
+enum IntrinsicError {
+    none,
+    too_many_nodes,
+    invalid_node,
+    duplicate_node,
+    missing_node,
+    missing_child,
+    invalid_edge,
+    multiple_parents,
+    orphan_node,
+    cycle,
+    depth_exceeded,
+    unstable_measurement,
+    invalid_constraints,
+    arithmetic_overflow,
+}
+enum MeasureRule { intrinsic_preferred, minimum_constraint, maximum_constraint }
+
+struct IntrinsicMetrics {
+    minimum: Size,
+    preferred: Size,
+    maximum: Size,
+    baseline: i64,
+}
+
+struct IntrinsicNode {
+    id: i64,
+    kind: IntrinsicKind,
+    metrics: IntrinsicMetrics,
+    gap: i64,
+    padding: Insets,
+    revision: i64,
+}
+
+struct IntrinsicEdge {
+    parent_id: i64,
+    child_id: i64,
+}
+
+struct IntrinsicTree {
+    nodes: ArrayList[IntrinsicNode],
+    edges: ArrayList[IntrinsicEdge],
+}
+
+struct MeasureResult {
+    intrinsic: IntrinsicMetrics,
+    resolved: Size,
+    baseline: i64,
+    overflow_width: i64,
+    overflow_height: i64,
+    width_rule: MeasureRule,
+    height_rule: MeasureRule,
+    visited_nodes: i32,
+    measure_hash: i64,
+    error: IntrinsicError,
+    error_node: i64,
+    error_edge: i32,
+}
+
+struct IntrinsicSolveState {
+    states: ArrayList[i32],
+    values: ArrayList[IntrinsicMetrics],
+    visited_nodes: i32,
+    error: IntrinsicError,
+    error_node: i64,
+    error_edge: i32,
+    depth: i32,
+}
+
+struct IntrinsicWitness {
+    node_id: i64,
+    revision: i64,
+    input_hash: i64,
+}
+
+struct IntrinsicStability {
+    witnesses: ArrayList[IntrinsicWitness],
+}
+
+struct IntrinsicStabilityResult {
+    error: IntrinsicError,
+    node_id: i64,
+    previous_hash: i64,
+    current_hash: i64,
+}
+
+fn intrinsic_metrics(
+    min_width: i64,
+    min_height: i64,
+    preferred_width: i64,
+    preferred_height: i64,
+    max_width: i64,
+    max_height: i64,
+    baseline: i64,
+) IntrinsicMetrics {
+    return IntrinsicMetrics{
+        .minimum = size(min_width, min_height),
+        .preferred = size(preferred_width, preferred_height),
+        .maximum = size(max_width, max_height),
+        .baseline = baseline,
+    };
+}
+
+fn intrinsic_zero() IntrinsicMetrics {
+    return intrinsic_metrics(0, 0, 0, 0, 0, 0, 0);
+}
+
+fn intrinsic_leaf(id: i64, metrics: IntrinsicMetrics, revision: i64) IntrinsicNode {
+    return IntrinsicNode{
+        .id = id,
+        .kind = IntrinsicKind.leaf,
+        .metrics = metrics,
+        .gap = 0,
+        .padding = insets_all(0),
+        .revision = revision,
+    };
+}
+
+fn intrinsic_group(id: i64, kind: IntrinsicKind, gap: i64, padding: Insets) IntrinsicNode {
+    return IntrinsicNode{
+        .id = id,
+        .kind = kind,
+        .metrics = intrinsic_zero(),
+        .gap = gap,
+        .padding = padding,
+        .revision = 0,
+    };
+}
+
+fn intrinsic_tree_make() IntrinsicTree {
+    return IntrinsicTree{
+        .nodes = make[IntrinsicNode](16),
+        .edges = make[IntrinsicEdge](24),
+    };
+}
+
+fn intrinsic_node_limit() i32 { return 4096; }
+fn intrinsic_edge_limit() i32 { return 16384; }
+fn intrinsic_depth_limit() i32 { return 512; }
+
+fn intrinsic_tree_free(tree: *IntrinsicTree) void {
+    free[IntrinsicNode](&tree.*.nodes);
+    free[IntrinsicEdge](&tree.*.edges);
+}
+
+fn intrinsic_tree_add_node(tree: *IntrinsicTree, node: IntrinsicNode) void {
+    push[IntrinsicNode](&tree.*.nodes, node);
+}
+
+fn intrinsic_tree_add_child(tree: *IntrinsicTree, parent_id: i64, child_id: i64) void {
+    push[IntrinsicEdge](&tree.*.edges, IntrinsicEdge{ .parent_id = parent_id, .child_id = child_id });
+}
+
+fn intrinsic_metric_valid(value: IntrinsicMetrics) i32 {
+    return (value.minimum.width >= 0 && value.minimum.height >= 0 &&
+        value.preferred.width >= value.minimum.width &&
+        value.preferred.height >= value.minimum.height &&
+        value.maximum.width >= value.preferred.width &&
+        value.maximum.height >= value.preferred.height &&
+        value.maximum.width <= unbounded_extent() &&
+        value.maximum.height <= unbounded_extent() &&
+        value.baseline >= 0 && value.baseline <= value.preferred.height) as i32;
+}
+
+fn intrinsic_node_valid(node: IntrinsicNode) i32 {
+    if (node.id <= 0 || node.revision < 0 || node.gap < 0 ||
+        node.gap > unbounded_extent() / 4 ||
+        node.padding.top < 0 || node.padding.top > unbounded_extent() / 4 ||
+        node.padding.right < 0 || node.padding.right > unbounded_extent() / 4 ||
+        node.padding.bottom < 0 || node.padding.bottom > unbounded_extent() / 4 ||
+        node.padding.left < 0 || node.padding.left > unbounded_extent() / 4) { return 0; }
+    if (node.kind == IntrinsicKind.leaf) { return intrinsic_metric_valid(node.metrics); }
+    return 1;
+}
+
+fn intrinsic_find_node(tree: IntrinsicTree, id: i64) i32 {
+    let i: i32 = 0;
+    while (i < tree.nodes.len) {
+        if (tree.nodes.data[i].id == id) { return i; }
+        i = i + 1;
+    }
+    return 0 - 1;
+}
+
+fn intrinsic_add(a: i64, b: i64) i64 {
+    if (a < 0 || b < 0) { return 0 - 1; }
+    if (a > unbounded_extent() - b) { return 0 - 1; }
+    return a + b;
+}
+
+fn intrinsic_add_maximum(a: i64, b: i64) i64 {
+    if (a < 0 || b < 0) { return 0 - 1; }
+    if (a == unbounded_extent() || b == unbounded_extent()) { return unbounded_extent(); }
+    return intrinsic_add(a, b);
+}
+
+fn intrinsic_max(a: i64, b: i64) i64 {
+    if (b > a) { return b; }
+    return a;
+}
+
+fn intrinsic_mix(hash: i64, value: i64) i64 {
+    return (hash * 1099511628211) ^ value;
+}
+
+fn intrinsic_metrics_hash(value: IntrinsicMetrics) i64 {
+    let hash: i64 = 17;
+    hash = intrinsic_mix(hash, value.minimum.width);
+    hash = intrinsic_mix(hash, value.minimum.height);
+    hash = intrinsic_mix(hash, value.preferred.width);
+    hash = intrinsic_mix(hash, value.preferred.height);
+    hash = intrinsic_mix(hash, value.maximum.width);
+    hash = intrinsic_mix(hash, value.maximum.height);
+    hash = intrinsic_mix(hash, value.baseline);
+    return hash;
+}
+
+fn intrinsic_node_hash(node: IntrinsicNode) i64 {
+    let hash: i64 = intrinsic_mix(17, node.id);
+    hash = intrinsic_mix(hash, node.kind as i64);
+    hash = intrinsic_mix(hash, intrinsic_metrics_hash(node.metrics));
+    hash = intrinsic_mix(hash, node.gap);
+    hash = intrinsic_mix(hash, node.padding.top);
+    hash = intrinsic_mix(hash, node.padding.right);
+    hash = intrinsic_mix(hash, node.padding.bottom);
+    hash = intrinsic_mix(hash, node.padding.left);
+    return hash;
+}
+
+fn intrinsic_tree_hash(tree: IntrinsicTree) i64 {
+    let hash: i64 = intrinsic_mix(17, tree.nodes.len as i64);
+    let i: i32 = 0;
+    while (i < tree.nodes.len) {
+        let node: IntrinsicNode = tree.nodes.data[i];
+        hash = intrinsic_mix(hash, intrinsic_node_hash(node));
+        hash = intrinsic_mix(hash, node.revision);
+        i = i + 1;
+    }
+    hash = intrinsic_mix(hash, tree.edges.len as i64);
+    i = 0;
+    while (i < tree.edges.len) {
+        hash = intrinsic_mix(hash, tree.edges.data[i].parent_id);
+        hash = intrinsic_mix(hash, tree.edges.data[i].child_id);
+        i = i + 1;
+    }
+    return hash;
+}
+
+fn intrinsic_stability_make() IntrinsicStability {
+    return IntrinsicStability{ .witnesses = make[IntrinsicWitness](16) };
+}
+
+fn intrinsic_stability_free(stability: *IntrinsicStability) void {
+    free[IntrinsicWitness](&stability.*.witnesses);
+}
+
+fn intrinsic_stability_observe(
+    stability: *IntrinsicStability,
+    tree: IntrinsicTree,
+) IntrinsicStabilityResult {
+    let i: i32 = 0;
+    while (i < tree.nodes.len) {
+        let node: IntrinsicNode = tree.nodes.data[i];
+        let duplicate_index: i32 = 0;
+        while (duplicate_index < i) {
+            if (tree.nodes.data[duplicate_index].id == node.id) {
+                return IntrinsicStabilityResult{
+                    .error = IntrinsicError.duplicate_node,
+                    .node_id = node.id,
+                    .previous_hash = 0,
+                    .current_hash = intrinsic_node_hash(node),
+                };
+            }
+            duplicate_index = duplicate_index + 1;
+        }
+        let input_hash: i64 = intrinsic_node_hash(node);
+        let found: i32 = 0 - 1;
+        let j: i32 = 0;
+        while (j < stability.*.witnesses.len) {
+            if (stability.*.witnesses.data[j].node_id == node.id) {
+                found = j;
+                j = stability.*.witnesses.len;
+            } else {
+                j = j + 1;
+            }
+        }
+        if (found >= 0) {
+            let witness: IntrinsicWitness = stability.*.witnesses.data[found];
+            if (node.revision == witness.revision && input_hash != witness.input_hash) {
+                return IntrinsicStabilityResult{
+                    .error = IntrinsicError.unstable_measurement,
+                    .node_id = node.id,
+                    .previous_hash = witness.input_hash,
+                    .current_hash = input_hash,
+                };
+            }
+            if (node.revision < witness.revision) {
+                return IntrinsicStabilityResult{
+                    .error = IntrinsicError.invalid_node,
+                    .node_id = node.id,
+                    .previous_hash = witness.input_hash,
+                    .current_hash = input_hash,
+                };
+            }
+            if (node.revision > witness.revision) {
+                stability.*.witnesses.data[found].revision = node.revision;
+                stability.*.witnesses.data[found].input_hash = input_hash;
+            }
+        } else {
+            push[IntrinsicWitness](&stability.*.witnesses, IntrinsicWitness{
+                .node_id = node.id,
+                .revision = node.revision,
+                .input_hash = input_hash,
+            });
+        }
+        i = i + 1;
+    }
+    return IntrinsicStabilityResult{
+        .error = IntrinsicError.none,
+        .node_id = 0,
+        .previous_hash = 0,
+        .current_hash = 0,
+    };
+}
+
+fn intrinsic_set_error(
+    solve: *IntrinsicSolveState,
+    error: IntrinsicError,
+    node: i64,
+    edge: i32,
+) void {
+    if (solve.*.error == IntrinsicError.none) {
+        solve.*.error = error;
+        solve.*.error_node = node;
+        solve.*.error_edge = edge;
+    }
+}
+
+fn intrinsic_compute(
+    tree: IntrinsicTree,
+    node_index: i32,
+    solve: *IntrinsicSolveState,
+) IntrinsicMetrics {
+    if (solve.*.states.data[node_index] == 2) { return solve.*.values.data[node_index]; }
+    let node: IntrinsicNode = tree.nodes.data[node_index];
+    if (solve.*.states.data[node_index] == 1) {
+        intrinsic_set_error(solve, IntrinsicError.cycle, node.id, 0 - 1);
+        return intrinsic_zero();
+    }
+    if (solve.*.depth >= intrinsic_depth_limit()) {
+        intrinsic_set_error(solve, IntrinsicError.depth_exceeded, node.id, 0 - 1);
+        return intrinsic_zero();
+    }
+    solve.*.depth = solve.*.depth + 1;
+    solve.*.states.data[node_index] = 1;
+    solve.*.visited_nodes = solve.*.visited_nodes + 1;
+    if (node.kind == IntrinsicKind.leaf) {
+        solve.*.values.data[node_index] = node.metrics;
+        solve.*.states.data[node_index] = 2;
+        solve.*.depth = solve.*.depth - 1;
+        return node.metrics;
+    }
+
+    let minimum_width: i64 = 0;
+    let minimum_height: i64 = 0;
+    let preferred_width: i64 = 0;
+    let preferred_height: i64 = 0;
+    let maximum_width: i64 = 0;
+    let maximum_height: i64 = 0;
+    let max_baseline: i64 = 0;
+    let max_descent: i64 = 0;
+    let first_baseline: i64 = 0;
+    let child_count: i32 = 0;
+    let edge_index: i32 = 0;
+    while (edge_index < tree.edges.len && solve.*.error == IntrinsicError.none) {
+        let edge: IntrinsicEdge = tree.edges.data[edge_index];
+        if (edge.parent_id == node.id) {
+            let child_index: i32 = intrinsic_find_node(tree, edge.child_id);
+            if (child_index < 0) {
+                intrinsic_set_error(solve, IntrinsicError.missing_child, edge.child_id, edge_index);
+                return intrinsic_zero();
+            }
+            let child: IntrinsicMetrics = intrinsic_compute(tree, child_index, solve);
+            if (solve.*.error != IntrinsicError.none) { return intrinsic_zero(); }
+            if (child_count == 0) { first_baseline = child.baseline; }
+
+            if (node.kind == IntrinsicKind.row) {
+                if (child_count > 0) {
+                    minimum_width = intrinsic_add(minimum_width, node.gap);
+                    preferred_width = intrinsic_add(preferred_width, node.gap);
+                    maximum_width = intrinsic_add_maximum(maximum_width, node.gap);
+                }
+                if (minimum_width >= 0) { minimum_width = intrinsic_add(minimum_width, child.minimum.width); }
+                if (preferred_width >= 0) { preferred_width = intrinsic_add(preferred_width, child.preferred.width); }
+                if (maximum_width >= 0) {
+                    maximum_width = intrinsic_add_maximum(maximum_width, child.maximum.width);
+                }
+                minimum_height = intrinsic_max(minimum_height, child.minimum.height);
+                preferred_height = intrinsic_max(preferred_height, child.preferred.height);
+                maximum_height = intrinsic_max(maximum_height, child.maximum.height);
+                max_baseline = intrinsic_max(max_baseline, child.baseline);
+                max_descent = intrinsic_max(max_descent, child.preferred.height - child.baseline);
+            } else if (node.kind == IntrinsicKind.column) {
+                minimum_width = intrinsic_max(minimum_width, child.minimum.width);
+                preferred_width = intrinsic_max(preferred_width, child.preferred.width);
+                maximum_width = intrinsic_max(maximum_width, child.maximum.width);
+                if (child_count > 0) {
+                    minimum_height = intrinsic_add(minimum_height, node.gap);
+                    preferred_height = intrinsic_add(preferred_height, node.gap);
+                    maximum_height = intrinsic_add_maximum(maximum_height, node.gap);
+                }
+                if (minimum_height >= 0) { minimum_height = intrinsic_add(minimum_height, child.minimum.height); }
+                if (preferred_height >= 0) { preferred_height = intrinsic_add(preferred_height, child.preferred.height); }
+                if (maximum_height >= 0) {
+                    maximum_height = intrinsic_add_maximum(maximum_height, child.maximum.height);
+                }
+            } else {
+                minimum_width = intrinsic_max(minimum_width, child.minimum.width);
+                minimum_height = intrinsic_max(minimum_height, child.minimum.height);
+                preferred_width = intrinsic_max(preferred_width, child.preferred.width);
+                preferred_height = intrinsic_max(preferred_height, child.preferred.height);
+                maximum_width = intrinsic_max(maximum_width, child.maximum.width);
+                maximum_height = intrinsic_max(maximum_height, child.maximum.height);
+                max_baseline = intrinsic_max(max_baseline, child.baseline);
+            }
+            if (minimum_width < 0 || minimum_height < 0 || preferred_width < 0 ||
+                preferred_height < 0 || maximum_width < 0 || maximum_height < 0) {
+                intrinsic_set_error(solve, IntrinsicError.arithmetic_overflow, node.id, edge_index);
+                return intrinsic_zero();
+            }
+            child_count = child_count + 1;
+        }
+        edge_index = edge_index + 1;
+    }
+
+    if (node.kind == IntrinsicKind.row) {
+        let baseline_extent: i64 = intrinsic_add(max_baseline, max_descent);
+        if (baseline_extent < 0) {
+            intrinsic_set_error(solve, IntrinsicError.arithmetic_overflow, node.id, 0 - 1);
+            return intrinsic_zero();
+        }
+        preferred_height = intrinsic_max(preferred_height, baseline_extent);
+    }
+
+    let horizontal: i64 = intrinsic_add(node.padding.left, node.padding.right);
+    let vertical: i64 = intrinsic_add(node.padding.top, node.padding.bottom);
+    if (horizontal < 0 || vertical < 0) {
+        intrinsic_set_error(solve, IntrinsicError.arithmetic_overflow, node.id, 0 - 1);
+        return intrinsic_zero();
+    }
+    minimum_width = intrinsic_add(minimum_width, horizontal);
+    preferred_width = intrinsic_add(preferred_width, horizontal);
+    maximum_width = intrinsic_add_maximum(maximum_width, horizontal);
+    minimum_height = intrinsic_add(minimum_height, vertical);
+    preferred_height = intrinsic_add(preferred_height, vertical);
+    maximum_height = intrinsic_add_maximum(maximum_height, vertical);
+    if (minimum_width < 0 || minimum_height < 0 || preferred_width < 0 ||
+        preferred_height < 0 || maximum_width < 0 || maximum_height < 0) {
+        intrinsic_set_error(solve, IntrinsicError.arithmetic_overflow, node.id, 0 - 1);
+        return intrinsic_zero();
+    }
+
+    let baseline: i64 = node.padding.top;
+    if (child_count > 0) {
+        if (node.kind == IntrinsicKind.row || node.kind == IntrinsicKind.overlay) {
+            baseline = intrinsic_add(node.padding.top, max_baseline);
+        } else {
+            baseline = intrinsic_add(node.padding.top, first_baseline);
+        }
+    }
+    if (baseline < 0) {
+        intrinsic_set_error(solve, IntrinsicError.arithmetic_overflow, node.id, 0 - 1);
+        return intrinsic_zero();
+    }
+    let result: IntrinsicMetrics = intrinsic_metrics(
+        minimum_width, minimum_height,
+        preferred_width, preferred_height,
+        maximum_width, maximum_height,
+        baseline
+    );
+    if (intrinsic_metric_valid(result) == 0) {
+        intrinsic_set_error(solve, IntrinsicError.invalid_node, node.id, 0 - 1);
+        return intrinsic_zero();
+    }
+    solve.*.values.data[node_index] = result;
+    solve.*.states.data[node_index] = 2;
+    solve.*.depth = solve.*.depth - 1;
+    return result;
+}
+
+fn measure_error_result(error: IntrinsicError, node: i64, edge: i32) MeasureResult {
+    let result: MeasureResult = MeasureResult{
+        .intrinsic = intrinsic_zero(),
+        .resolved = size(0, 0),
+        .baseline = 0,
+        .overflow_width = 0,
+        .overflow_height = 0,
+        .width_rule = MeasureRule.intrinsic_preferred,
+        .height_rule = MeasureRule.intrinsic_preferred,
+        .visited_nodes = 0,
+        .measure_hash = 17,
+        .error = error,
+        .error_node = node,
+        .error_edge = edge,
+    };
+    result.measure_hash = intrinsic_mix(result.measure_hash, error as i64);
+    result.measure_hash = intrinsic_mix(result.measure_hash, node);
+    result.measure_hash = intrinsic_mix(result.measure_hash, edge as i64);
+    return result;
+}
+
+fn measure_rule(preferred: i64, minimum: i64, maximum: i64) MeasureRule {
+    if (preferred < minimum) { return MeasureRule.minimum_constraint; }
+    if (preferred > maximum) { return MeasureRule.maximum_constraint; }
+    return MeasureRule.intrinsic_preferred;
+}
+
+fn intrinsic_tree_measure(tree: IntrinsicTree, root_id: i64, raw_constraints: Constraints) MeasureResult {
+    if (tree.nodes.len > intrinsic_node_limit() || tree.edges.len > intrinsic_edge_limit()) {
+        return measure_error_result(IntrinsicError.too_many_nodes, root_id, 0 - 1);
+    }
+    let constraints: Constraints = normalize_constraints(raw_constraints);
+    if (constraints.min_width > unbounded_extent() || constraints.max_width > unbounded_extent() ||
+        constraints.min_height > unbounded_extent() || constraints.max_height > unbounded_extent()) {
+        return measure_error_result(IntrinsicError.invalid_constraints, root_id, 0 - 1);
+    }
+    let root_index: i32 = intrinsic_find_node(tree, root_id);
+    if (root_index < 0) { return measure_error_result(IntrinsicError.missing_node, root_id, 0 - 1); }
+
+    let i: i32 = 0;
+    while (i < tree.nodes.len) {
+        if (intrinsic_node_valid(tree.nodes.data[i]) == 0) {
+            return measure_error_result(IntrinsicError.invalid_node, tree.nodes.data[i].id, 0 - 1);
+        }
+        let j: i32 = i + 1;
+        while (j < tree.nodes.len) {
+            if (tree.nodes.data[i].id == tree.nodes.data[j].id) {
+                return measure_error_result(IntrinsicError.duplicate_node, tree.nodes.data[j].id, j);
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    let edge_index: i32 = 0;
+    while (edge_index < tree.edges.len) {
+        let edge: IntrinsicEdge = tree.edges.data[edge_index];
+        let parent_index: i32 = intrinsic_find_node(tree, edge.parent_id);
+        let child_index: i32 = intrinsic_find_node(tree, edge.child_id);
+        if (parent_index < 0) {
+            return measure_error_result(IntrinsicError.missing_node, edge.parent_id, edge_index);
+        }
+        if (child_index < 0) {
+            return measure_error_result(IntrinsicError.missing_child, edge.child_id, edge_index);
+        }
+        if (tree.nodes.data[parent_index].kind == IntrinsicKind.leaf) {
+            return measure_error_result(IntrinsicError.invalid_edge, edge.parent_id, edge_index);
+        }
+        if (edge.child_id == root_id) {
+            return measure_error_result(IntrinsicError.cycle, root_id, edge_index);
+        }
+        let prior: i32 = 0;
+        while (prior < edge_index) {
+            if (tree.edges.data[prior].parent_id == edge.parent_id &&
+                tree.edges.data[prior].child_id == edge.child_id) {
+                return measure_error_result(IntrinsicError.invalid_edge, edge.child_id, edge_index);
+            }
+            if (tree.edges.data[prior].child_id == edge.child_id) {
+                return measure_error_result(IntrinsicError.multiple_parents, edge.child_id, edge_index);
+            }
+            prior = prior + 1;
+        }
+        edge_index = edge_index + 1;
+    }
+
+    let solve: IntrinsicSolveState = IntrinsicSolveState{
+        .states = make[i32](tree.nodes.len),
+        .values = make[IntrinsicMetrics](tree.nodes.len),
+        .visited_nodes = 0,
+        .error = IntrinsicError.none,
+        .error_node = 0,
+        .error_edge = 0 - 1,
+        .depth = 0,
+    };
+    i = 0;
+    while (i < tree.nodes.len) {
+        push[i32](&solve.states, 0);
+        push[IntrinsicMetrics](&solve.values, intrinsic_zero());
+        i = i + 1;
+    }
+    let metrics: IntrinsicMetrics = intrinsic_compute(tree, root_index, &solve);
+    if (solve.error != IntrinsicError.none) {
+        let failed: MeasureResult = measure_error_result(solve.error, solve.error_node, solve.error_edge);
+        failed.visited_nodes = solve.visited_nodes;
+        failed.measure_hash = intrinsic_mix(failed.measure_hash, failed.visited_nodes as i64);
+        free[i32](&solve.states);
+        free[IntrinsicMetrics](&solve.values);
+        return failed;
+    }
+    if (solve.visited_nodes != tree.nodes.len) {
+        i = 0;
+        while (i < solve.states.len && solve.states.data[i] != 0) { i = i + 1; }
+        let orphan_id: i64 = 0;
+        if (i < tree.nodes.len) { orphan_id = tree.nodes.data[i].id; }
+        let failed: MeasureResult = measure_error_result(IntrinsicError.orphan_node, orphan_id, 0 - 1);
+        failed.visited_nodes = solve.visited_nodes;
+        failed.measure_hash = intrinsic_mix(failed.measure_hash, failed.visited_nodes as i64);
+        free[i32](&solve.states);
+        free[IntrinsicMetrics](&solve.values);
+        return failed;
+    }
+
+    let resolved: Size = size(
+        clamp_i64(metrics.preferred.width, constraints.min_width, constraints.max_width),
+        clamp_i64(metrics.preferred.height, constraints.min_height, constraints.max_height)
+    );
+    let overflow_width: i64 = metrics.minimum.width - resolved.width;
+    if (overflow_width < 0) { overflow_width = 0; }
+    let overflow_height: i64 = metrics.minimum.height - resolved.height;
+    if (overflow_height < 0) { overflow_height = 0; }
+    let result: MeasureResult = MeasureResult{
+        .intrinsic = metrics,
+        .resolved = resolved,
+        .baseline = clamp_i64(metrics.baseline, 0, resolved.height),
+        .overflow_width = overflow_width,
+        .overflow_height = overflow_height,
+        .width_rule = measure_rule(metrics.preferred.width, constraints.min_width, constraints.max_width),
+        .height_rule = measure_rule(metrics.preferred.height, constraints.min_height, constraints.max_height),
+        .visited_nodes = solve.visited_nodes,
+        .measure_hash = intrinsic_mix(intrinsic_tree_hash(tree), intrinsic_metrics_hash(metrics)),
+        .error = IntrinsicError.none,
+        .error_node = 0,
+        .error_edge = 0 - 1,
+    };
+    result.measure_hash = intrinsic_mix(result.measure_hash, resolved.width);
+    result.measure_hash = intrinsic_mix(result.measure_hash, resolved.height);
+    result.measure_hash = intrinsic_mix(result.measure_hash, result.baseline);
+    result.measure_hash = intrinsic_mix(result.measure_hash, result.overflow_width);
+    result.measure_hash = intrinsic_mix(result.measure_hash, result.overflow_height);
+    result.measure_hash = intrinsic_mix(result.measure_hash, result.width_rule as i64);
+    result.measure_hash = intrinsic_mix(result.measure_hash, result.height_rule as i64);
+    result.measure_hash = intrinsic_mix(result.measure_hash, result.visited_nodes as i64);
+    result.measure_hash = intrinsic_mix(result.measure_hash, constraints.min_width);
+    result.measure_hash = intrinsic_mix(result.measure_hash, constraints.max_width);
+    result.measure_hash = intrinsic_mix(result.measure_hash, constraints.min_height);
+    result.measure_hash = intrinsic_mix(result.measure_hash, constraints.max_height);
+    free[i32](&solve.states);
+    free[IntrinsicMetrics](&solve.values);
+    return result;
+}

@@ -68,6 +68,7 @@ struct ReplayResult {
     motion_velocity: i64,
     motion_status: MotionStatus,
     semantics_hash: i64,
+    measure_hash: i64,
     layout_hash: i64,
     layout_lines: i32,
     display_hash: i64,
@@ -241,6 +242,7 @@ fn replay_result_error(error: ReplayError, event_index: i32, applied: i64) Repla
         .motion_velocity = 0,
         .motion_status = MotionStatus.settled,
         .semantics_hash = 0,
+        .measure_hash = 0,
         .layout_hash = 0,
         .layout_lines = 0,
         .display_hash = 0,
@@ -352,15 +354,54 @@ fn replay_build_scene(state_value: i64, backend_generation: i64) ReplayResult {
 
     let magnitude: i64 = state_value % 3;
     if (magnitude < 0) { magnitude = 0 - magnitude; }
+    let first_metrics: IntrinsicMetrics = intrinsic_metrics(
+        (2 + magnitude) * unit_scale(), 4 * unit_scale(),
+        (2 + magnitude) * unit_scale(), 4 * unit_scale(),
+        (2 + magnitude) * unit_scale(), 4 * unit_scale(),
+        4 * unit_scale()
+    );
+    let second_metrics: IntrinsicMetrics = intrinsic_metrics(
+        2 * unit_scale(), 4 * unit_scale(),
+        2 * unit_scale(), 4 * unit_scale(),
+        2 * unit_scale(), 4 * unit_scale(),
+        4 * unit_scale()
+    );
+    let third_metrics: IntrinsicMetrics = intrinsic_metrics(
+        2 * unit_scale(), 2 * unit_scale(),
+        2 * unit_scale(), 2 * unit_scale(),
+        2 * unit_scale(), 2 * unit_scale(),
+        2 * unit_scale()
+    );
+    let measurement: IntrinsicTree = intrinsic_tree_make();
+    intrinsic_tree_add_node(
+        &measurement, intrinsic_group(1000, IntrinsicKind.row, unit_scale(), insets_all(0))
+    );
+    intrinsic_tree_add_node(&measurement, intrinsic_leaf(101, first_metrics, magnitude));
+    intrinsic_tree_add_node(&measurement, intrinsic_leaf(102, second_metrics, 0));
+    intrinsic_tree_add_node(&measurement, intrinsic_leaf(103, third_metrics, 0));
+    intrinsic_tree_add_child(&measurement, 1000, 101);
+    intrinsic_tree_add_child(&measurement, 1000, 102);
+    intrinsic_tree_add_child(&measurement, 1000, 103);
+    let measured: MeasureResult = intrinsic_tree_measure(
+        measurement, 1000,
+        Constraints{
+            .min_width = 0, .max_width = unbounded_extent(),
+            .min_height = 0, .max_height = unbounded_extent(),
+        }
+    );
+    intrinsic_tree_free(&measurement);
+    if (measured.error != IntrinsicError.none || measured.visited_nodes != 4) {
+        semantics_tree_free(&semantics);
+        return replay_result_error(ReplayError.scene_error, 0 - 1, 0);
+    }
+    result.measure_hash = measured.measure_hash;
+
     let items: ArrayList[FlexItem] = make[FlexItem](3);
-    let first: FlexItem = flex_item(101, (2 + magnitude) * unit_scale(), 4 * unit_scale());
-    first.shrink = 0;
+    let first: FlexItem = flex_item_intrinsic(101, first_metrics, FlexAxis.row, FlexPriority.required);
     push[FlexItem](&items, first);
-    let second: FlexItem = flex_item(102, 2 * unit_scale(), 4 * unit_scale());
-    second.shrink = 0;
+    let second: FlexItem = flex_item_intrinsic(102, second_metrics, FlexAxis.row, FlexPriority.required);
     push[FlexItem](&items, second);
-    let third: FlexItem = flex_item(103, 2 * unit_scale(), 2 * unit_scale());
-    third.shrink = 0;
+    let third: FlexItem = flex_item_intrinsic(103, third_metrics, FlexAxis.row, FlexPriority.required);
     push[FlexItem](&items, third);
     let style: FlexStyle = flex_style(FlexAxis.row, unit_scale(), insets_all(0));
     let wrap_style: FlexWrapStyle = flex_wrap_style(style, unit_scale());
@@ -530,6 +571,7 @@ fn replay_execute(tape: ReplayTape) ReplayResult {
     hash = display_mix(hash, result.input_hash);
     hash = display_mix(hash, result.motion_hash);
     hash = display_mix(hash, result.semantics_hash);
+    hash = display_mix(hash, result.measure_hash);
     hash = display_mix(hash, result.layout_hash);
     hash = display_mix(hash, result.display_hash);
     result.output_hash = display_mix(hash, result.cpu_hash);

@@ -11,8 +11,9 @@ modern materials and asset fidelity, and a complete PrismStudio UI replacement.
 
 This repository is at **0.1.0-experimental.0**. It currently contains the
 accepted product contract, executable Milestone 0 checks, and the first
-deterministic state, keyed reconciliation, geometry, Flex, semantics, Talkback,
-display-list, CPU-oracle, input, replay, and motion slices. It does not yet
+deterministic state, keyed reconciliation, geometry, intrinsic measurement,
+Flex, semantics, Talkback, display-list, CPU-oracle, input, replay, and motion
+slices. It does not yet
 contain a usable renderer, window shell, component library, or supported platform
 backend. Nothing in this repository is a Zagkit 1.0 release.
 
@@ -41,7 +42,7 @@ is normative in [DEPENDENCIES.md](DEPENDENCIES.md).
 | Product and architecture contract | accepted | [RFC index](docs/rfcs/README.md) |
 | Compiler dependency | pinned, prerequisites incomplete | [toolchain lock](contracts/toolchain.json) |
 | Platform shells | unavailable | [support matrix](SUPPORT.md) |
-| Headless core | experimental state, reconciliation, geometry, Flex, semantics, Talkback, display lists, CPU raster, input, replay, and motion | [headless test](tools/test-headless.sh) |
+| Headless core | experimental state, reconciliation, intrinsic measurement, geometry, Flex, semantics, Talkback, display lists, CPU raster, input, replay, and motion | [headless test](tools/test-headless.sh) |
 | Components and visual language | inventory only, visual review pending | [component inventory](contracts/components.json) |
 | Flex and Zagkit Talkback | Flex foundation and in-process ID-first Talkback dispatch executing; native transport remains unavailable | [Talkback contract](docs/automation/talkback.md) |
 | Benchmarks | scene specifications only, no results | [benchmark contract](benchmarks/README.md) |
@@ -60,10 +61,14 @@ The compiled headless contract currently provides revisioned `State<T>`,
 action-producing `Binding<T>`, inherited integer environment values, exact
 per-node state-read records, fail-visible keyed reconciliation, deterministic
 fixed-point geometry, and single-line or wrapped Flex. These APIs are
-experimental. Typed
-environment values, reconciliation cancellation, child ownership, replay
-serialization, intrinsic measurement, grid, overlay, and breakpoint policies
-remain open; the corresponding Milestone 2 checklist items are not complete.
+experimental. A retained intrinsic tree now aggregates leaf, row, column, and
+overlay size ranges, rejects invalid ownership and unstable same-revision
+measurement, resolves constraints with explicit rules and overflow, and records
+exact state-read layout causes. Typed environment values, reconciliation
+cancellation, retained child lifecycle, replay serialization, grid and overlay
+placement, and full breakpoint policy remain open; the corresponding Milestone
+2 checklist items are not complete. See the
+[measurement contract](docs/architecture/measurement.md).
 
 Flex now also provides an experimental primitive spacing scale, compact,
 standard, and touch density resolution, physical safe-area composition,
@@ -72,8 +77,8 @@ column wrapping. Wrapped lines preserve logical stable-ID order while resolving
 physical RTL placement, per-line growth and shrinkage, baseline-safe extents,
 line alignment, overflow truth, and layout identity. These are headless
 placement primitives rather than the still-unselected visual design language.
-Grid, overlay, intrinsic measurement, exact invalidation rules, and the full
-adaptive matrix remain open, so `G2-FLEX` and `G2-FLEX-RTL` are not complete.
+Grid and overlay placement, end-to-end retained invalidation coverage, and the
+full adaptive matrix remain open, so `G2-FLEX` and `G2-FLEX-RTL` are not complete.
 See the [Flex contract](docs/architecture/flex.md).
 
 The semantics slice owns copied names and values, stable keys, explicit action
@@ -116,11 +121,12 @@ gestures, and platform input adaptation remain open.
 
 The first replay slice owns a sealed ordered tape for exact state revisions,
 pointer phases, monotonic time, backend activation, device loss, and recovery.
-Executing the same tape regenerates identical motion, semantic, Flex,
-display-list, and CPU identities; raw mutation, stale revisions, clock
-regression, and invalid backend transitions fail before they can become evidence. The current scene is
-an executable conformance reference, not yet a general application callback
-boundary or a versioned replay-file format, so `G2-REPLAY` remains open.
+Executing the same tape regenerates identical motion, semantic, measurement,
+Flex, display-list, and CPU identities; raw mutation, stale revisions, clock
+regression, and invalid backend transitions fail before they can become
+evidence. The current scene is an executable conformance reference, not yet a
+general application callback boundary or a versioned replay-file format, so
+`G2-REPLAY` remains open.
 
 The experimental motion kernel uses supplied monotonic microseconds and the
 same 26.6 logical units as layout. Its refresh-aware scheduler records why

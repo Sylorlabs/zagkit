@@ -1,0 +1,420 @@
+@import("std:list")
+@import("../src/core/state.zag")
+@import("../src/layout/invalidation.zag")
+@import("../src/layout/flex.zag")
+
+struct TestState { passed: i32, failed: i32 }
+
+fn expect(state: *TestState, condition: i32, name: []u8) void {
+    if (condition != 0) {
+        state.*.passed = state.*.passed + 1;
+        _zag_print("ok  "); _zag_println(name);
+    } else {
+        state.*.failed = state.*.failed + 1;
+        _zag_print("FAIL "); _zag_println(name);
+    }
+}
+
+fn leaf_metrics(width: i64, height: i64, baseline: i64) IntrinsicMetrics {
+    return intrinsic_metrics(
+        width / 2, height / 2,
+        width, height,
+        width * 2, height * 2,
+        baseline
+    );
+}
+
+fn aggregation_contract(state: *TestState) void {
+    let tree: IntrinsicTree = intrinsic_tree_make();
+    intrinsic_tree_add_node(&tree, intrinsic_group(100, IntrinsicKind.row, 2, insets_all(3)));
+    intrinsic_tree_add_node(&tree, intrinsic_leaf(1, leaf_metrics(20, 10, 7), 0));
+    intrinsic_tree_add_node(&tree, intrinsic_leaf(2, leaf_metrics(30, 16, 11), 0));
+    intrinsic_tree_add_child(&tree, 100, 1);
+    intrinsic_tree_add_child(&tree, 100, 2);
+    let row: MeasureResult = intrinsic_tree_measure(
+        tree, 100,
+        Constraints{ .min_width = 0, .max_width = unbounded_extent(), .min_height = 0, .max_height = unbounded_extent() }
+    );
+    expect(state, row.error == IntrinsicError.none && row.visited_nodes == 3,
+        "intrinsic row visits its exact retained subtree");
+    expect(state, row.intrinsic.minimum.width == 33 && row.intrinsic.preferred.width == 58 &&
+        row.intrinsic.maximum.width == 108,
+        "row intrinsic widths aggregate children gaps and padding exactly");
+    expect(state, row.intrinsic.preferred.height == 22 && row.baseline == 14,
+        "row baseline aggregation reserves ascent descent and physical padding");
+    expect(state, row.resolved.width == 58 && row.resolved.height == 22 &&
+        row.width_rule == MeasureRule.intrinsic_preferred && row.height_rule == MeasureRule.intrinsic_preferred,
+        "unbounded constraints preserve preferred intrinsic size");
+
+    let constrained: MeasureResult = intrinsic_tree_measure(tree, 100, tight_constraints(40, 12));
+    expect(state, constrained.resolved.width == 40 && constrained.resolved.height == 12 &&
+        constrained.width_rule == MeasureRule.maximum_constraint &&
+        constrained.height_rule == MeasureRule.maximum_constraint,
+        "tight constraints retain the exact rule that overrode preferred size");
+    expect(state, constrained.overflow_width == 0 && constrained.overflow_height == 2 &&
+        constrained.baseline == 12,
+        "resolved baselines clamp safely while minimum overflow remains explicit");
+    let expanded: MeasureResult = intrinsic_tree_measure(
+        tree, 100,
+        Constraints{ .min_width = 100, .max_width = 120, .min_height = 30, .max_height = 40 }
+    );
+    expect(state, expanded.resolved.width == 100 && expanded.resolved.height == 30 &&
+        expanded.width_rule == MeasureRule.minimum_constraint &&
+        expanded.height_rule == MeasureRule.minimum_constraint,
+        "minimum constraints expand intrinsic preference with explicit per-axis rules");
+    intrinsic_tree_free(&tree);
+}
+
+fn column_overlay_contract(state: *TestState) void {
+    let tree: IntrinsicTree = intrinsic_tree_make();
+    intrinsic_tree_add_node(&tree, intrinsic_group(200, IntrinsicKind.column, 4, insets_all(2)));
+    intrinsic_tree_add_node(&tree, intrinsic_group(201, IntrinsicKind.overlay, 0, insets_all(1)));
+    intrinsic_tree_add_node(&tree, intrinsic_leaf(1, leaf_metrics(20, 10, 6), 1));
+    intrinsic_tree_add_node(&tree, intrinsic_leaf(2, leaf_metrics(30, 12, 8), 2));
+    intrinsic_tree_add_node(&tree, intrinsic_leaf(3, leaf_metrics(8, 6, 4), 3));
+    intrinsic_tree_add_child(&tree, 201, 1);
+    intrinsic_tree_add_child(&tree, 201, 2);
+    intrinsic_tree_add_child(&tree, 200, 201);
+    intrinsic_tree_add_child(&tree, 200, 3);
+    let result: MeasureResult = intrinsic_tree_measure(
+        tree, 200,
+        Constraints{ .min_width = 0, .max_width = unbounded_extent(), .min_height = 0, .max_height = unbounded_extent() }
+    );
+    expect(state, result.error == IntrinsicError.none && result.visited_nodes == 5,
+        "nested column and overlay measurement traverses each retained node once");
+    expect(state, result.intrinsic.preferred.width == 36 && result.intrinsic.preferred.height == 28,
+        "overlay max and column sum aggregation compose deterministically");
+    expect(state, result.baseline == 11 && result.measure_hash != 0,
+        "column baseline follows its first child and measurement retains identity");
+
+    let repeated: MeasureResult = intrinsic_tree_measure(
+        tree, 200,
+        Constraints{ .min_width = 0, .max_width = unbounded_extent(), .min_height = 0, .max_height = unbounded_extent() }
+    );
+    expect(state, repeated.measure_hash == result.measure_hash,
+        "identical intrinsic trees produce bit-identical measurement identity");
+    let changed_constraints: MeasureResult = intrinsic_tree_measure(
+        tree, 200,
+        Constraints{
+            .min_width = 0, .max_width = unbounded_extent() - 1,
+            .min_height = 0, .max_height = unbounded_extent(),
+        }
+    );
+    expect(state, changed_constraints.resolved.width == result.resolved.width &&
+        changed_constraints.measure_hash != result.measure_hash,
+        "constraint input remains visible in identity even when resolved size is unchanged");
+    tree.nodes.data[4].metrics.preferred.width = 9;
+    tree.nodes.data[4].metrics.maximum.width = 16;
+    let changed: MeasureResult = intrinsic_tree_measure(
+        tree, 200,
+        Constraints{ .min_width = 0, .max_width = unbounded_extent(), .min_height = 0, .max_height = unbounded_extent() }
+    );
+    expect(state, changed.measure_hash != result.measure_hash,
+        "intrinsic content changes alter deterministic measurement identity");
+    intrinsic_tree_free(&tree);
+}
+
+fn flex_priority_contract(state: *TestState) void {
+    let low_metrics: IntrinsicMetrics = intrinsic_metrics(10, 10, 30, 10, 60, 10, 8);
+    let high_metrics: IntrinsicMetrics = intrinsic_metrics(10, 10, 30, 10, 60, 10, 8);
+    let required_metrics: IntrinsicMetrics = intrinsic_metrics(20, 10, 20, 10, 20, 10, 8);
+    let items: ArrayList[FlexItem] = make[FlexItem](3);
+    push[FlexItem](&items, flex_item_intrinsic(1, low_metrics, FlexAxis.row, FlexPriority.low));
+    push[FlexItem](&items, flex_item_intrinsic(2, high_metrics, FlexAxis.row, FlexPriority.high));
+    push[FlexItem](&items, flex_item_intrinsic(3, required_metrics, FlexAxis.row, FlexPriority.required));
+    expect(state, items.data[0].shrink == 4 && items.data[1].shrink == 1 &&
+        items.data[2].shrink == 0 && items.data[2].min_main == 20,
+        "Flex priorities map to explicit shrink resistance and intrinsic bounds");
+    let result: FlexResult = flex_layout(
+        items, tight_constraints(60, 10), flex_style(FlexAxis.row, 0, insets_all(0))
+    );
+    expect(state, result.error == FlexError.none && result.placements.data[2].frame.width == 20,
+        "required intrinsic items preserve their exact extent under pressure");
+    expect(state, result.placements.data[0].frame.width < result.placements.data[1].frame.width,
+        "lower priority content yields more space than higher priority content");
+    flex_free(&result);
+    free[FlexItem](&items);
+
+    let column: FlexItem = flex_item_intrinsic(4, low_metrics, FlexAxis.column, FlexPriority.normal);
+    expect(state, column.basis == low_metrics.preferred.height &&
+        column.min_main == low_metrics.minimum.height && column.max_main == low_metrics.maximum.height &&
+        column.cross == low_metrics.preferred.width,
+        "column intrinsic conversion maps vertical main and horizontal cross axes explicitly");
+}
+
+fn invalidation_contract(state: *TestState) void {
+    let width: State[i64] = state_make[i64](700, 20);
+    let measure_context: ViewContext = view_context_make(node_key_scoped(10, 2));
+    let layout_context: ViewContext = view_context_make(node_key_scoped(11, 4));
+    _ = state_read[i64](&width, &measure_context);
+    _ = state_read[i64](&width, &layout_context);
+    let trace: LayoutTrace = layout_trace_make();
+    layout_trace_record(
+        &trace, measure_context, node_key(100), LayoutPhase.measure, LayoutReason.intrinsic_content
+    );
+    layout_trace_record(
+        &trace, layout_context, node_key(101), LayoutPhase.layout, LayoutReason.breakpoint
+    );
+    expect(state, trace.dependencies.len == 2,
+        "layout trace retains independent measure and placement dependencies");
+    layout_trace_record(
+        &trace, measure_context, node_key(100), LayoutPhase.measure, LayoutReason.intrinsic_content
+    );
+    expect(state, trace.dependencies.len == 2,
+        "duplicate dependency reads collapse without losing their phase or rule");
+
+    let change: StateChange = state_set[i64](&width, 30);
+    let invalidated: LayoutInvalidationResult = layout_trace_invalidate(trace, change);
+    expect(state, invalidated.causes.len == 2,
+        "one state change reports every affected layout operation");
+    expect(state, invalidated.causes.data[0].node.value == 10 &&
+        invalidated.causes.data[0].node.generation == 2 &&
+        invalidated.causes.data[0].ancestor.value == 100 &&
+        invalidated.causes.data[0].phase == LayoutPhase.measure &&
+        invalidated.causes.data[0].reason == LayoutReason.intrinsic_content,
+        "measurement invalidation names the exact reader generation ancestor phase and rule");
+    expect(state, invalidated.causes.data[1].node.value == 11 &&
+        invalidated.causes.data[1].ancestor.value == 101 &&
+        invalidated.causes.data[1].phase == LayoutPhase.layout &&
+        invalidated.causes.data[1].reason == LayoutReason.breakpoint &&
+        invalidated.causes.data[1].read_revision == 0 && invalidated.causes.data[1].to_revision == 1,
+        "placement invalidation retains the exact state revision edge and breakpoint reason");
+    layout_invalidation_free(&invalidated);
+
+    let unrelated: LayoutInvalidationResult = layout_trace_invalidate(
+        trace, StateChange{ .state_id = 999, .from_revision = 0, .to_revision = 1 }
+    );
+    expect(state, unrelated.causes.len == 0,
+        "unread state produces no phantom layout work");
+    layout_invalidation_free(&unrelated);
+    layout_trace_free(&trace);
+    view_context_free(&measure_context);
+    view_context_free(&layout_context);
+}
+
+fn failure_contract(state: *TestState) void {
+    let duplicate: IntrinsicTree = intrinsic_tree_make();
+    intrinsic_tree_add_node(&duplicate, intrinsic_leaf(1, leaf_metrics(10, 10, 5), 0));
+    intrinsic_tree_add_node(&duplicate, intrinsic_leaf(1, leaf_metrics(10, 10, 5), 0));
+    let duplicate_result: MeasureResult = intrinsic_tree_measure(duplicate, 1, tight_constraints(10, 10));
+    expect(state, duplicate_result.error == IntrinsicError.duplicate_node &&
+        duplicate_result.error_node == 1 && duplicate_result.error_edge == 1,
+        "duplicate retained IDs fail at the exact node before measurement");
+    intrinsic_tree_free(&duplicate);
+
+    let missing: IntrinsicTree = intrinsic_tree_make();
+    intrinsic_tree_add_node(&missing, intrinsic_group(10, IntrinsicKind.row, 0, insets_all(0)));
+    intrinsic_tree_add_child(&missing, 10, 99);
+    let missing_result: MeasureResult = intrinsic_tree_measure(missing, 10, tight_constraints(10, 10));
+    expect(state, missing_result.error == IntrinsicError.missing_child &&
+        missing_result.error_node == 99 && missing_result.error_edge == 0,
+        "missing intrinsic children fail at the exact edge");
+    intrinsic_tree_free(&missing);
+
+    let missing_parent: IntrinsicTree = intrinsic_tree_make();
+    intrinsic_tree_add_node(&missing_parent, intrinsic_leaf(11, leaf_metrics(10, 10, 5), 0));
+    intrinsic_tree_add_child(&missing_parent, 99, 11);
+    let missing_parent_result: MeasureResult = intrinsic_tree_measure(
+        missing_parent, 11, tight_constraints(10, 10)
+    );
+    expect(state, missing_parent_result.error == IntrinsicError.missing_node &&
+        missing_parent_result.error_node == 99 && missing_parent_result.error_edge == 0,
+        "missing intrinsic parents fail as missing retained nodes rather than child errors");
+    intrinsic_tree_free(&missing_parent);
+
+    let orphan: IntrinsicTree = intrinsic_tree_make();
+    intrinsic_tree_add_node(&orphan, intrinsic_group(10, IntrinsicKind.row, 0, insets_all(0)));
+    intrinsic_tree_add_node(&orphan, intrinsic_leaf(11, leaf_metrics(10, 10, 5), 0));
+    let orphan_result: MeasureResult = intrinsic_tree_measure(orphan, 10, tight_constraints(10, 10));
+    expect(state, orphan_result.error == IntrinsicError.orphan_node &&
+        orphan_result.error_node == 11 && orphan_result.visited_nodes == 1,
+        "retained intrinsic nodes cannot silently remain outside the measured root tree");
+    intrinsic_tree_free(&orphan);
+
+    let shared: IntrinsicTree = intrinsic_tree_make();
+    intrinsic_tree_add_node(&shared, intrinsic_group(10, IntrinsicKind.row, 0, insets_all(0)));
+    intrinsic_tree_add_node(&shared, intrinsic_group(11, IntrinsicKind.column, 0, insets_all(0)));
+    intrinsic_tree_add_node(&shared, intrinsic_leaf(12, leaf_metrics(10, 10, 5), 0));
+    intrinsic_tree_add_child(&shared, 10, 12);
+    intrinsic_tree_add_child(&shared, 11, 12);
+    intrinsic_tree_add_child(&shared, 10, 11);
+    let shared_result: MeasureResult = intrinsic_tree_measure(shared, 10, tight_constraints(10, 10));
+    expect(state, shared_result.error == IntrinsicError.multiple_parents &&
+        shared_result.error_node == 12 && shared_result.error_edge == 1,
+        "one retained intrinsic node cannot have multiple layout owners");
+    intrinsic_tree_free(&shared);
+
+    let leaf_parent: IntrinsicTree = intrinsic_tree_make();
+    intrinsic_tree_add_node(&leaf_parent, intrinsic_leaf(10, leaf_metrics(10, 10, 5), 0));
+    intrinsic_tree_add_node(&leaf_parent, intrinsic_leaf(11, leaf_metrics(10, 10, 5), 0));
+    intrinsic_tree_add_child(&leaf_parent, 10, 11);
+    let leaf_parent_result: MeasureResult = intrinsic_tree_measure(
+        leaf_parent, 10, tight_constraints(10, 10)
+    );
+    expect(state, leaf_parent_result.error == IntrinsicError.invalid_edge &&
+        leaf_parent_result.error_node == 10 && leaf_parent_result.error_edge == 0,
+        "leaf nodes cannot masquerade as intrinsic layout containers");
+    intrinsic_tree_free(&leaf_parent);
+
+    let cycle: IntrinsicTree = intrinsic_tree_make();
+    intrinsic_tree_add_node(&cycle, intrinsic_group(10, IntrinsicKind.row, 0, insets_all(0)));
+    intrinsic_tree_add_node(&cycle, intrinsic_group(11, IntrinsicKind.column, 0, insets_all(0)));
+    intrinsic_tree_add_child(&cycle, 10, 11);
+    intrinsic_tree_add_child(&cycle, 11, 10);
+    let cycle_result: MeasureResult = intrinsic_tree_measure(cycle, 10, tight_constraints(10, 10));
+    expect(state, cycle_result.error == IntrinsicError.cycle && cycle_result.error_node == 10 &&
+        cycle_result.error_edge == 1,
+        "intrinsic cycles fail visibly without recursive runaway");
+    intrinsic_tree_free(&cycle);
+
+    let malformed: IntrinsicTree = intrinsic_tree_make();
+    intrinsic_tree_add_node(&malformed, intrinsic_leaf(
+        1, intrinsic_metrics(20, 10, 10, 10, 30, 20, 5), 0
+    ));
+    let malformed_result: MeasureResult = intrinsic_tree_measure(malformed, 1, tight_constraints(10, 10));
+    expect(state, malformed_result.error == IntrinsicError.invalid_node && malformed_result.error_node == 1,
+        "nonmonotonic intrinsic ranges fail before constraint resolution");
+    intrinsic_tree_free(&malformed);
+
+    let overflow: IntrinsicTree = intrinsic_tree_make();
+    intrinsic_tree_add_node(&overflow, intrinsic_group(10, IntrinsicKind.row, 0, insets_all(0)));
+    intrinsic_tree_add_node(&overflow, intrinsic_leaf(
+        1, intrinsic_metrics(unbounded_extent(), 1, unbounded_extent(), 1, unbounded_extent(), 1, 1), 0
+    ));
+    intrinsic_tree_add_node(&overflow, intrinsic_leaf(
+        2, intrinsic_metrics(1, 1, 1, 1, 1, 1, 1), 0
+    ));
+    intrinsic_tree_add_child(&overflow, 10, 1);
+    intrinsic_tree_add_child(&overflow, 10, 2);
+    let overflow_result: MeasureResult = intrinsic_tree_measure(
+        overflow, 10,
+        Constraints{ .min_width = 0, .max_width = unbounded_extent(), .min_height = 0, .max_height = unbounded_extent() }
+    );
+    expect(state, overflow_result.error == IntrinsicError.arithmetic_overflow &&
+        overflow_result.error_node == 10 && overflow_result.error_edge == 1,
+        "finite intrinsic aggregation cannot wrap bounded geometry");
+    intrinsic_tree_free(&overflow);
+
+    let deep: IntrinsicTree = intrinsic_tree_make();
+    let node_id: i64 = 1;
+    while (node_id <= (intrinsic_depth_limit() as i64) + 1) {
+        if (node_id == (intrinsic_depth_limit() as i64) + 1) {
+            intrinsic_tree_add_node(&deep, intrinsic_leaf(node_id, leaf_metrics(1, 1, 1), 0));
+        } else {
+            intrinsic_tree_add_node(&deep, intrinsic_group(node_id, IntrinsicKind.column, 0, insets_all(0)));
+            intrinsic_tree_add_child(&deep, node_id, node_id + 1);
+        }
+        node_id = node_id + 1;
+    }
+    let deep_result: MeasureResult = intrinsic_tree_measure(
+        deep, 1,
+        Constraints{
+            .min_width = 0, .max_width = unbounded_extent(),
+            .min_height = 0, .max_height = unbounded_extent(),
+        }
+    );
+    expect(state, deep_result.error == IntrinsicError.depth_exceeded &&
+        deep_result.error_node == (intrinsic_depth_limit() as i64) + 1 &&
+        deep_result.visited_nodes == intrinsic_depth_limit(),
+        "adversarial retained depth fails before exhausting the native call stack");
+    intrinsic_tree_free(&deep);
+}
+
+fn stability_contract(state: *TestState) void {
+    let tree: IntrinsicTree = intrinsic_tree_make();
+    intrinsic_tree_add_node(&tree, intrinsic_leaf(1, leaf_metrics(20, 10, 7), 4));
+    let stability: IntrinsicStability = intrinsic_stability_make();
+    let first: IntrinsicStabilityResult = intrinsic_stability_observe(&stability, tree);
+    expect(state, first.error == IntrinsicError.none && stability.witnesses.len == 1,
+        "first intrinsic observation retains a revisioned stability witness");
+
+    tree.nodes.data[0].metrics.preferred.width = 21;
+    let unstable: IntrinsicStabilityResult = intrinsic_stability_observe(&stability, tree);
+    expect(state, unstable.error == IntrinsicError.unstable_measurement && unstable.node_id == 1 &&
+        unstable.previous_hash != unstable.current_hash,
+        "changed intrinsic input at one revision fails as unstable measurement");
+
+    tree.nodes.data[0].revision = 5;
+    let revised: IntrinsicStabilityResult = intrinsic_stability_observe(&stability, tree);
+    expect(state, revised.error == IntrinsicError.none && stability.witnesses.data[0].revision == 5,
+        "an explicit content revision permits and records changed intrinsic input");
+    tree.nodes.data[0].revision = 4;
+    let stale: IntrinsicStabilityResult = intrinsic_stability_observe(&stability, tree);
+    expect(state, stale.error == IntrinsicError.invalid_node && stale.node_id == 1,
+        "intrinsic content revisions cannot regress behind retained stability truth");
+    intrinsic_stability_free(&stability);
+    intrinsic_tree_free(&tree);
+}
+
+fn property_contract(state: *TestState) void {
+    let all_valid: i32 = 1;
+    let width: i64 = 1;
+    while (width <= 256) {
+        let tree: IntrinsicTree = intrinsic_tree_make();
+        intrinsic_tree_add_node(&tree, intrinsic_leaf(1, leaf_metrics(100, 40, 25), width));
+        let result: MeasureResult = intrinsic_tree_measure(tree, 1, tight_constraints(width, width / 2));
+        if (result.error != IntrinsicError.none || result.resolved.width != width ||
+            result.resolved.height != width / 2 || result.baseline > result.resolved.height) {
+            all_valid = 0;
+        }
+        intrinsic_tree_free(&tree);
+        width = width + 1;
+    }
+    expect(state, all_valid == 1,
+        "256-constraint sweep preserves exact bounded size and baseline invariants");
+
+    let all_rows_valid: i32 = 1;
+    let count: i64 = 1;
+    while (count <= 32) {
+        let gap: i64 = 0;
+        while (gap <= 8) {
+            let tree: IntrinsicTree = intrinsic_tree_make();
+            intrinsic_tree_add_node(&tree, intrinsic_group(1000, IntrinsicKind.row, gap, insets_all(1)));
+            let expected_width: i64 = 2;
+            let child: i64 = 1;
+            while (child <= count) {
+                let width: i64 = (child % 7) + 1;
+                expected_width = expected_width + width;
+                if (child > 1) { expected_width = expected_width + gap; }
+                intrinsic_tree_add_node(&tree, intrinsic_leaf(
+                    child, intrinsic_metrics(width, 1, width, 2, width, 3, 1), child
+                ));
+                intrinsic_tree_add_child(&tree, 1000, child);
+                child = child + 1;
+            }
+            let measured: MeasureResult = intrinsic_tree_measure(
+                tree, 1000,
+                Constraints{
+                    .min_width = 0, .max_width = unbounded_extent(),
+                    .min_height = 0, .max_height = unbounded_extent(),
+                }
+            );
+            if (measured.error != IntrinsicError.none ||
+                measured.intrinsic.preferred.width != expected_width ||
+                measured.visited_nodes != count + 1) { all_rows_valid = 0; }
+            intrinsic_tree_free(&tree);
+            gap = gap + 1;
+        }
+        count = count + 1;
+    }
+    expect(state, all_rows_valid == 1,
+        "288-tree aggregation sweep conserves child extents gaps padding and ownership");
+}
+
+fn main() i32 {
+    let state: TestState = TestState{ .passed = 0, .failed = 0 };
+    aggregation_contract(&state);
+    column_overlay_contract(&state);
+    flex_priority_contract(&state);
+    invalidation_contract(&state);
+    failure_contract(&state);
+    stability_contract(&state);
+    property_contract(&state);
+    let passed_text: []u8 = _zag_i64_to_str(state.passed as i64);
+    let failed_text: []u8 = _zag_i64_to_str(state.failed as i64);
+    _zag_print("Measurement contract: pass="); _zag_print(passed_text);
+    _zag_print(" fail="); _zag_println(failed_text);
+    _zag_str_free(passed_text); _zag_str_free(failed_text);
+    if (state.failed == 0) { return 0; }
+    return 1;
+}

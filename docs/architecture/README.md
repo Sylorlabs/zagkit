@@ -28,6 +28,7 @@ Normative decisions:
 
 Detailed experimental contracts:
 
+- [intrinsic measurement and invalidation reasons](measurement.md)
 - [Flex placement and adaptive spacing](flex.md)
 - [motion scheduler and tracks](motion.md)
 
@@ -39,6 +40,14 @@ preserves retained identity through reorder and fails visibly on duplicate
 keys. Ownership, threading, serialization, typed environment values,
 cancellation and replay serialization are still open contracts rather than
 stable API.
+
+The retained intrinsic measurement tree aggregates leaf, row, column, and
+overlay size ranges with exact gaps, padding, baselines, ownership, constraint
+rules, overflow, and deterministic input/output identity. Revision witnesses
+reject unstable intrinsic results, while `LayoutTrace` maps real state reads to
+the exact node, ancestor, phase, and rule that must recompute. The full contract
+and incomplete lifecycle boundaries are documented in
+[measurement.md](measurement.md).
 
 Flex extends fixed-point constraints with deterministic single-line and wrapped
 row or column placement. Its primitive spacing scale adapts to density, safe
@@ -81,10 +90,10 @@ The first deterministic replay executor consumes an immutable ordered tape of
 state revisions, pointer events, monotonic clock samples, backend activation,
 loss, and recovery. It rejects stale or impossible transitions at their exact
 event index, then rebuilds a conformance scene through the real semantics,
-motion, Flex, display-list, and CPU-oracle paths. A repeated tape must produce
-identical subsystem and aggregate hashes. A general application callback contract,
-versioned tape codec, resource capture, and platform lifecycle integration are
-still open.
+motion, intrinsic measurement, Flex, display-list, and CPU-oracle paths. A
+repeated tape must produce identical subsystem and aggregate hashes. A general
+application callback contract, versioned tape codec, resource capture, and
+platform lifecycle integration are still open.
 
 The motion scheduler consumes an authoritative monotonic clock and advertises
 the current refresh interval without deriving motion from callback count.
