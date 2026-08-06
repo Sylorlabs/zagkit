@@ -1,0 +1,142 @@
+@import("../src/semantics/semantics.zag")
+
+struct TestState { passed: i32, failed: i32 }
+
+fn expect(state: *TestState, condition: i32, name: []u8) void {
+    if (condition != 0) {
+        state.*.passed = state.*.passed + 1;
+        _zag_print("ok  "); _zag_println(name);
+    } else {
+        state.*.failed = state.*.failed + 1;
+        _zag_print("FAIL "); _zag_println(name);
+    }
+}
+
+fn tree_contract(state: *TestState) void {
+    let tree: SemanticsTree = semantics_tree_make();
+    let root_id: NodeKey = node_key(1);
+    let root: SemanticsSpec = semantics_spec(root_id, semantic_root_key(), SemanticRole.window, "Document");
+    expect(state, semantics_add(&tree, root) == SemanticsError.none, "a semantic root is accepted");
+
+    let save_id: NodeKey = node_key(2);
+    let save: SemanticsSpec = semantics_spec(save_id, root_id, SemanticRole.button, "Save");
+    save.action_mask = semantic_actions(SemanticAction.activate);
+    save.action_mask = semantic_actions_add(save.action_mask, SemanticAction.focus);
+    save.focus_order = 2;
+    save.selected = 1;
+    save.live_region = LiveRegion.polite;
+    expect(state, semantics_add(&tree, save) == SemanticsError.none, "a named actionable child is accepted");
+
+    let field_id: NodeKey = node_key(3);
+    let field: SemanticsSpec = semantics_spec(field_id, root_id, SemanticRole.text_field, "Part name");
+    field.value = "Bracket";
+    field.action_mask = semantic_actions_add(semantic_actions(SemanticAction.set_value), SemanticAction.focus);
+    field.focus_order = 1;
+    field.text_length = 7;
+    field.selection_start = 0;
+    field.selection_end = 7;
+    expect(state, semantics_add(&tree, field) == SemanticsError.none, "editable text navigation data is accepted");
+
+    let slider_id: NodeKey = node_key(4);
+    let slider: SemanticsSpec = semantics_spec(slider_id, root_id, SemanticRole.slider, "Zoom");
+    slider.value = "100 percent";
+    slider.action_mask = semantic_actions_add(semantic_actions(SemanticAction.increment), SemanticAction.decrement);
+    slider.has_range = 1;
+    slider.range_min = 25;
+    slider.range_max = 400;
+    slider.range_value = 100;
+    slider.range_step = 25;
+    expect(state, semantics_add(&tree, slider) == SemanticsError.none, "range semantics preserve value and step");
+
+    let save_index: i32 = semantics_find_index(tree, save_id);
+    let field_index: i32 = semantics_find_index(tree, field_id);
+    let slider_index: i32 = semantics_find_index(tree, slider_id);
+    expect(state, save_index >= 0 && semantic_text_equal(tree.nodes.data[save_index].name, "Save") == 1, "owned semantic names are queryable by stable ID");
+    expect(state, semantic_actions_has(tree.nodes.data[save_index].action_mask, SemanticAction.activate) == 1 && semantic_actions_has(tree.nodes.data[save_index].action_mask, SemanticAction.scroll) == 0, "semantic actions are explicit capabilities");
+    expect(state, tree.nodes.data[save_index].selected == 1 && tree.nodes.data[save_index].live_region == LiveRegion.polite, "selection and live-region state remain explicit");
+    expect(state, field_index >= 0 && semantic_text_equal(tree.nodes.data[field_index].value, "Bracket") == 1 && tree.nodes.data[field_index].selection_end == 7, "text value and selection remain inspectable");
+    expect(state, slider_index >= 0 && tree.nodes.data[slider_index].range_value == 100 && tree.nodes.data[slider_index].range_step == 25, "range value remains inspectable");
+    expect(state, node_key_equal(semantics_next_focus(tree, 0), field_id) == 1 && node_key_equal(semantics_next_focus(tree, 1), save_id) == 1, "focus order is deterministic rather than insertion based");
+    let disabled: SemanticsSpec = semantics_spec(node_key(5), root_id, SemanticRole.button, "Unavailable");
+    disabled.action_mask = semantic_actions(SemanticAction.focus);
+    disabled.focus_order = 3;
+    disabled.disabled = 1;
+    _ = semantics_add(&tree, disabled);
+    expect(state, node_key_equal(semantics_next_focus(tree, 2), semantic_root_key()) == 1, "disabled nodes are excluded from focus traversal");
+    expect(state, tree.nodes.len == 5 && tree.revision == 5, "tree revision advances exactly once per accepted node");
+    semantics_tree_free(&tree);
+}
+
+fn rejection_contract(state: *TestState) void {
+    let tree: SemanticsTree = semantics_tree_make();
+    let root_id: NodeKey = node_key(10);
+    let root: SemanticsSpec = semantics_spec(root_id, semantic_root_key(), SemanticRole.window, "Root");
+    _ = semantics_add(&tree, root);
+
+    let duplicate: SemanticsSpec = semantics_spec(root_id, semantic_root_key(), SemanticRole.button, "Duplicate");
+    expect(state, semantics_add(&tree, duplicate) == SemanticsError.duplicate_id && tree.nodes.len == 1, "duplicate IDs fail without mutating the tree");
+
+    let orphan: SemanticsSpec = semantics_spec(node_key(11), node_key(999), SemanticRole.button, "Orphan");
+    expect(state, semantics_add(&tree, orphan) == SemanticsError.missing_parent && node_key_equal(tree.error_node, node_key(11)) == 1, "missing parents report the exact rejected node");
+
+    let first_focus: SemanticsSpec = semantics_spec(node_key(12), root_id, SemanticRole.button, "First");
+    first_focus.focus_order = 1;
+    _ = semantics_add(&tree, first_focus);
+    let duplicate_focus: SemanticsSpec = semantics_spec(node_key(13), root_id, SemanticRole.button, "Second");
+    duplicate_focus.focus_order = 1;
+    expect(state, semantics_add(&tree, duplicate_focus) == SemanticsError.duplicate_focus_order, "duplicate explicit focus order fails visibly");
+
+    let bad_range: SemanticsSpec = semantics_spec(node_key(14), root_id, SemanticRole.slider, "Bad range");
+    bad_range.has_range = 1;
+    bad_range.range_min = 10;
+    bad_range.range_max = 5;
+    bad_range.range_value = 7;
+    bad_range.range_step = 0;
+    expect(state, semantics_add(&tree, bad_range) == SemanticsError.invalid_range, "malformed range semantics are rejected");
+
+    let bad_text: SemanticsSpec = semantics_spec(node_key(15), root_id, SemanticRole.text_field, "Bad selection");
+    bad_text.text_length = 4;
+    bad_text.selection_start = 3;
+    bad_text.selection_end = 5;
+    expect(state, semantics_add(&tree, bad_text) == SemanticsError.invalid_text_selection, "out-of-bounds text selection is rejected");
+    semantics_tree_free(&tree);
+}
+
+fn generated_identity_contract(state: *TestState) void {
+    let parent: NodeKey = node_key_scoped(50, 3);
+    let stable: i32 = node_key_equal(
+        semantic_generated_key(parent, SemanticRole.button, 7),
+        semantic_generated_key(parent, SemanticRole.button, 7)
+    );
+    let unique: i32 = 1;
+    let i: i64 = 0;
+    while (i < 100) {
+        let j: i64 = i + 1;
+        while (j < 100) {
+            if (node_key_equal(
+                semantic_generated_key(parent, SemanticRole.list_item, i),
+                semantic_generated_key(parent, SemanticRole.list_item, j)
+            ) == 1) { unique = 0; }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    expect(state, stable == 1, "generated semantic IDs are deterministic for the same structural input");
+    expect(state, unique == 1, "100 generated sibling IDs remain unique");
+    expect(state, semantic_generated_key(parent, SemanticRole.button, 7).generation == 3, "generated IDs preserve parent scope generation");
+}
+
+fn main() i32 {
+    let state: TestState = TestState{ .passed = 0, .failed = 0 };
+    tree_contract(&state);
+    rejection_contract(&state);
+    generated_identity_contract(&state);
+    let passed_text: []u8 = _zag_i64_to_str(state.passed as i64);
+    let failed_text: []u8 = _zag_i64_to_str(state.failed as i64);
+    _zag_print("Semantics contract: pass="); _zag_print(passed_text);
+    _zag_print(" fail="); _zag_println(failed_text);
+    _zag_str_free(passed_text);
+    _zag_str_free(failed_text);
+    if (state.failed == 0) { return 0; }
+    return 1;
+}

@@ -34,3 +34,9 @@ preserves retained identity through reorder and fails visibly on duplicate
 keys. Ownership, threading, serialization, typed environment values,
 cancellation, and deterministic replay are still open contracts rather than
 stable API.
+
+The parallel experimental `SemanticsTree` retains owned names and values plus
+roles, actions, focus order, live regions, ranges, selection, and text
+navigation. Its stable `NodeKey` identity is shared with rendering, so future
+accessibility adapters, semantic tests, and Zagkit Talkback automation can
+query product meaning without reconstructing it from pixels.

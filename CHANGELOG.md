@@ -17,6 +17,8 @@ include a generated capability record and exact Zag compiler revision.
 - Experimental keyed reconciliation with stable reorder identity and
   fail-visible duplicate-key handling.
 - Deterministic fixed-point geometry, constraints, and single-line Flex.
+- An experimental owned semantics tree with roles, actions, focus order,
+  live regions, ranges, selection, text navigation, and stable generated IDs.
 
 ## 0.1.0-experimental.0 (unreleased)
 

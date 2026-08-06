@@ -1,0 +1,291 @@
+@import("std:list")
+@import("../core/view_contract.zag")
+
+enum SemanticRole {
+    application,
+    window,
+    group,
+    text,
+    button,
+    toggle,
+    checkbox,
+    radio,
+    slider,
+    progress,
+    text_field,
+    text_editor,
+    image,
+    link,
+    menu,
+    menu_item,
+    tab,
+    list,
+    list_item,
+    table,
+    row,
+    cell,
+    tree,
+    tree_item,
+    dialog,
+}
+
+enum SemanticAction {
+    activate,
+    set_value,
+    increment,
+    decrement,
+    focus,
+    scroll,
+    expand,
+    collapse,
+    dismiss,
+    select,
+}
+
+enum LiveRegion { off, polite, assertive }
+
+enum SemanticsError {
+    none,
+    duplicate_id,
+    missing_parent,
+    duplicate_focus_order,
+    invalid_range,
+    invalid_text_selection,
+}
+
+struct SemanticsSpec {
+    id: NodeKey,
+    parent: NodeKey,
+    role: SemanticRole,
+    name: []u8,
+    value: []u8,
+    action_mask: i64,
+    focus_order: i64,
+    disabled: i32,
+    selected: i32,
+    hidden: i32,
+    live_region: LiveRegion,
+    has_range: i32,
+    range_min: i64,
+    range_max: i64,
+    range_value: i64,
+    range_step: i64,
+    text_length: i64,
+    selection_start: i64,
+    selection_end: i64,
+}
+
+struct SemanticsNode {
+    id: NodeKey,
+    parent: NodeKey,
+    role: SemanticRole,
+    name: ArrayList[u8],
+    value: ArrayList[u8],
+    action_mask: i64,
+    focus_order: i64,
+    disabled: i32,
+    selected: i32,
+    hidden: i32,
+    live_region: LiveRegion,
+    has_range: i32,
+    range_min: i64,
+    range_max: i64,
+    range_value: i64,
+    range_step: i64,
+    text_length: i64,
+    selection_start: i64,
+    selection_end: i64,
+}
+
+struct SemanticsTree {
+    nodes: ArrayList[SemanticsNode],
+    revision: i64,
+    last_error: SemanticsError,
+    error_node: NodeKey,
+}
+
+fn semantic_root_key() NodeKey { return node_key(0 - 1); }
+
+fn semantic_action_bit(action: SemanticAction) i64 {
+    return switch (action) {
+        .activate => 1,
+        .set_value => 2,
+        .increment => 4,
+        .decrement => 8,
+        .focus => 16,
+        .scroll => 32,
+        .expand => 64,
+        .collapse => 128,
+        .dismiss => 256,
+        .select => 512,
+    };
+}
+
+fn semantic_actions(first: SemanticAction) i64 {
+    return semantic_action_bit(first);
+}
+
+fn semantic_actions_add(mask: i64, action: SemanticAction) i64 {
+    return mask | semantic_action_bit(action);
+}
+
+fn semantic_actions_has(mask: i64, action: SemanticAction) i32 {
+    return ((mask & semantic_action_bit(action)) != 0) as i32;
+}
+
+fn semantic_generated_key(parent: NodeKey, role: SemanticRole, ordinal: i64) NodeKey {
+    let role_code: i64 = role as i64;
+    let value: i64 = parent.value * 1000003 + role_code * 1009 + ordinal + 17;
+    return node_key_scoped(value, parent.generation);
+}
+
+fn semantics_spec(id: NodeKey, parent: NodeKey, role: SemanticRole, name: []u8) SemanticsSpec {
+    return SemanticsSpec{
+        .id = id,
+        .parent = parent,
+        .role = role,
+        .name = name,
+        .value = "",
+        .action_mask = 0,
+        .focus_order = 0,
+        .disabled = 0,
+        .selected = 0,
+        .hidden = 0,
+        .live_region = LiveRegion.off,
+        .has_range = 0,
+        .range_min = 0,
+        .range_max = 0,
+        .range_value = 0,
+        .range_step = 0,
+        .text_length = 0,
+        .selection_start = 0,
+        .selection_end = 0,
+    };
+}
+
+fn semantics_tree_make() SemanticsTree {
+    return SemanticsTree{
+        .nodes = make[SemanticsNode](8),
+        .revision = 0,
+        .last_error = SemanticsError.none,
+        .error_node = semantic_root_key(),
+    };
+}
+
+fn semantic_text_copy(text: []u8) ArrayList[u8] {
+    let result: ArrayList[u8] = make[u8](text.len);
+    let i: i32 = 0;
+    while (i < text.len) {
+        push[u8](&result, text[i]);
+        i = i + 1;
+    }
+    return result;
+}
+
+fn semantic_text_equal(actual: ArrayList[u8], expected: []u8) i32 {
+    if (actual.len != expected.len) { return 0; }
+    let i: i32 = 0;
+    while (i < actual.len) {
+        if (actual.data[i] != expected[i]) { return 0; }
+        i = i + 1;
+    }
+    return 1;
+}
+
+fn semantics_find_index(tree: SemanticsTree, id: NodeKey) i32 {
+    let i: i32 = tree.nodes.len - 1;
+    while (i >= 0) {
+        if (node_key_equal(tree.nodes.data[i].id, id) == 1) { return i; }
+        i = i - 1;
+    }
+    return 0 - 1;
+}
+
+fn semantics_fail(tree: *SemanticsTree, error: SemanticsError, id: NodeKey) SemanticsError {
+    tree.*.last_error = error;
+    tree.*.error_node = id;
+    return error;
+}
+
+fn semantics_add(tree: *SemanticsTree, spec: SemanticsSpec) SemanticsError {
+    if (semantics_find_index(tree.*, spec.id) >= 0) {
+        return semantics_fail(tree, SemanticsError.duplicate_id, spec.id);
+    }
+    if (node_key_equal(spec.parent, semantic_root_key()) == 0 &&
+        semantics_find_index(tree.*, spec.parent) < 0) {
+        return semantics_fail(tree, SemanticsError.missing_parent, spec.id);
+    }
+    if (spec.focus_order > 0) {
+        let i: i32 = 0;
+        while (i < tree.*.nodes.len) {
+            if (tree.*.nodes.data[i].focus_order == spec.focus_order) {
+                return semantics_fail(tree, SemanticsError.duplicate_focus_order, spec.id);
+            }
+            i = i + 1;
+        }
+    }
+    if (spec.has_range != 0 &&
+        (spec.range_min > spec.range_max || spec.range_value < spec.range_min ||
+         spec.range_value > spec.range_max || spec.range_step <= 0)) {
+        return semantics_fail(tree, SemanticsError.invalid_range, spec.id);
+    }
+    if (spec.text_length < 0 || spec.selection_start < 0 ||
+        spec.selection_end < spec.selection_start || spec.selection_end > spec.text_length) {
+        return semantics_fail(tree, SemanticsError.invalid_text_selection, spec.id);
+    }
+
+    let node: SemanticsNode = SemanticsNode{
+        .id = spec.id,
+        .parent = spec.parent,
+        .role = spec.role,
+        .name = semantic_text_copy(spec.name),
+        .value = semantic_text_copy(spec.value),
+        .action_mask = spec.action_mask,
+        .focus_order = spec.focus_order,
+        .disabled = spec.disabled,
+        .selected = spec.selected,
+        .hidden = spec.hidden,
+        .live_region = spec.live_region,
+        .has_range = spec.has_range,
+        .range_min = spec.range_min,
+        .range_max = spec.range_max,
+        .range_value = spec.range_value,
+        .range_step = spec.range_step,
+        .text_length = spec.text_length,
+        .selection_start = spec.selection_start,
+        .selection_end = spec.selection_end,
+    };
+    push[SemanticsNode](&tree.*.nodes, node);
+    tree.*.revision = tree.*.revision + 1;
+    tree.*.last_error = SemanticsError.none;
+    tree.*.error_node = semantic_root_key();
+    return SemanticsError.none;
+}
+
+fn semantics_next_focus(tree: SemanticsTree, after_order: i64) NodeKey {
+    let found: i32 = 0;
+    let best_order: i64 = 0;
+    let best: NodeKey = semantic_root_key();
+    let i: i32 = 0;
+    while (i < tree.nodes.len) {
+        let node: SemanticsNode = tree.nodes.data[i];
+        if (node.focus_order > after_order && node.disabled == 0 && node.hidden == 0 &&
+            (found == 0 || node.focus_order < best_order)) {
+            found = 1;
+            best_order = node.focus_order;
+            best = node.id;
+        }
+        i = i + 1;
+    }
+    return best;
+}
+
+fn semantics_tree_free(tree: *SemanticsTree) void {
+    let i: i32 = 0;
+    while (i < tree.*.nodes.len) {
+        free[u8](&tree.*.nodes.data[i].name);
+        free[u8](&tree.*.nodes.data[i].value);
+        i = i + 1;
+    }
+    free[SemanticsNode](&tree.*.nodes);
+}
