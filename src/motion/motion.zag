@@ -1,0 +1,654 @@
+@import("std:list")
+@import("../render/display_list.zag")
+
+// Motion values use the same signed 26.6 logical-unit representation as
+// layout. Time is supplied explicitly in monotonic microseconds.
+
+enum MotionKind { spring, keyframes }
+enum MotionStatus { running, settled }
+enum MotionPreference { full, reduced }
+enum MotionReducedSubstitution { snap_to_end, opacity_fade }
+
+enum MotionFrameReason {
+    start,
+    tick,
+    interrupt,
+    reverse,
+    gesture_handoff,
+    resize,
+    reduced_motion,
+    refresh_rate_change,
+}
+
+enum MotionError {
+    none,
+    duplicate_id,
+    missing_track,
+    invalid_spec,
+    invalid_keyframes,
+    clock_regression,
+    clock_advance_requires_tick,
+    clock_step_too_large,
+}
+
+struct SpringSpec {
+    stiffness: i64,
+    damping: i64,
+    position_epsilon: i64,
+    velocity_epsilon: i64,
+}
+
+struct MotionKeyframe {
+    time_us: i64,
+    value: i64,
+}
+
+struct MotionTrack {
+    id: i64,
+    kind: MotionKind,
+    status: MotionStatus,
+    value: i64,
+    velocity: i64,
+    target: i64,
+    spring: SpringSpec,
+    keyframes: ArrayList[MotionKeyframe],
+    elapsed_us: i64,
+    remainder_us: i64,
+    velocity_remainder: i64,
+    position_remainder: i64,
+}
+
+struct MotionEvent {
+    sequence: i64,
+    reason: MotionFrameReason,
+    track_id: i64,
+    time_us: i64,
+    value: i64,
+    velocity: i64,
+    target: i64,
+}
+
+struct MotionTickResult {
+    error: MotionError,
+    did_work: i32,
+    updated_tracks: i32,
+    running_tracks: i32,
+    request_next_frame: i32,
+    frame_interval_us: i64,
+}
+
+struct MotionSample {
+    found: i32,
+    id: i64,
+    kind: MotionKind,
+    status: MotionStatus,
+    value: i64,
+    velocity: i64,
+    target: i64,
+    elapsed_us: i64,
+}
+
+struct MotionScheduler {
+    tracks: ArrayList[MotionTrack],
+    events: ArrayList[MotionEvent],
+    now_us: i64,
+    has_clock: i32,
+    refresh_hz: i64,
+    frame_interval_us: i64,
+    next_sequence: i64,
+    last_error: MotionError,
+    error_track: i64,
+}
+
+fn motion_abs(value: i64) i64 {
+    if (value < 0) { return 0 - value; }
+    return value;
+}
+
+fn motion_value_valid(value: i64) i32 {
+    return (value >= -1000000000 && value <= 1000000000) as i32;
+}
+
+fn spring_spec(stiffness: i64, damping: i64) SpringSpec {
+    return SpringSpec{
+        .stiffness = stiffness,
+        .damping = damping,
+        .position_epsilon = 1,
+        .velocity_epsilon = unit_scale(),
+    };
+}
+
+fn motion_spring_valid(spec: SpringSpec) i32 {
+    return (spec.stiffness > 0 && spec.stiffness <= 4096 &&
+        spec.damping >= 0 && spec.damping <= 1024 &&
+        spec.position_epsilon >= 0 && spec.position_epsilon <= unit_scale() * 16 &&
+        spec.velocity_epsilon >= 0 && spec.velocity_epsilon <= unit_scale() * 1024) as i32;
+}
+
+fn motion_scheduler_make(refresh_hz: i64) MotionScheduler {
+    let actual_hz: i64 = refresh_hz;
+    if (actual_hz < 24 || actual_hz > 480) { actual_hz = 60; }
+    return MotionScheduler{
+        .tracks = make[MotionTrack](16),
+        .events = make[MotionEvent](64),
+        .now_us = 0,
+        .has_clock = 0,
+        .refresh_hz = actual_hz,
+        .frame_interval_us = 1000000 / actual_hz,
+        .next_sequence = 1,
+        .last_error = MotionError.none,
+        .error_track = 0,
+    };
+}
+
+fn motion_scheduler_free(scheduler: *MotionScheduler) void {
+    let i: i32 = 0;
+    while (i < scheduler.*.tracks.len) {
+        free[MotionKeyframe](&scheduler.*.tracks.data[i].keyframes);
+        i = i + 1;
+    }
+    free[MotionTrack](&scheduler.*.tracks);
+    free[MotionEvent](&scheduler.*.events);
+}
+
+fn motion_find_index(scheduler: MotionScheduler, id: i64) i32 {
+    let i: i32 = scheduler.tracks.len - 1;
+    while (i >= 0) {
+        if (scheduler.tracks.data[i].id == id) { return i; }
+        i = i - 1;
+    }
+    return 0 - 1;
+}
+
+fn motion_fail(scheduler: *MotionScheduler, error: MotionError, track_id: i64) MotionError {
+    scheduler.*.last_error = error;
+    scheduler.*.error_track = track_id;
+    return error;
+}
+
+fn motion_clear_error(scheduler: *MotionScheduler) void {
+    scheduler.*.last_error = MotionError.none;
+    scheduler.*.error_track = 0;
+}
+
+fn motion_record(scheduler: *MotionScheduler, reason: MotionFrameReason, track_id: i64) void {
+    let value: i64 = 0;
+    let velocity: i64 = 0;
+    let target: i64 = 0;
+    let index: i32 = motion_find_index(scheduler.*, track_id);
+    if (index >= 0) {
+        value = scheduler.*.tracks.data[index].value;
+        velocity = scheduler.*.tracks.data[index].velocity;
+        target = scheduler.*.tracks.data[index].target;
+    }
+    push[MotionEvent](&scheduler.*.events, MotionEvent{
+        .sequence = scheduler.*.next_sequence,
+        .reason = reason,
+        .track_id = track_id,
+        .time_us = scheduler.*.now_us,
+        .value = value,
+        .velocity = velocity,
+        .target = target,
+    });
+    scheduler.*.next_sequence = scheduler.*.next_sequence + 1;
+}
+
+fn motion_set_clock(scheduler: *MotionScheduler, time_us: i64) MotionError {
+    if (time_us < 0) { return motion_fail(scheduler, MotionError.invalid_spec, 0); }
+    if (scheduler.*.has_clock != 0 && time_us < scheduler.*.now_us) {
+        return motion_fail(scheduler, MotionError.clock_regression, 0);
+    }
+    if (scheduler.*.has_clock != 0 && time_us > scheduler.*.now_us &&
+        motion_running_count(scheduler.*) > 0) {
+        return motion_fail(scheduler, MotionError.clock_advance_requires_tick, 0);
+    }
+    scheduler.*.now_us = time_us;
+    scheduler.*.has_clock = 1;
+    motion_clear_error(scheduler);
+    return MotionError.none;
+}
+
+fn motion_running_count(scheduler: MotionScheduler) i32 {
+    let count: i32 = 0;
+    let i: i32 = 0;
+    while (i < scheduler.tracks.len) {
+        if (scheduler.tracks.data[i].status == MotionStatus.running) { count = count + 1; }
+        i = i + 1;
+    }
+    return count;
+}
+
+fn motion_needs_frame(scheduler: MotionScheduler) i32 {
+    return (motion_running_count(scheduler) > 0) as i32;
+}
+
+fn motion_empty_keyframes() ArrayList[MotionKeyframe] {
+    return make[MotionKeyframe](1);
+}
+
+fn motion_start_spring(
+    scheduler: *MotionScheduler,
+    id: i64,
+    value: i64,
+    target: i64,
+    spec: SpringSpec,
+    preference: MotionPreference,
+    substitution: MotionReducedSubstitution,
+) MotionError {
+    if (scheduler.*.has_clock == 0 || id <= 0 || scheduler.*.tracks.len >= 4096 ||
+        motion_find_index(scheduler.*, id) >= 0) {
+        if (motion_find_index(scheduler.*, id) >= 0) {
+            return motion_fail(scheduler, MotionError.duplicate_id, id);
+        }
+        return motion_fail(scheduler, MotionError.invalid_spec, id);
+    }
+    if (motion_value_valid(value) == 0 || motion_value_valid(target) == 0 || motion_spring_valid(spec) == 0) {
+        return motion_fail(scheduler, MotionError.invalid_spec, id);
+    }
+    if (preference == MotionPreference.reduced && substitution != MotionReducedSubstitution.snap_to_end) {
+        return motion_fail(scheduler, MotionError.invalid_spec, id);
+    }
+    let track: MotionTrack = MotionTrack{
+        .id = id,
+        .kind = MotionKind.spring,
+        .status = MotionStatus.running,
+        .value = value,
+        .velocity = 0,
+        .target = target,
+        .spring = spec,
+        .keyframes = motion_empty_keyframes(),
+        .elapsed_us = 0,
+        .remainder_us = 0,
+        .velocity_remainder = 0,
+        .position_remainder = 0,
+    };
+    if (value == target) { track.status = MotionStatus.settled; }
+    if (preference == MotionPreference.reduced && substitution == MotionReducedSubstitution.snap_to_end) {
+        track.value = target;
+        track.status = MotionStatus.settled;
+    }
+    push[MotionTrack](&scheduler.*.tracks, track);
+    if (preference == MotionPreference.reduced) {
+        motion_record(scheduler, MotionFrameReason.reduced_motion, id);
+    } else {
+        motion_record(scheduler, MotionFrameReason.start, id);
+    }
+    motion_clear_error(scheduler);
+    return MotionError.none;
+}
+
+fn motion_keyframes_valid(keyframes: ArrayList[MotionKeyframe]) i32 {
+    if (keyframes.len < 2 || keyframes.len > 4096 || keyframes.data[0].time_us != 0) { return 0; }
+    let i: i32 = 0;
+    while (i < keyframes.len) {
+        if (motion_value_valid(keyframes.data[i].value) == 0 || keyframes.data[i].time_us < 0 ||
+            keyframes.data[i].time_us > 60000000) { return 0; }
+        if (i > 0 && keyframes.data[i].time_us <= keyframes.data[i - 1].time_us) { return 0; }
+        if (i > 0) {
+            let duration: i64 = keyframes.data[i].time_us - keyframes.data[i - 1].time_us;
+            let velocity: i64 = ((keyframes.data[i].value - keyframes.data[i - 1].value) * 1000000) / duration;
+            if (motion_value_valid(velocity) == 0) { return 0; }
+        }
+        i = i + 1;
+    }
+    return 1;
+}
+
+fn motion_opacity_keyframes_valid(keyframes: ArrayList[MotionKeyframe]) i32 {
+    if (motion_keyframes_valid(keyframes) == 0 || keyframes.data[keyframes.len - 1].time_us > 250000) {
+        return 0;
+    }
+    let i: i32 = 0;
+    while (i < keyframes.len) {
+        if (keyframes.data[i].value < 0 || keyframes.data[i].value > unit_scale()) { return 0; }
+        i = i + 1;
+    }
+    return 1;
+}
+
+fn motion_copy_keyframes(keyframes: ArrayList[MotionKeyframe]) ArrayList[MotionKeyframe] {
+    let owned: ArrayList[MotionKeyframe] = make[MotionKeyframe](keyframes.len);
+    let i: i32 = 0;
+    while (i < keyframes.len) {
+        push[MotionKeyframe](&owned, keyframes.data[i]);
+        i = i + 1;
+    }
+    return owned;
+}
+
+fn motion_start_keyframes(
+    scheduler: *MotionScheduler,
+    id: i64,
+    keyframes: ArrayList[MotionKeyframe],
+    preference: MotionPreference,
+    substitution: MotionReducedSubstitution,
+) MotionError {
+    if (scheduler.*.has_clock == 0 || id <= 0 || scheduler.*.tracks.len >= 4096 ||
+        motion_find_index(scheduler.*, id) >= 0) {
+        if (motion_find_index(scheduler.*, id) >= 0) {
+            return motion_fail(scheduler, MotionError.duplicate_id, id);
+        }
+        return motion_fail(scheduler, MotionError.invalid_spec, id);
+    }
+    if (motion_keyframes_valid(keyframes) == 0) {
+        return motion_fail(scheduler, MotionError.invalid_keyframes, id);
+    }
+    if (preference == MotionPreference.reduced && substitution == MotionReducedSubstitution.opacity_fade &&
+        motion_opacity_keyframes_valid(keyframes) == 0) {
+        return motion_fail(scheduler, MotionError.invalid_keyframes, id);
+    }
+    let owned: ArrayList[MotionKeyframe] = motion_copy_keyframes(keyframes);
+    let last: MotionKeyframe = owned.data[owned.len - 1];
+    let track: MotionTrack = MotionTrack{
+        .id = id,
+        .kind = MotionKind.keyframes,
+        .status = MotionStatus.running,
+        .value = owned.data[0].value,
+        .velocity = 0,
+        .target = last.value,
+        .spring = spring_spec(1, 0),
+        .keyframes = owned,
+        .elapsed_us = 0,
+        .remainder_us = 0,
+        .velocity_remainder = 0,
+        .position_remainder = 0,
+    };
+    if (preference == MotionPreference.reduced && substitution == MotionReducedSubstitution.snap_to_end) {
+        track.value = track.target;
+        track.status = MotionStatus.settled;
+    }
+    if (preference == MotionPreference.reduced && substitution == MotionReducedSubstitution.opacity_fade) {
+        // The caller supplied an explicit opacity timeline as its semantic
+        // substitute. It is not derived by multiplying the original duration.
+        track.status = MotionStatus.running;
+    }
+    push[MotionTrack](&scheduler.*.tracks, track);
+    if (preference == MotionPreference.reduced) {
+        motion_record(scheduler, MotionFrameReason.reduced_motion, id);
+    } else {
+        motion_record(scheduler, MotionFrameReason.start, id);
+    }
+    motion_clear_error(scheduler);
+    return MotionError.none;
+}
+
+fn motion_set_refresh_rate(scheduler: *MotionScheduler, refresh_hz: i64) MotionError {
+    if (refresh_hz < 24 || refresh_hz > 480) {
+        return motion_fail(scheduler, MotionError.invalid_spec, 0);
+    }
+    if (scheduler.*.refresh_hz != refresh_hz) {
+        scheduler.*.refresh_hz = refresh_hz;
+        scheduler.*.frame_interval_us = 1000000 / refresh_hz;
+        motion_record(scheduler, MotionFrameReason.refresh_rate_change, 0);
+    }
+    motion_clear_error(scheduler);
+    return MotionError.none;
+}
+
+fn motion_spring_step(track: *MotionTrack) void {
+    let error: i64 = track.*.target - track.*.value;
+    let acceleration: i64 = error * track.*.spring.stiffness - track.*.velocity * track.*.spring.damping;
+    let velocity_numerator: i64 = acceleration * 1000 + track.*.velocity_remainder;
+    let velocity_delta: i64 = velocity_numerator / 1000000;
+    track.*.velocity_remainder = velocity_numerator - velocity_delta * 1000000;
+    track.*.velocity = track.*.velocity + velocity_delta;
+    if (track.*.velocity < -1000000000) {
+        track.*.velocity = -1000000000;
+        track.*.velocity_remainder = 0;
+    }
+    if (track.*.velocity > 1000000000) {
+        track.*.velocity = 1000000000;
+        track.*.velocity_remainder = 0;
+    }
+    let position_numerator: i64 = track.*.velocity * 1000 + track.*.position_remainder;
+    let position_delta: i64 = position_numerator / 1000000;
+    track.*.position_remainder = position_numerator - position_delta * 1000000;
+    track.*.value = track.*.value + position_delta;
+    if (track.*.value < -1000000000) {
+        track.*.value = -1000000000;
+        track.*.position_remainder = 0;
+    }
+    if (track.*.value > 1000000000) {
+        track.*.value = 1000000000;
+        track.*.position_remainder = 0;
+    }
+    if (motion_abs(track.*.target - track.*.value) <= track.*.spring.position_epsilon &&
+        motion_abs(track.*.velocity) <= track.*.spring.velocity_epsilon) {
+        track.*.value = track.*.target;
+        track.*.velocity = 0;
+        track.*.status = MotionStatus.settled;
+        track.*.remainder_us = 0;
+        track.*.velocity_remainder = 0;
+        track.*.position_remainder = 0;
+    }
+}
+
+fn motion_advance_spring(track: *MotionTrack, delta_us: i64) void {
+    let remaining: i64 = delta_us + track.*.remainder_us;
+    while (remaining >= 1000 && track.*.status == MotionStatus.running) {
+        motion_spring_step(track);
+        remaining = remaining - 1000;
+    }
+    if (track.*.status == MotionStatus.running) { track.*.remainder_us = remaining; }
+}
+
+fn motion_advance_keyframes(track: *MotionTrack, delta_us: i64) void {
+    track.*.elapsed_us = track.*.elapsed_us + delta_us;
+    let last: MotionKeyframe = track.*.keyframes.data[track.*.keyframes.len - 1];
+    if (track.*.elapsed_us >= last.time_us) {
+        track.*.elapsed_us = last.time_us;
+        track.*.value = last.value;
+        track.*.velocity = 0;
+        track.*.status = MotionStatus.settled;
+        return;
+    }
+    let i: i32 = 1;
+    while (i < track.*.keyframes.len && track.*.keyframes.data[i].time_us < track.*.elapsed_us) {
+        i = i + 1;
+    }
+    let before: MotionKeyframe = track.*.keyframes.data[i - 1];
+    let after: MotionKeyframe = track.*.keyframes.data[i];
+    let duration: i64 = after.time_us - before.time_us;
+    let elapsed: i64 = track.*.elapsed_us - before.time_us;
+    let difference: i64 = after.value - before.value;
+    track.*.value = before.value + (difference * elapsed) / duration;
+    track.*.velocity = (difference * 1000000) / duration;
+}
+
+fn motion_tick(scheduler: *MotionScheduler, time_us: i64) MotionTickResult {
+    let failed: MotionTickResult = MotionTickResult{
+        .error = MotionError.none,
+        .did_work = 0,
+        .updated_tracks = 0,
+        .running_tracks = motion_running_count(scheduler.*),
+        .request_next_frame = 0,
+        .frame_interval_us = scheduler.*.frame_interval_us,
+    };
+    if (scheduler.*.has_clock == 0) {
+        let error: MotionError = motion_set_clock(scheduler, time_us);
+        failed.error = error;
+        failed.running_tracks = motion_running_count(scheduler.*);
+        failed.request_next_frame = (failed.running_tracks > 0) as i32;
+        return failed;
+    }
+    if (time_us < scheduler.*.now_us) {
+        failed.error = motion_fail(scheduler, MotionError.clock_regression, 0);
+        return failed;
+    }
+    let delta_us: i64 = time_us - scheduler.*.now_us;
+    if (delta_us > 1000000) {
+        failed.error = motion_fail(scheduler, MotionError.clock_step_too_large, 0);
+        return failed;
+    }
+    if (delta_us == 0 || failed.running_tracks == 0) {
+        scheduler.*.now_us = time_us;
+        failed.request_next_frame = (failed.running_tracks > 0) as i32;
+        motion_clear_error(scheduler);
+        return failed;
+    }
+
+    scheduler.*.now_us = time_us;
+    let updated: i32 = 0;
+    let i: i32 = 0;
+    while (i < scheduler.*.tracks.len) {
+        if (scheduler.*.tracks.data[i].status == MotionStatus.running) {
+            if (scheduler.*.tracks.data[i].kind == MotionKind.spring) {
+                motion_advance_spring(&scheduler.*.tracks.data[i], delta_us);
+            } else {
+                motion_advance_keyframes(&scheduler.*.tracks.data[i], delta_us);
+            }
+            updated = updated + 1;
+        }
+        i = i + 1;
+    }
+    motion_record(scheduler, MotionFrameReason.tick, 0);
+    let running: i32 = motion_running_count(scheduler.*);
+    motion_clear_error(scheduler);
+    return MotionTickResult{
+        .error = MotionError.none,
+        .did_work = 1,
+        .updated_tracks = updated,
+        .running_tracks = running,
+        .request_next_frame = (running > 0) as i32,
+        .frame_interval_us = scheduler.*.frame_interval_us,
+    };
+}
+
+fn motion_retarget(
+    scheduler: *MotionScheduler,
+    id: i64,
+    target: i64,
+    reason: MotionFrameReason,
+    preference: MotionPreference,
+    substitution: MotionReducedSubstitution,
+) MotionError {
+    let index: i32 = motion_find_index(scheduler.*, id);
+    if (index < 0) { return motion_fail(scheduler, MotionError.missing_track, id); }
+    if (scheduler.*.tracks.data[index].kind != MotionKind.spring || motion_value_valid(target) == 0 ||
+        (reason != MotionFrameReason.interrupt && reason != MotionFrameReason.reverse && reason != MotionFrameReason.resize)) {
+        return motion_fail(scheduler, MotionError.invalid_spec, id);
+    }
+    if (preference == MotionPreference.reduced && substitution != MotionReducedSubstitution.snap_to_end) {
+        return motion_fail(scheduler, MotionError.invalid_spec, id);
+    }
+    scheduler.*.tracks.data[index].target = target;
+    scheduler.*.tracks.data[index].status = MotionStatus.running;
+    scheduler.*.tracks.data[index].remainder_us = 0;
+    scheduler.*.tracks.data[index].velocity_remainder = 0;
+    if (preference == MotionPreference.reduced && substitution == MotionReducedSubstitution.snap_to_end) {
+        scheduler.*.tracks.data[index].value = target;
+        scheduler.*.tracks.data[index].velocity = 0;
+        scheduler.*.tracks.data[index].status = MotionStatus.settled;
+        scheduler.*.tracks.data[index].remainder_us = 0;
+        scheduler.*.tracks.data[index].velocity_remainder = 0;
+        scheduler.*.tracks.data[index].position_remainder = 0;
+        motion_record(scheduler, MotionFrameReason.reduced_motion, id);
+    } else {
+        motion_record(scheduler, reason, id);
+    }
+    motion_clear_error(scheduler);
+    return MotionError.none;
+}
+
+fn motion_gesture_handoff(
+    scheduler: *MotionScheduler,
+    id: i64,
+    value: i64,
+    velocity: i64,
+    target: i64,
+) MotionError {
+    let index: i32 = motion_find_index(scheduler.*, id);
+    if (index < 0) { return motion_fail(scheduler, MotionError.missing_track, id); }
+    if (scheduler.*.tracks.data[index].kind != MotionKind.spring || motion_value_valid(value) == 0 ||
+        motion_value_valid(velocity) == 0 || motion_value_valid(target) == 0) {
+        return motion_fail(scheduler, MotionError.invalid_spec, id);
+    }
+    scheduler.*.tracks.data[index].value = value;
+    scheduler.*.tracks.data[index].velocity = velocity;
+    scheduler.*.tracks.data[index].target = target;
+    scheduler.*.tracks.data[index].status = MotionStatus.running;
+    scheduler.*.tracks.data[index].remainder_us = 0;
+    scheduler.*.tracks.data[index].velocity_remainder = 0;
+    scheduler.*.tracks.data[index].position_remainder = 0;
+    motion_record(scheduler, MotionFrameReason.gesture_handoff, id);
+    motion_clear_error(scheduler);
+    return MotionError.none;
+}
+
+fn motion_sample(scheduler: MotionScheduler, id: i64) MotionSample {
+    let index: i32 = motion_find_index(scheduler, id);
+    if (index >= 0) {
+        let track: MotionTrack = scheduler.tracks.data[index];
+        return MotionSample{
+            .found = 1,
+            .id = track.id,
+            .kind = track.kind,
+            .status = track.status,
+            .value = track.value,
+            .velocity = track.velocity,
+            .target = track.target,
+            .elapsed_us = track.elapsed_us,
+        };
+    }
+    return MotionSample{
+        .found = 0,
+        .id = 0,
+        .kind = MotionKind.spring,
+        .status = MotionStatus.settled,
+        .value = 0,
+        .velocity = 0,
+        .target = 0,
+        .elapsed_us = 0,
+    };
+}
+
+fn motion_scheduler_hash(scheduler: MotionScheduler) i64 {
+    let hash: i64 = display_mix(17, scheduler.now_us);
+    hash = display_mix(hash, scheduler.has_clock as i64);
+    hash = display_mix(hash, scheduler.refresh_hz);
+    hash = display_mix(hash, scheduler.frame_interval_us);
+    hash = display_mix(hash, scheduler.next_sequence);
+    hash = display_mix(hash, scheduler.last_error as i64);
+    hash = display_mix(hash, scheduler.error_track);
+    hash = display_mix(hash, scheduler.tracks.len as i64);
+    let i: i32 = 0;
+    while (i < scheduler.tracks.len) {
+        let track: MotionTrack = scheduler.tracks.data[i];
+        hash = display_mix(hash, track.id);
+        hash = display_mix(hash, track.kind as i64);
+        hash = display_mix(hash, track.status as i64);
+        hash = display_mix(hash, track.value);
+        hash = display_mix(hash, track.velocity);
+        hash = display_mix(hash, track.target);
+        hash = display_mix(hash, track.spring.stiffness);
+        hash = display_mix(hash, track.spring.damping);
+        hash = display_mix(hash, track.spring.position_epsilon);
+        hash = display_mix(hash, track.spring.velocity_epsilon);
+        hash = display_mix(hash, track.elapsed_us);
+        hash = display_mix(hash, track.remainder_us);
+        hash = display_mix(hash, track.velocity_remainder);
+        hash = display_mix(hash, track.position_remainder);
+        hash = display_mix(hash, track.keyframes.len as i64);
+        let j: i32 = 0;
+        while (j < track.keyframes.len) {
+            hash = display_mix(hash, track.keyframes.data[j].time_us);
+            hash = display_mix(hash, track.keyframes.data[j].value);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    hash = display_mix(hash, scheduler.events.len as i64);
+    i = 0;
+    while (i < scheduler.events.len) {
+        let event: MotionEvent = scheduler.events.data[i];
+        hash = display_mix(hash, event.sequence);
+        hash = display_mix(hash, event.reason as i64);
+        hash = display_mix(hash, event.track_id);
+        hash = display_mix(hash, event.time_us);
+        hash = display_mix(hash, event.value);
+        hash = display_mix(hash, event.velocity);
+        hash = display_mix(hash, event.target);
+        i = i + 1;
+    }
+    return hash;
+}

@@ -1,0 +1,227 @@
+@import("../src/motion/motion.zag")
+
+struct TestState { passed: i32, failed: i32 }
+
+fn expect(state: *TestState, condition: i32, name: []u8) void {
+    if (condition != 0) {
+        state.*.passed = state.*.passed + 1;
+        _zag_print("ok  "); _zag_println(name);
+    } else {
+        state.*.failed = state.*.failed + 1;
+        _zag_print("FAIL "); _zag_println(name);
+    }
+}
+
+fn timeline() ArrayList[MotionKeyframe] {
+    let frames: ArrayList[MotionKeyframe] = make[MotionKeyframe](3);
+    push[MotionKeyframe](&frames, MotionKeyframe{ .time_us = 0, .value = 0 });
+    push[MotionKeyframe](&frames, MotionKeyframe{ .time_us = 100000, .value = 10 * unit_scale() });
+    push[MotionKeyframe](&frames, MotionKeyframe{ .time_us = 200000, .value = 0 });
+    return frames;
+}
+
+fn idle_and_refresh_contract(state: *TestState) void {
+    let scheduler: MotionScheduler = motion_scheduler_make(60);
+    let first: MotionTickResult = motion_tick(&scheduler, 1000);
+    let idle: MotionTickResult = motion_tick(&scheduler, 2000);
+    expect(state, first.error == MotionError.none && idle.did_work == 0 &&
+        idle.request_next_frame == 0 && scheduler.events.len == 0,
+        "idle clocks perform no motion work and schedule no phantom frame");
+    expect(state, motion_set_refresh_rate(&scheduler, 120) == MotionError.none &&
+        scheduler.refresh_hz == 120 && scheduler.frame_interval_us == 8333,
+        "refresh-rate changes update the explicit frame deadline");
+    expect(state, scheduler.events.len == 1 &&
+        scheduler.events.data[0].reason == MotionFrameReason.refresh_rate_change,
+        "refresh-rate changes retain an observable frame reason");
+    expect(state, motion_set_refresh_rate(&scheduler, 12) == MotionError.invalid_spec &&
+        scheduler.refresh_hz == 120,
+        "invalid display rates fail without mutating scheduler truth");
+    motion_scheduler_free(&scheduler);
+}
+
+fn spring_determinism_contract(state: *TestState) void {
+    let split: MotionScheduler = motion_scheduler_make(120);
+    let grouped: MotionScheduler = motion_scheduler_make(120);
+    _ = motion_set_clock(&split, 0);
+    _ = motion_set_clock(&grouped, 0);
+    let spec: SpringSpec = spring_spec(220, 28);
+    _ = motion_start_spring(&split, 1, 0, 10 * unit_scale(), spec, MotionPreference.full, MotionReducedSubstitution.snap_to_end);
+    _ = motion_start_spring(&grouped, 1, 0, 10 * unit_scale(), spec, MotionPreference.full, MotionReducedSubstitution.snap_to_end);
+    _ = motion_tick(&split, 8333);
+    _ = motion_tick(&split, 16666);
+    _ = motion_tick(&split, 25000);
+    _ = motion_tick(&grouped, 25000);
+    let a: MotionSample = motion_sample(split, 1);
+    let b: MotionSample = motion_sample(grouped, 1);
+    expect(state, a.value == b.value && a.velocity == b.velocity && a.status == b.status,
+        "fixed-step springs are independent of refresh callback grouping");
+    expect(state, a.value > 0 && a.value < 10 * unit_scale() && a.velocity > 0,
+        "spring integration advances position and velocity without teleporting");
+    expect(state, motion_needs_frame(split) == 1 && motion_tick(&split, 25000).request_next_frame == 1,
+        "running motion requests another frame even when a callback repeats the same clock");
+
+    let replay_a: MotionScheduler = motion_scheduler_make(120);
+    let replay_b: MotionScheduler = motion_scheduler_make(120);
+    _ = motion_set_clock(&replay_a, 0); _ = motion_set_clock(&replay_b, 0);
+    _ = motion_start_spring(&replay_a, 8, 0, 5 * unit_scale(), spec, MotionPreference.full, MotionReducedSubstitution.snap_to_end);
+    _ = motion_start_spring(&replay_b, 8, 0, 5 * unit_scale(), spec, MotionPreference.full, MotionReducedSubstitution.snap_to_end);
+    _ = motion_tick(&replay_a, 8333); _ = motion_tick(&replay_b, 8333);
+    _ = motion_tick(&replay_a, 16666); _ = motion_tick(&replay_b, 16666);
+    expect(state, motion_scheduler_hash(replay_a) == motion_scheduler_hash(replay_b),
+        "identical supplied clocks produce identical full motion evidence");
+
+    let settling: MotionScheduler = motion_scheduler_make(120);
+    _ = motion_set_clock(&settling, 0);
+    _ = motion_start_spring(&settling, 9, 0, 5 * unit_scale(), spec, MotionPreference.full, MotionReducedSubstitution.snap_to_end);
+    _ = motion_tick(&settling, 1000000);
+    _ = motion_tick(&settling, 2000000);
+    _ = motion_tick(&settling, 3000000);
+    _ = motion_tick(&settling, 4000000);
+    let last: MotionTickResult = motion_tick(&settling, 5000000);
+    let settled: MotionSample = motion_sample(settling, 9);
+    let settled_events: i32 = settling.events.len;
+    let after: MotionTickResult = motion_tick(&settling, 5001000);
+    expect(state, settled.status == MotionStatus.settled && settled.value == 5 * unit_scale() &&
+        settled.velocity == 0 && last.request_next_frame == 0 && after.did_work == 0 &&
+        settling.events.len == settled_events,
+        "settled springs snap exactly and produce no continuous idle work");
+    motion_scheduler_free(&settling);
+    motion_scheduler_free(&replay_a); motion_scheduler_free(&replay_b);
+    motion_scheduler_free(&split); motion_scheduler_free(&grouped);
+}
+
+fn continuity_contract(state: *TestState) void {
+    let scheduler: MotionScheduler = motion_scheduler_make(120);
+    _ = motion_set_clock(&scheduler, 0);
+    _ = motion_start_spring(&scheduler, 2, 0, 12 * unit_scale(), spring_spec(240, 30), MotionPreference.full, MotionReducedSubstitution.snap_to_end);
+    _ = motion_tick(&scheduler, 50000);
+    let before: MotionSample = motion_sample(scheduler, 2);
+    _ = motion_retarget(&scheduler, 2, 18 * unit_scale(), MotionFrameReason.interrupt, MotionPreference.full, MotionReducedSubstitution.snap_to_end);
+    let interrupted: MotionSample = motion_sample(scheduler, 2);
+    expect(state, interrupted.value == before.value && interrupted.velocity == before.velocity &&
+        interrupted.target == 18 * unit_scale(),
+        "interruption preserves exact position and incoming velocity");
+    _ = motion_retarget(&scheduler, 2, 0, MotionFrameReason.reverse, MotionPreference.full, MotionReducedSubstitution.snap_to_end);
+    let reversed: MotionSample = motion_sample(scheduler, 2);
+    expect(state, reversed.value == before.value && reversed.velocity == before.velocity && reversed.target == 0,
+        "reversal preserves exact position and incoming velocity");
+    _ = motion_retarget(&scheduler, 2, 20 * unit_scale(), MotionFrameReason.resize, MotionPreference.full, MotionReducedSubstitution.snap_to_end);
+    let resized: MotionSample = motion_sample(scheduler, 2);
+    expect(state, resized.value == before.value && resized.velocity == before.velocity && resized.target == 20 * unit_scale(),
+        "resize retargeting preserves continuity while changing destination");
+    _ = motion_gesture_handoff(&scheduler, 2, 7 * unit_scale(), 90 * unit_scale(), 15 * unit_scale());
+    let handed: MotionSample = motion_sample(scheduler, 2);
+    expect(state, handed.value == 7 * unit_scale() && handed.velocity == 90 * unit_scale() &&
+        handed.target == 15 * unit_scale() && handed.status == MotionStatus.running,
+        "gesture handoff transfers position and velocity exactly");
+    expect(state, scheduler.events.data[scheduler.events.len - 4].reason == MotionFrameReason.interrupt &&
+        scheduler.events.data[scheduler.events.len - 3].reason == MotionFrameReason.reverse &&
+        scheduler.events.data[scheduler.events.len - 2].reason == MotionFrameReason.resize &&
+        scheduler.events.data[scheduler.events.len - 1].reason == MotionFrameReason.gesture_handoff,
+        "continuity changes retain ordered semantic frame reasons");
+    motion_scheduler_free(&scheduler);
+}
+
+fn keyframe_contract(state: *TestState) void {
+    let frames: ArrayList[MotionKeyframe] = timeline();
+    let scheduler: MotionScheduler = motion_scheduler_make(60);
+    _ = motion_set_clock(&scheduler, 0);
+    _ = motion_start_keyframes(&scheduler, 3, frames, MotionPreference.full, MotionReducedSubstitution.snap_to_end);
+    frames.data[1].value = 999;
+    _ = motion_tick(&scheduler, 50000);
+    let rising: MotionSample = motion_sample(scheduler, 3);
+    expect(state, rising.value == 5 * unit_scale() && rising.velocity == 100 * unit_scale(),
+        "keyframes interpolate exact position and segment velocity from owned data");
+    _ = motion_tick(&scheduler, 150000);
+    let falling: MotionSample = motion_sample(scheduler, 3);
+    expect(state, falling.value == 5 * unit_scale() && falling.velocity == -100 * unit_scale(),
+        "keyframe direction changes preserve exact deterministic velocity");
+    let final_tick: MotionTickResult = motion_tick(&scheduler, 200000);
+    let finished: MotionSample = motion_sample(scheduler, 3);
+    expect(state, finished.value == 0 && finished.velocity == 0 && finished.status == MotionStatus.settled &&
+        final_tick.request_next_frame == 0,
+        "keyframe timelines settle exactly and stop scheduling frames");
+    let event_count: i32 = scheduler.events.len;
+    let idle: MotionTickResult = motion_tick(&scheduler, 201000);
+    expect(state, idle.did_work == 0 && scheduler.events.len == event_count,
+        "settled timelines remain completely idle");
+    free[MotionKeyframe](&frames);
+    motion_scheduler_free(&scheduler);
+}
+
+fn reduced_motion_contract(state: *TestState) void {
+    let scheduler: MotionScheduler = motion_scheduler_make(60);
+    _ = motion_set_clock(&scheduler, 0);
+    _ = motion_start_spring(&scheduler, 4, 0, 20 * unit_scale(), spring_spec(220, 28), MotionPreference.reduced, MotionReducedSubstitution.snap_to_end);
+    let snapped: MotionSample = motion_sample(scheduler, 4);
+    expect(state, snapped.value == 20 * unit_scale() && snapped.status == MotionStatus.settled &&
+        scheduler.events.data[0].reason == MotionFrameReason.reduced_motion,
+        "reduced motion uses an explicit snap substitution for spatial movement");
+
+    let fade: ArrayList[MotionKeyframe] = make[MotionKeyframe](2);
+    push[MotionKeyframe](&fade, MotionKeyframe{ .time_us = 0, .value = 0 });
+    push[MotionKeyframe](&fade, MotionKeyframe{ .time_us = 80000, .value = unit_scale() });
+    _ = motion_start_keyframes(&scheduler, 5, fade, MotionPreference.reduced, MotionReducedSubstitution.opacity_fade);
+    _ = motion_tick(&scheduler, 40000);
+    let faded: MotionSample = motion_sample(scheduler, 5);
+    expect(state, faded.value == unit_scale() / 2 && faded.status == MotionStatus.running,
+        "reduced motion can use a caller-authored opacity substitution timeline");
+    free[MotionKeyframe](&fade);
+    motion_scheduler_free(&scheduler);
+}
+
+fn failure_contract(state: *TestState) void {
+    let scheduler: MotionScheduler = motion_scheduler_make(60);
+    expect(state, motion_start_spring(&scheduler, 1, 0, 64, spring_spec(220, 28), MotionPreference.full, MotionReducedSubstitution.snap_to_end) == MotionError.invalid_spec,
+        "tracks cannot start without an authoritative supplied clock");
+    _ = motion_set_clock(&scheduler, 1000);
+    _ = motion_start_spring(&scheduler, 1, 0, 64, spring_spec(220, 28), MotionPreference.full, MotionReducedSubstitution.snap_to_end);
+    expect(state, motion_start_spring(&scheduler, 1, 0, 64, spring_spec(220, 28), MotionPreference.full, MotionReducedSubstitution.snap_to_end) == MotionError.duplicate_id && scheduler.tracks.len == 1,
+        "duplicate stable motion IDs fail before allocation");
+    let before: MotionSample = motion_sample(scheduler, 1);
+    expect(state, motion_set_clock(&scheduler, 2000) == MotionError.clock_advance_requires_tick &&
+        scheduler.now_us == 1000,
+        "running motion cannot be skipped by advancing the clock outside tick");
+    expect(state, motion_tick(&scheduler, 999).error == MotionError.clock_regression &&
+        scheduler.now_us == 1000 && motion_sample(scheduler, 1).value == before.value,
+        "clock regression fails before scheduler or track mutation");
+    expect(state, motion_tick(&scheduler, 60001001).error == MotionError.clock_step_too_large &&
+        scheduler.now_us == 1000,
+        "unbounded suspend jumps fail visibly before expensive catch-up");
+    expect(state, motion_retarget(&scheduler, 99, 0, MotionFrameReason.interrupt, MotionPreference.full, MotionReducedSubstitution.snap_to_end) == MotionError.missing_track,
+        "retargeting a missing stable ID fails visibly");
+
+    let malformed: ArrayList[MotionKeyframe] = make[MotionKeyframe](2);
+    push[MotionKeyframe](&malformed, MotionKeyframe{ .time_us = 100, .value = 0 });
+    push[MotionKeyframe](&malformed, MotionKeyframe{ .time_us = 50, .value = 64 });
+    expect(state, motion_start_keyframes(&scheduler, 2, malformed, MotionPreference.full, MotionReducedSubstitution.snap_to_end) == MotionError.invalid_keyframes && scheduler.tracks.len == 1,
+        "malformed keyframe order fails before ownership transfer");
+    free[MotionKeyframe](&malformed);
+
+    let spatial_fade: ArrayList[MotionKeyframe] = make[MotionKeyframe](2);
+    push[MotionKeyframe](&spatial_fade, MotionKeyframe{ .time_us = 0, .value = 0 });
+    push[MotionKeyframe](&spatial_fade, MotionKeyframe{ .time_us = 80000, .value = 2 * unit_scale() });
+    expect(state, motion_start_keyframes(&scheduler, 3, spatial_fade, MotionPreference.reduced, MotionReducedSubstitution.opacity_fade) == MotionError.invalid_keyframes,
+        "reduced opacity substitution rejects spatial values masquerading as a fade");
+    expect(state, motion_start_spring(&scheduler, 4, 0, 64, spring_spec(220, 28), MotionPreference.reduced, MotionReducedSubstitution.opacity_fade) == MotionError.invalid_spec,
+        "spatial springs require an explicit snap reduced-motion substitution");
+    free[MotionKeyframe](&spatial_fade);
+    motion_scheduler_free(&scheduler);
+}
+
+fn main() i32 {
+    let state: TestState = TestState{ .passed = 0, .failed = 0 };
+    idle_and_refresh_contract(&state);
+    spring_determinism_contract(&state);
+    continuity_contract(&state);
+    keyframe_contract(&state);
+    reduced_motion_contract(&state);
+    failure_contract(&state);
+    let passed_text: []u8 = _zag_i64_to_str(state.passed as i64);
+    let failed_text: []u8 = _zag_i64_to_str(state.failed as i64);
+    _zag_print("Motion contract: pass="); _zag_print(passed_text);
+    _zag_print(" fail="); _zag_println(failed_text);
+    _zag_str_free(passed_text); _zag_str_free(failed_text);
+    if (state.failed == 0) { return 0; }
+    return 1;
+}

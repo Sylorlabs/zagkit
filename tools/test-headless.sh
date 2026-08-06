@@ -32,5 +32,7 @@ cd "$root"
 "$tmp/input-contract"
 "$znc" tests/replay_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/replay-contract"
 "$tmp/replay-contract"
+"$znc" tests/motion_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/motion-contract"
+"$tmp/motion-contract"
 
-printf 'headless test: PASS (state, reconciliation, constraints, Flex, semantics, Talkback, display lists, CPU raster, input, and replay)\n'
+printf 'headless test: PASS (state, reconciliation, constraints, Flex, semantics, Talkback, display lists, CPU raster, input, replay, and motion)\n'

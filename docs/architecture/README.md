@@ -26,6 +26,10 @@ Normative decisions:
 - [platform seams and backend truth](../rfcs/0004-platform-seams-and-backend-truth.md)
 - [quality and release](../rfcs/0005-quality-and-release-contract.md)
 
+Detailed experimental contracts:
+
+- [motion scheduler and tracks](motion.md)
+
 The first experimental compiled slice now fixes the initial Zag shapes for
 `NodeKey`, `State<T>`, `Binding<T>`, `Action`, `Environment`, `ViewContext`,
 `ViewSpec`, and `RenderNode`. State reads record their reader and revision;
@@ -70,7 +74,15 @@ The first deterministic replay executor consumes an immutable ordered tape of
 state revisions, pointer events, monotonic clock samples, backend activation,
 loss, and recovery. It rejects stale or impossible transitions at their exact
 event index, then rebuilds a conformance scene through the real semantics,
-Flex, display-list, and CPU-oracle paths. A repeated tape must produce identical
-subsystem and aggregate hashes. A general application callback contract,
+motion, Flex, display-list, and CPU-oracle paths. A repeated tape must produce
+identical subsystem and aggregate hashes. A general application callback contract,
 versioned tape codec, resource capture, and platform lifecycle integration are
 still open.
+
+The motion scheduler consumes an authoritative monotonic clock and advertises
+the current refresh interval without deriving motion from callback count.
+Integer fixed-step springs and owned keyframe timelines retain stable track
+identity, exact position and velocity, explicit frame reasons, interruption,
+reversal, resize retargeting, gesture handoff, and reduced-motion substitution.
+Settled tracks request no further frame. The full contract and current limits
+are documented in [motion.md](motion.md).

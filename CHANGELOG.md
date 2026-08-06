@@ -33,7 +33,11 @@ include a generated capability record and exact Zag compiler revision.
   z-order, capture, focus, stale-target recovery, and ordered evidence.
 - A sealed deterministic replay tape and conformance executor covering exact
   state revisions, pointer input, monotonic time, backend activation, loss,
-  recovery, and regenerated semantics, Flex, display-list, and CPU identities.
+  recovery, and regenerated motion, semantics, Flex, display-list, and CPU identities.
+- A refresh-aware deterministic motion scheduler with fixed-step integer
+  springs, owned keyframes, explicit frame reasons, interruption, reversal,
+  resize continuity, gesture velocity handoff, and semantic reduced-motion
+  substitutions that perform no continuous work after settling.
 
 ## 0.1.0-experimental.0 (unreleased)
 

@@ -20,11 +20,11 @@ fn complete_tape(final_value: i64, pointer_x: i64) ReplayTape {
     _ = replay_tape_push(&tape, replay_pointer_event(9, PointerPhase.down, pointer_x, unit_scale()));
     _ = replay_tape_push(&tape, replay_pointer_event(9, PointerPhase.move, pointer_x + unit_scale(), unit_scale()));
     _ = replay_tape_push(&tape, replay_pointer_event(9, PointerPhase.up, pointer_x + unit_scale(), unit_scale()));
-    _ = replay_tape_push(&tape, replay_clock_event(10));
+    _ = replay_tape_push(&tape, replay_clock_event(10000));
     _ = replay_tape_push(&tape, replay_state_event(1, 1, final_value));
     _ = replay_tape_push(&tape, replay_backend_loss_event(7));
     _ = replay_tape_push(&tape, replay_backend_recover_event(7));
-    _ = replay_tape_push(&tape, replay_clock_event(20));
+    _ = replay_tape_push(&tape, replay_clock_event(20000));
     _ = replay_tape_seal(&tape);
     return tape;
 }
@@ -35,6 +35,9 @@ fn results_equal(a: ReplayResult, b: ReplayResult) i32 {
         a.state_revision == b.state_revision && a.clock == b.clock &&
         a.backend_id == b.backend_id && a.backend_generation == b.backend_generation &&
         a.backend_state == b.backend_state && a.input_hash == b.input_hash &&
+        a.motion_hash == b.motion_hash &&
+        a.motion_value == b.motion_value && a.motion_velocity == b.motion_velocity &&
+        a.motion_status == b.motion_status &&
         a.semantics_hash == b.semantics_hash && a.layout_hash == b.layout_hash &&
         a.display_hash == b.display_hash && a.cpu_hash == b.cpu_hash &&
         a.output_hash == b.output_hash) as i32;
@@ -48,14 +51,17 @@ fn deterministic_contract(state: *TestState) void {
         "sealed tape preserves one canonical ordered event stream");
     expect(state, first.error == ReplayError.none && first.events_applied == 11,
         "complete tape applies every event without hidden skips");
-    expect(state, first.state_value == 2 && first.state_revision == 2 && first.clock == 20,
+    expect(state, first.state_value == 2 && first.state_revision == 2 && first.clock == 20000,
         "state revisions and monotonic clock replay exactly");
     expect(state, first.backend_id == 7 && first.backend_generation == 2 &&
         first.backend_state == ReplayBackendState.active,
         "backend activation loss and recovery remain observable in final truth");
-    expect(state, first.input_hash != 0 && first.semantics_hash != 0 && first.layout_hash != 0 &&
+    expect(state, first.input_hash != 0 && first.motion_hash != 0 && first.semantics_hash != 0 && first.layout_hash != 0 &&
         first.display_hash != 0 && first.cpu_hash != 0 && first.output_hash != 0,
-        "replay regenerates input semantics layout display and CPU identities");
+        "replay regenerates input motion semantics layout display and CPU identities");
+    expect(state, first.motion_value > 0 && first.motion_velocity > 0 &&
+        first.motion_status == MotionStatus.running,
+        "replayed clock samples advance interruptible motion state");
     expect(state, results_equal(first, second) == 1,
         "two executions of the same sealed tape are bit-identical");
     replay_tape_free(&tape);
@@ -145,10 +151,10 @@ fn differential_contract(state: *TestState) void {
     let a: ReplayResult = replay_execute(baseline);
     let b: ReplayResult = replay_execute(changed_state);
     let c: ReplayResult = replay_execute(changed_pointer);
-    expect(state, a.output_hash != b.output_hash && a.semantics_hash != b.semantics_hash &&
+    expect(state, a.output_hash != b.output_hash && a.motion_hash != b.motion_hash && a.semantics_hash != b.semantics_hash &&
         a.layout_hash != b.layout_hash && a.display_hash != b.display_hash && a.cpu_hash != b.cpu_hash,
-        "state changes propagate through semantics Flex display and CPU output");
-    expect(state, a.input_hash != c.input_hash && a.semantics_hash == c.semantics_hash &&
+        "state changes propagate through motion semantics Flex display and CPU output");
+    expect(state, a.input_hash != c.input_hash && a.motion_hash == c.motion_hash && a.semantics_hash == c.semantics_hash &&
         a.layout_hash == c.layout_hash && a.display_hash == c.display_hash && a.cpu_hash == c.cpu_hash &&
         a.output_hash != c.output_hash,
         "pointer differences change input identity without contaminating scene generation");
