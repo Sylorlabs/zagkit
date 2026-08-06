@@ -313,6 +313,27 @@ fn fixture_matrix_icc(kind: i32) ArrayList[u8] {
         fixture_write_signature(&bytes, 296, "para");
         fixture_write_u32_be(&bytes, 308, 32768);
     }
+    if (kind == 18) {
+        fixture_write_u32_be(&bytes, 176, 20);
+        fixture_write_u32_be(&bytes, 188, 20);
+        fixture_write_u32_be(&bytes, 200, 20);
+        fixture_write_signature(&bytes, 264, "curv");
+        fixture_write_u32_be(&bytes, 272, 4);
+        bytes.data[278] = 64;
+        bytes.data[280] = 192;
+        bytes.data[282] = 255; bytes.data[283] = 255;
+    }
+    if (kind == 19) {
+        fixture_write_signature(&bytes, 264, "curv");
+        fixture_write_u32_be(&bytes, 272, 4097);
+    }
+    if (kind == 20) {
+        fixture_write_u32_be(&bytes, 176, 18);
+        fixture_write_u32_be(&bytes, 188, 18);
+        fixture_write_u32_be(&bytes, 200, 18);
+        fixture_write_signature(&bytes, 264, "curv");
+        fixture_write_u32_be(&bytes, 272, 4);
+    }
     return bytes;
 }
 
@@ -713,9 +734,59 @@ fn color_profile_contract(state: *TestState) void {
     let lut_icc: PngDecodeResult = png_decode(
         lut_icc_fixture.bytes.data[0..lut_icc_fixture.bytes.len]
     );
-    expect(state, lut_icc.error == PngDecodeError.unsupported_color_profile,
-        "unevaluated sampled ICC curves fail instead of being approximated");
+    expect(state, lut_icc.error == PngDecodeError.none &&
+        lut_icc.profile_assumed == 0 && lut_icc.pixels.data[0] == 73 &&
+        lut_icc.pixels.data[1] == 102 && lut_icc.pixels.data[2] == 124,
+        "two-entry sampled ICC curves interpolate the complete input domain");
     png_decode_free(&lut_icc); png_encode_free(&lut_icc_fixture);
+
+    let sampled_fixture: PngEncodeResult = fixture_profile_png(0, 0, 0, 0, 18);
+    let sampled: PngDecodeResult = png_decode(
+        sampled_fixture.bytes.data[0..sampled_fixture.bytes.len]
+    );
+    expect(state, sampled.error == PngDecodeError.none &&
+        sampled.profile_assumed == 0 && sampled.pixels.data[0] == 63 &&
+        sampled.pixels.data[1] == 89 && sampled.pixels.data[2] == 108,
+        "multi-entry sampled ICC curves use deterministic linear interpolation");
+    png_decode_free(&sampled);
+    let sampled_repeat_valid: i32 = 1;
+    let sampled_repeat: i32 = 0;
+    while (sampled_repeat < 4096 && sampled_repeat_valid != 0) {
+        let repeated_sampled: PngDecodeResult = png_decode(
+            sampled_fixture.bytes.data[0..sampled_fixture.bytes.len]
+        );
+        if (repeated_sampled.error != PngDecodeError.none ||
+            repeated_sampled.pixels.data[0] != 63 ||
+            repeated_sampled.pixels.data[1] != 89 ||
+            repeated_sampled.pixels.data[2] != 108) {
+            sampled_repeat_valid = 0;
+        }
+        png_decode_free(&repeated_sampled);
+        sampled_repeat = sampled_repeat + 1;
+    }
+    expect(state, sampled_repeat_valid != 0 && sampled_repeat == 4096,
+        "4096 sampled ICC parse decode and cleanup cycles preserve exact output");
+    png_encode_free(&sampled_fixture);
+
+    let oversized_curve_fixture: PngEncodeResult = fixture_profile_png(
+        0, 0, 0, 0, 19
+    );
+    let oversized_curve: PngDecodeResult = png_decode(
+        oversized_curve_fixture.bytes.data[0..oversized_curve_fixture.bytes.len]
+    );
+    expect(state, oversized_curve.error == PngDecodeError.unsupported_color_profile,
+        "sampled ICC curve counts above the execution ceiling fail before allocation");
+    png_decode_free(&oversized_curve); png_encode_free(&oversized_curve_fixture);
+
+    let truncated_curve_fixture: PngEncodeResult = fixture_profile_png(
+        0, 0, 0, 0, 20
+    );
+    let truncated_curve: PngDecodeResult = png_decode(
+        truncated_curve_fixture.bytes.data[0..truncated_curve_fixture.bytes.len]
+    );
+    expect(state, truncated_curve.error == PngDecodeError.unsupported_color_profile,
+        "sampled ICC curve tables cannot cross their declared tag bounds");
+    png_decode_free(&truncated_curve); png_encode_free(&truncated_curve_fixture);
 
     let bad_name_fixture: PngEncodeResult = fixture_profile_png(0, 0, 0, 0, 5);
     let bad_name: PngDecodeResult = png_decode(

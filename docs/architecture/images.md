@@ -70,8 +70,10 @@ declared profile size, header signature, reserved header bytes, rendering intent
 bounded aligned tag table, unique required tags, XYZ tag types, and transfer
 curve types before executing it. The current executable subset accepts the six
 required RGB matrix/TRC tags with independent per-channel identity curves,
-single gamma curves, or parametric curve types 0 through 4. Each piecewise function
-executes from bounded fixed-point coefficients and clips to its declared range;
+single gamma curves, parametric curve types 0 through 4, or sampled curves with
+at most 4,096 entries. Sampled curves use ICC linear interpolation to build an
+owned 256-entry fixed-point table for each RGBA8 input channel. Each piecewise
+function executes from bounded fixed-point coefficients and clips to its declared range;
 undefined or unsafe coefficient domains fail before pixels are touched. Matrix
 columns are converted
 from D50 PCS into linear sRGB, then encoded through the canonical sRGB transfer.
@@ -89,18 +91,18 @@ headless scale evidence, not native compositor or monitor evidence.
 
 The strict deterministic fuzz gate decodes 20,000 arbitrary byte streams,
 20,000 structured mutations of a valid PNG, 20,000 arbitrary decompressed ICC
-profiles, every strict seed prefix, and 4,096 decode/free repetitions on both
+profiles, every strict seed prefix, 4,096 general decode/free repetitions, and
+4,096 sampled-profile parse/decode/free repetitions on both
 x86-64 and ARM64. Every result must preserve success or failure ownership
 invariants. Coverage-guided sanitizer campaigns
 and a larger published malformed corpus remain additional required evidence.
 
 Dimension, encoded-data, decompressed-scanline, output-pixel, palette-index,
 filter, color-matrix, ICC inflate, ICC tag-table, and arithmetic limits fail
-before out-of-bounds access. Sampled curves, monochrome profiles, LUT profiles,
-device-link profiles, and
+before out-of-bounds access. Monochrome profiles, LUT profiles, device-link profiles, and
 unsupported `cICP` metadata fail as unsupported color profiles. Unknown interlace
-methods fail before decompression. These paths keep `G3-PNG` open until sampled
-and LUT ICC execution plus coverage-guided malformed-input evidence land.
+methods fail before decompression. These paths keep `G3-PNG` open until ICC LUT
+execution plus coverage-guided malformed-input evidence land.
 
 Linear-light filtering, wide-gamut output surfaces, mipmapping,
 high-quality downsampling, image tiling, and GPU upload caches also remain

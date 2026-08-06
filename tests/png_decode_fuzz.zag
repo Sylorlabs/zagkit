@@ -124,11 +124,12 @@ fn icc_profile_contract(state: *FuzzState) void {
                 profile.transform.active == 0 ||
                 profile.red_curve.valid == 0 || profile.green_curve.valid == 0 ||
                 profile.blue_curve.valid == 0 ||
-                profile.red_curve.kind < 1 || profile.red_curve.kind > 5 ||
-                profile.green_curve.kind < 1 || profile.green_curve.kind > 5 ||
-                profile.blue_curve.kind < 1 || profile.blue_curve.kind > 5))) {
+                profile.red_curve.kind < 1 || profile.red_curve.kind > 6 ||
+                profile.green_curve.kind < 1 || profile.green_curve.kind > 6 ||
+                profile.blue_curve.kind < 1 || profile.blue_curve.kind > 6))) {
             valid = 0;
         }
+        png_icc_profile_free(&profile);
         free[u8](&bytes); case_index = case_index + 1;
     }
     fuzz_expect(state, valid != 0 && case_index == 20000,
