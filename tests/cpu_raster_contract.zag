@@ -101,6 +101,8 @@ fn failure_contract(state: *TestState) void {
     display_list_free(&unsealed);
 
     let unsupported: DisplayList = display_list_make();
+    _ = display_list_add_resource(&unsupported,
+        render_resource_spec(8, RenderResourceKind.path, "PATH", 1));
     let path: DisplayOp = display_op(DisplayOpKind.draw_path, node_key(1));
     path.resource_id = 8;
     _ = display_list_push(&unsupported, path);

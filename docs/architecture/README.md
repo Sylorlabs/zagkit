@@ -68,21 +68,23 @@ Rendering begins with an experimental immutable `DisplayList`. Every operation
 retains its owning `NodeKey`; paths, images, glyph runs, clips, transforms,
 RGBA16 paints, layers, and effects remain explicit rather than backend calls.
 Balanced lists seal with deterministic content identity, and verification
-detects mutation outside the builder contract before rendering. Resource
-storage, serialization, damage, the CPU oracle, and GPU transports remain open.
+detects mutation outside the builder contract before rendering. Owned resource
+payloads participate in sealing and identity; damage and GPU transports remain
+open.
 
-The first [render resource ownership layer](render-resources.md) copies opaque
+The [render resource ownership layer](render-resources.md) copies opaque
 typed payloads behind positive stable IDs, canonicalizes insertion order,
 enforces configurable byte and count ceilings, requires exact replacement
-revisions, and verifies sealed byte-level identity. It is not yet attached to
-the display list and does not claim path, SVG, PNG, font, image, or glyph
-decoding.
+revisions, and verifies sealed byte-level identity. Display lists own the store
+and validate each resource reference by kind; this still does not claim path,
+SVG, PNG, font, image, or glyph decoding.
 
-Display-list replay uses the versioned little-endian `ZKDL` codec. Decoding is
+Display-list replay uses the versioned little-endian `ZKDL` version 2 codec. Decoding is
 bounded to one million operations, reconstructs operations only through the
 same validation path as live building, requires balanced seal state, verifies
 the stored content identity and revision, and rejects trailing bytes so one
-scene has one canonical encoding. Resource payload serialization remains open.
+scene has one canonical encoding. A bounded variable-length resource section
+preserves allocation policy, typed metadata, revisions, and exact owned bytes.
 
 The CPU oracle begins with deterministic RGBA8 rectangle rasterization from
 26.6 fixed-point geometry. Clip and positive axis-aligned transform state,

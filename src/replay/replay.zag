@@ -604,6 +604,16 @@ fn replay_build_scene(state_value: i64, backend_generation: i64) ReplayResult {
     overlay_free(&overlay_layout_result);
 
     let list: DisplayList = display_list_make();
+    let replay_payload: []u8 = "REPLAY-RESOURCE-0";
+    if (magnitude != 0) { replay_payload = "REPLAY-RESOURCE-1"; }
+    if (display_list_add_resource(&list, render_resource_spec(
+        900, RenderResourceKind.effect, replay_payload, 1
+    )) != RenderResourceError.none) {
+        display_list_free(&list);
+        flex_wrap_free(&layout);
+        semantics_tree_free(&semantics);
+        return replay_result_error(ReplayError.scene_error, 0 - 1, 0);
+    }
     let first_op: DisplayOp = display_op(DisplayOpKind.fill_rect, node_key(101));
     first_op.bounds = layout.placements.data[0].frame;
     let blue: i64 = (backend_generation % 8) * 4096;

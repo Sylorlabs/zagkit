@@ -6,8 +6,7 @@ Status: experimental headless primitive
 will later feed Zagkit paths, decoded images, glyph runs, effects, fonts, SVG,
 and PNG. It is not a decoder and does not make an opaque payload renderable.
 SVG parsing, PNG parsing and color management, font validation, glyph shaping,
-path schemas, and display-list payload serialization remain separate open
-contracts.
+path schemas, and decoded rendering remain separate open contracts.
 
 ## Identity and metadata
 
@@ -45,8 +44,15 @@ revision changes, forged accounting, invalid limits, and aggregate identity
 changes. `render_resource_store_free` releases every owned payload and then the
 resource array; callers invoke it exactly once for every store, sealed or not.
 
-The current executable contract does not attach this store to `DisplayList`,
-serialize payloads in `ZKDL`, decode SVG or PNG, validate font data, rasterize
-paths or images, cache platform uploads, or implement memory-pressure eviction.
-Those capabilities remain unavailable until their own malformed-input,
-round-trip, rendering, replacement, and cleanup suites pass.
+`DisplayList` now owns this store. Sealing verifies that every resource-bearing
+operation resolves an existing resource of the exact required kind. Resource
+bytes, metadata, allocation policy, and replacement revisions contribute to
+the display-list revision and content identity. `ZKDL` version 2 serializes the
+canonical resource section before operations and reconstructs it through the
+same bounded validation path; decoding and re-encoding are byte identical.
+
+The current executable contract still does not decode SVG or PNG, validate font
+tables, interpret path or glyph payload schemas, rasterize paths or images,
+cache platform uploads, or implement memory-pressure eviction. Those
+capabilities remain unavailable until their own malformed-input, rendering,
+replacement, and cleanup suites pass.

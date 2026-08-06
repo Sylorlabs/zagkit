@@ -133,14 +133,15 @@ fixed-point geometry, RGBA16 paints, paths, images, glyph runs, layers, and
 effects as explicit operations. Invalid geometry, resources, parameters, and
 stack balance fail before mutation; the builder rejects writes after sealing,
 and verification detects out-of-contract raw mutation against deterministic
-content identity. A separate experimental resource store now owns opaque typed
+content identity. An integrated experimental resource store owns opaque typed
 payload bytes with stable IDs, canonical order, bounded allocation, exact
-replacement revisions, sealing, and mutation verification. It is not yet
-attached to the display list, so payload schemas, resource serialization,
-damage, complete CPU rasterization, and GPU transport remain open. The first versioned binary codec
-now round-trips sealed lists byte-identically and rejects malformed, truncated,
-noncanonical, unknown-version, and hash-mismatched input; schema evolution,
-resource payloads, and fuzz coverage remain open.
+replacement revisions, sealing, and mutation verification. Display-list seal
+requires every reference to resolve the exact resource kind. The version 2
+binary codec round-trips resource metadata, payloads, revisions, allocation
+policy, and operations byte-identically and rejects malformed, truncated,
+noncanonical, unknown-version, and hash-mismatched input. Payload interpretation,
+damage, complete CPU rasterization, GPU transport, schema evolution, and fuzz
+coverage remain open.
 
 The first CPU-oracle subset rasterizes fixed-point rectangle fills with exact
 clip and axis-aligned transform state, area-based fractional edge coverage, and

@@ -15,6 +15,13 @@ fn expect(state: *TestState, condition: i32, name: []u8) void {
 fn codec_scene() DisplayList {
     let list: DisplayList = display_list_make();
     let owner: NodeKey = node_key_scoped(42, 3);
+    _ = display_list_add_resource(&list,
+        render_resource_spec(50, RenderResourceKind.path, "M0L1", 7));
+    let replacement: RenderResourceSpec = render_resource_spec(
+        50, RenderResourceKind.path, "M0L2", 7
+    );
+    replacement.revision = 1;
+    _ = display_list_replace_resource(&list, replacement);
     _ = display_list_push(&list, display_op(DisplayOpKind.save, owner));
     let clip: DisplayOp = display_op(DisplayOpKind.clip_rect, owner);
     clip.bounds = rect(0 - unit_scale(), 2 * unit_scale(), 80 * unit_scale(), 40 * unit_scale());
@@ -23,6 +30,9 @@ fn codec_scene() DisplayList {
     fill.bounds = rect(3 * unit_scale(), 4 * unit_scale(), 20 * unit_scale(), 10 * unit_scale());
     fill.paint = paint_rgba16(1234, 2345, 3456, 4567);
     _ = display_list_push(&list, fill);
+    let path: DisplayOp = display_op(DisplayOpKind.draw_path, owner);
+    path.resource_id = 50;
+    _ = display_list_push(&list, path);
     _ = display_list_push(&list, display_op(DisplayOpKind.restore, owner));
     _ = display_list_seal(&list);
     return list;
@@ -41,7 +51,9 @@ fn bytes_equal(a: ArrayList[u8], b: ArrayList[u8]) i32 {
 fn round_trip_contract(state: *TestState) void {
     let source: DisplayList = codec_scene();
     let encoded: DisplayEncodeResult = display_list_encode(source);
-    expect(state, encoded.error == DisplayCodecError.none && encoded.bytes.len == 36 + 4 * 160, "sealed display list encodes to the versioned exact size");
+    expect(state, encoded.error == DisplayCodecError.none && encoded.bytes.len ==
+        76 + 64 + 4 + 5 * 160,
+        "sealed display list encodes resource records payload bytes and operations to the exact size");
     expect(state, encoded.bytes.data[0] == 90 && encoded.bytes.data[1] == 75 && encoded.bytes.data[2] == 68 && encoded.bytes.data[3] == 76, "codec carries the ZKDL magic");
 
     let decoded: DisplayDecodeResult = display_list_decode(encoded.bytes);
@@ -49,6 +61,13 @@ fn round_trip_contract(state: *TestState) void {
     expect(state, decoded.list.content_hash == source.content_hash && decoded.list.revision == source.revision, "round trip preserves deterministic identity");
     expect(state, decoded.list.ops.data[2].owner.value == 42 && decoded.list.ops.data[2].owner.generation == 3, "round trip preserves retained ownership");
     expect(state, decoded.list.ops.data[1].bounds.x == 0 - unit_scale() && decoded.list.ops.data[2].paint.alpha == 4567, "round trip preserves signed geometry and RGBA16 paint");
+    expect(state, decoded.list.resources.resources.len == 1 &&
+        decoded.list.resources.resources.data[0].id == 50 &&
+        decoded.list.resources.resources.data[0].revision == 1 &&
+        decoded.list.resources.resources.data[0].payload.len == 4 &&
+        decoded.list.resources.resources.data[0].payload.data[3] == 50 &&
+        decoded.list.resources.revision == 2,
+        "round trip preserves replacement revision metadata and exact owned payload bytes");
 
     let encoded_again: DisplayEncodeResult = display_list_encode(decoded.list);
     expect(state, bytes_equal(encoded.bytes, encoded_again.bytes) == 1, "decode and re-encode are byte identical");
@@ -70,25 +89,98 @@ fn malformed_contract(state: *TestState) void {
     encoded.bytes.data[0] = saved;
 
     let saved_version: u8 = encoded.bytes.data[4];
-    encoded.bytes.data[4] = 2;
+    encoded.bytes.data[4] = 3;
     let bad_version: DisplayDecodeResult = display_list_decode(encoded.bytes);
     expect(state, bad_version.error == DisplayCodecError.unsupported_version && bad_version.error_offset == 4, "unsupported versions fail visibly");
     display_decode_free(&bad_version);
     encoded.bytes.data[4] = saved_version;
 
-    let saved_kind: u8 = encoded.bytes.data[36];
-    encoded.bytes.data[36] = 99;
+    let operation_offset: i32 = 76 + 64 + 4;
+    let saved_kind: u8 = encoded.bytes.data[operation_offset];
+    encoded.bytes.data[operation_offset] = 99;
     let bad_kind: DisplayDecodeResult = display_list_decode(encoded.bytes);
-    expect(state, bad_kind.error == DisplayCodecError.invalid_kind && bad_kind.error_offset == 36, "unknown operation kinds fail at the exact record");
+    expect(state, bad_kind.error == DisplayCodecError.invalid_kind &&
+        bad_kind.error_offset == operation_offset as i64,
+        "unknown operation kinds fail at the exact record");
     display_decode_free(&bad_kind);
-    encoded.bytes.data[36] = saved_kind;
+    encoded.bytes.data[operation_offset] = saved_kind;
 
-    let saved_paint: u8 = encoded.bytes.data[36 + 2 * 160 + 56];
-    encoded.bytes.data[36 + 2 * 160 + 56] = saved_paint + 1;
+    let paint_offset: i32 = operation_offset + 2 * 160 + 56;
+    let saved_paint: u8 = encoded.bytes.data[paint_offset];
+    encoded.bytes.data[paint_offset] = saved_paint + 1;
     let bad_hash: DisplayDecodeResult = display_list_decode(encoded.bytes);
     expect(state, bad_hash.error == DisplayCodecError.hash_mismatch, "content tampering fails deterministic identity verification");
     display_decode_free(&bad_hash);
-    encoded.bytes.data[36 + 2 * 160 + 56] = saved_paint;
+    encoded.bytes.data[paint_offset] = saved_paint;
+
+    let saved_resource_kind: u8 = encoded.bytes.data[76 + 8];
+    encoded.bytes.data[76 + 8] = 99;
+    let bad_resource: DisplayDecodeResult = display_list_decode(encoded.bytes);
+    expect(state, bad_resource.error == DisplayCodecError.invalid_resource &&
+        bad_resource.error_offset == 76,
+        "unknown resource kinds fail at the exact resource record");
+    display_decode_free(&bad_resource);
+    encoded.bytes.data[76 + 8] = saved_resource_kind;
+
+    let saved_valid_kind: u8 = encoded.bytes.data[76 + 8];
+    encoded.bytes.data[76 + 8] = RenderResourceKind.effect as u8;
+    let mismatched_resource: DisplayDecodeResult = display_list_decode(encoded.bytes);
+    expect(state, mismatched_resource.error == DisplayCodecError.invalid_operation,
+        "decoded resource kind mismatch fails before the referenced operation can seal");
+    display_decode_free(&mismatched_resource);
+    encoded.bytes.data[76 + 8] = saved_valid_kind;
+
+    let saved_format: u8 = encoded.bytes.data[76 + 24];
+    encoded.bytes.data[76 + 24] = 0;
+    let bad_format: DisplayDecodeResult = display_list_decode(encoded.bytes);
+    expect(state, bad_format.error == DisplayCodecError.invalid_resource &&
+        bad_format.error_offset == 76,
+        "invalid resource metadata fails at its record before payload ownership");
+    display_decode_free(&bad_format);
+    encoded.bytes.data[76 + 24] = saved_format;
+
+    let saved_length: u8 = encoded.bytes.data[76 + 56];
+    encoded.bytes.data[76 + 56] = 100;
+    let payload_bomb: DisplayDecodeResult = display_list_decode(encoded.bytes);
+    expect(state, payload_bomb.error == DisplayCodecError.invalid_payload &&
+        payload_bomb.error_offset == 76 + 56,
+        "payload lengths cannot cross the declared bounded resource section");
+    display_decode_free(&payload_bomb);
+    encoded.bytes.data[76 + 56] = saved_length;
+
+    let saved_configuration: u8 = encoded.bytes.data[53];
+    encoded.bytes.data[53] = 0;
+    let bad_configuration: DisplayDecodeResult = display_list_decode(encoded.bytes);
+    expect(state, bad_configuration.error == DisplayCodecError.invalid_configuration &&
+        bad_configuration.error_offset == 52,
+        "serialized allocation policy must remain within hard decoder limits");
+    display_decode_free(&bad_configuration);
+    encoded.bytes.data[53] = saved_configuration;
+
+    let saved_revision: u8 = encoded.bytes.data[44];
+    encoded.bytes.data[44] = saved_revision - 1;
+    let bad_revision: DisplayDecodeResult = display_list_decode(encoded.bytes);
+    expect(state, bad_revision.error == DisplayCodecError.invalid_operation,
+        "resource history revisions must reconstruct exactly before sealing");
+    display_decode_free(&bad_revision);
+    encoded.bytes.data[44] = saved_revision;
+
+    let reference_offset: i32 = operation_offset + 3 * 160 + 144;
+    let saved_reference: u8 = encoded.bytes.data[reference_offset];
+    encoded.bytes.data[reference_offset] = 99;
+    let missing_reference: DisplayDecodeResult = display_list_decode(encoded.bytes);
+    expect(state, missing_reference.error == DisplayCodecError.invalid_operation,
+        "decoded operations cannot reference absent resource IDs");
+    display_decode_free(&missing_reference);
+    encoded.bytes.data[reference_offset] = saved_reference;
+
+    let saved_payload: u8 = encoded.bytes.data[76 + 64];
+    encoded.bytes.data[76 + 64] = saved_payload + 1;
+    let bad_payload_hash: DisplayDecodeResult = display_list_decode(encoded.bytes);
+    expect(state, bad_payload_hash.error == DisplayCodecError.hash_mismatch,
+        "resource payload tampering fails aggregate display identity");
+    display_decode_free(&bad_payload_hash);
+    encoded.bytes.data[76 + 64] = saved_payload;
 
     let truncated: ArrayList[u8] = make[u8](20);
     let i: i32 = 0;
@@ -115,11 +207,51 @@ fn encode_rejection_contract(state: *TestState) void {
     display_list_free(&unsealed);
 }
 
+fn resource_payload_sweep(state: *TestState) void {
+    let stable: i32 = 1;
+    let payload_length: i32 = 1;
+    while (payload_length <= 64) {
+        let payload: ArrayList[u8] = make[u8](payload_length);
+        let i: i32 = 0;
+        while (i < payload_length) {
+            push[u8](&payload, ((i * 17 + payload_length) % 251) as u8);
+            i = i + 1;
+        }
+        let list: DisplayList = display_list_make_with_resource_limits(4, 256, 128);
+        if (display_list_add_resource(&list, render_resource_spec(
+            70, RenderResourceKind.path, payload.data[0..payload.len], 9
+        )) != RenderResourceError.none) { stable = 0; }
+        let path: DisplayOp = display_op(DisplayOpKind.draw_path, node_key(70));
+        path.resource_id = 70;
+        if (display_list_push(&list, path) != DisplayError.none ||
+            display_list_seal(&list) != DisplayError.none) { stable = 0; }
+        let encoded: DisplayEncodeResult = display_list_encode(list);
+        let decoded: DisplayDecodeResult = display_list_decode(encoded.bytes);
+        if (encoded.error != DisplayCodecError.none ||
+            decoded.error != DisplayCodecError.none ||
+            decoded.list.resources.resources.len != 1 ||
+            decoded.list.resources.resources.data[0].payload.len != payload_length ||
+            decoded.list.content_hash != list.content_hash) { stable = 0; }
+        let encoded_again: DisplayEncodeResult = display_list_encode(decoded.list);
+        if (encoded_again.error != DisplayCodecError.none ||
+            bytes_equal(encoded.bytes, encoded_again.bytes) == 0) { stable = 0; }
+        display_encode_free(&encoded_again);
+        display_decode_free(&decoded);
+        display_encode_free(&encoded);
+        display_list_free(&list);
+        free[u8](&payload);
+        payload_length = payload_length + 1;
+    }
+    expect(state, stable,
+        "64 payload lengths preserve canonical resource bytes through decode and re-encode");
+}
+
 fn main() i32 {
     let state: TestState = TestState{ .passed = 0, .failed = 0 };
     round_trip_contract(&state);
     malformed_contract(&state);
     encode_rejection_contract(&state);
+    resource_payload_sweep(&state);
     let passed_text: []u8 = _zag_i64_to_str(state.passed as i64);
     let failed_text: []u8 = _zag_i64_to_str(state.failed as i64);
     _zag_print("Display-list codec contract: pass="); _zag_print(passed_text);

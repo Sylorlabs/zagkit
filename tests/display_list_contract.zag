@@ -15,6 +15,18 @@ fn expect(state: *TestState, condition: i32, name: []u8) void {
 fn build_scene(color: i64) DisplayList {
     let list: DisplayList = display_list_make();
     let owner: NodeKey = node_key(7);
+    _ = display_list_add_resource(&list,
+        render_resource_spec(101, RenderResourceKind.path, "PATH", 1));
+    let image_resource: RenderResourceSpec = render_resource_spec(
+        202, RenderResourceKind.image, "RGBA", 2
+    );
+    image_resource.width = 1; image_resource.height = 1;
+    image_resource.color_space = RenderColorSpace.srgb;
+    _ = display_list_add_resource(&list, image_resource);
+    _ = display_list_add_resource(&list,
+        render_resource_spec(303, RenderResourceKind.glyph_run, "GLYPHS", 3));
+    _ = display_list_add_resource(&list,
+        render_resource_spec(404, RenderResourceKind.effect, "EFFECT", 4));
     _ = display_list_push(&list, display_op(DisplayOpKind.save, owner));
 
     let clip: DisplayOp = display_op(DisplayOpKind.clip_rect, owner);
@@ -64,6 +76,8 @@ fn scene_contract(state: *TestState) void {
     let second: DisplayList = build_scene(10000);
     let changed: DisplayList = build_scene(10001);
     expect(state, first.ops.len == 11 && first.stack_depth == 0 && first.layer_depth == 0, "display list records a balanced scene");
+    expect(state, first.resources.resources.len == 4 && first.revision == 15,
+        "display list owns every referenced resource and includes resource revisions");
     expect(state, first.ops.data[4].kind == DisplayOpKind.draw_path && first.ops.data[5].kind == DisplayOpKind.draw_image && first.ops.data[6].kind == DisplayOpKind.draw_glyph_run, "paths, images, and glyph runs remain explicit operations");
     expect(state, first.ops.data[7].kind == DisplayOpKind.begin_layer && first.ops.data[8].kind == DisplayOpKind.apply_effect, "layers and effects remain explicit operations");
     expect(state, first.content_hash == second.content_hash, "identical scenes produce the same deterministic content hash");
@@ -79,6 +93,14 @@ fn scene_contract(state: *TestState) void {
     expect(state, display_list_verify(first) == DisplayError.content_mutated, "out-of-contract raw mutation is detected before rendering");
     first.ops.data[3].paint.red = first.ops.data[3].paint.red - 1;
     expect(state, display_list_verify(first) == DisplayError.none, "restored sealed content verifies again");
+    first.resources.resources.data[0].payload.data[0] =
+        first.resources.resources.data[0].payload.data[0] + 1;
+    expect(state, display_list_verify(first) == DisplayError.content_mutated,
+        "display verification detects owned resource payload mutation");
+    first.resources.resources.data[0].payload.data[0] =
+        first.resources.resources.data[0].payload.data[0] - 1;
+    expect(state, display_list_verify(first) == DisplayError.none,
+        "restored resource bytes restore complete display identity");
 
     display_list_free(&changed);
     display_list_free(&second);
@@ -114,6 +136,26 @@ fn rejection_contract(state: *TestState) void {
     _ = display_list_push(&list, display_op(DisplayOpKind.restore, node_key(1)));
     expect(state, display_list_seal(&list) == DisplayError.none && list.sealed == 1, "a corrected stack seals without rebuilding the list");
     display_list_free(&list);
+
+    let missing: DisplayList = display_list_make();
+    let missing_path: DisplayOp = display_op(DisplayOpKind.draw_path, node_key(2));
+    missing_path.resource_id = 99;
+    _ = display_list_push(&missing, missing_path);
+    expect(state, display_list_seal(&missing) == DisplayError.invalid_resource &&
+        missing.error_index == 0 && missing.sealed == 0,
+        "sealing fails at the exact missing resource reference");
+    display_list_free(&missing);
+
+    let mismatched: DisplayList = display_list_make();
+    _ = display_list_add_resource(&mismatched,
+        render_resource_spec(5, RenderResourceKind.effect, "FX", 1));
+    let wrong_path: DisplayOp = display_op(DisplayOpKind.draw_path, node_key(3));
+    wrong_path.resource_id = 5;
+    _ = display_list_push(&mismatched, wrong_path);
+    expect(state, display_list_seal(&mismatched) == DisplayError.invalid_resource &&
+        mismatched.error_index == 0,
+        "resource kind mismatches cannot masquerade as drawable payloads");
+    display_list_free(&mismatched);
 }
 
 fn deterministic_sweep(state: *TestState) void {

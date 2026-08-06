@@ -38,11 +38,13 @@ include a generated capability record and exact Zag compiler revision.
   targeting, and explicit scale-aware pixel fallback.
 - A bounded owned render-resource store with typed stable IDs, canonical order,
   exact replacement revisions, copied payloads, byte accounting, sealing,
-  mutation detection, and explicit decoder and serialization boundaries.
+  mutation detection, typed display-list reference validation, and explicit
+  decoder boundaries.
 - An experimental immutable display list for explicit paints, resources, clips,
   transforms, layers, and effects with deterministic content identity.
 - A versioned canonical display-list codec with bounded validated decoding and
-  byte-identical replay round trips.
+  byte-identical replay round trips, upgraded to ZKDL version 2 with owned
+  resource metadata, payload, allocation-policy, and revision serialization.
 - The first deterministic CPU-oracle subset for fixed-point fills, clipping,
   axis-aligned transforms, fractional coverage, and source-over alpha.
 - Strict executable headless contracts in CI using the exact pinned Zag

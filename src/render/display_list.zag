@@ -1,6 +1,7 @@
 @import("std:list")
 @import("../core/geometry.zag")
 @import("../core/view_contract.zag")
+@import("resources.zag")
 
 enum DisplayOpKind {
     save,
@@ -60,6 +61,7 @@ struct DisplayOp {
 
 struct DisplayList {
     ops: ArrayList[DisplayOp],
+    resources: RenderResourceStore,
     sealed: i32,
     stack_depth: i32,
     layer_depth: i32,
@@ -129,20 +131,30 @@ fn display_op(kind: DisplayOpKind, owner: NodeKey) DisplayOp {
     };
 }
 
-fn display_list_make() DisplayList {
+fn display_list_make_with_resource_limits(max_resources: i32,
+    max_total_bytes: i64, max_payload_bytes: i64) DisplayList {
+    let resources: RenderResourceStore = render_resource_store_make(
+        max_resources, max_total_bytes, max_payload_bytes
+    );
     return DisplayList{
         .ops = make[DisplayOp](32),
+        .resources = resources,
         .sealed = 0,
         .stack_depth = 0,
         .layer_depth = 0,
         .revision = 0,
-        .content_hash = 17,
+        .content_hash = display_mix(17, resources.content_hash),
         .last_error = DisplayError.none,
         .error_index = 0 - 1,
     };
 }
 
+fn display_list_make() DisplayList {
+    return display_list_make_with_resource_limits(4096, 268435456, 33554432);
+}
+
 fn display_list_free(list: *DisplayList) void {
+    render_resource_store_free(&list.*.resources);
     free[DisplayOp](&list.*.ops);
 }
 
@@ -176,10 +188,77 @@ fn display_hash_op(hash: i64, op: DisplayOp) i64 {
     return display_mix(result, op.parameter);
 }
 
+fn display_list_calculate_hash(list: DisplayList) i64 {
+    let hash: i64 = display_mix(17, list.resources.content_hash);
+    let i: i32 = 0;
+    while (i < list.ops.len) {
+        hash = display_hash_op(hash, list.ops.data[i]);
+        i = i + 1;
+    }
+    return hash;
+}
+
+fn display_list_add_resource(list: *DisplayList,
+    spec: RenderResourceSpec) RenderResourceError {
+    if (list.*.sealed != 0) { return RenderResourceError.sealed; }
+    let error: RenderResourceError = render_resource_add(&list.*.resources, spec);
+    if (error == RenderResourceError.none) {
+        list.*.revision = list.*.ops.len as i64 + list.*.resources.revision;
+        list.*.content_hash = display_list_calculate_hash(list.*);
+        list.*.last_error = DisplayError.none;
+        list.*.error_index = 0 - 1;
+    }
+    return error;
+}
+
+fn display_list_replace_resource(list: *DisplayList,
+    spec: RenderResourceSpec) RenderResourceError {
+    if (list.*.sealed != 0) { return RenderResourceError.sealed; }
+    let error: RenderResourceError = render_resource_replace(&list.*.resources, spec);
+    if (error == RenderResourceError.none) {
+        list.*.revision = list.*.ops.len as i64 + list.*.resources.revision;
+        list.*.content_hash = display_list_calculate_hash(list.*);
+        list.*.last_error = DisplayError.none;
+        list.*.error_index = 0 - 1;
+    }
+    return error;
+}
+
 fn display_fail(list: *DisplayList, error: DisplayError) DisplayError {
     list.*.last_error = error;
     list.*.error_index = list.*.ops.len;
     return error;
+}
+
+fn display_fail_at(list: *DisplayList, error: DisplayError, index: i32) DisplayError {
+    list.*.last_error = error;
+    list.*.error_index = index;
+    return error;
+}
+
+fn display_expected_resource_kind(kind: DisplayOpKind) i64 {
+    return switch (kind) {
+        .draw_path => RenderResourceKind.path as i64,
+        .draw_image => RenderResourceKind.image as i64,
+        .draw_glyph_run => RenderResourceKind.glyph_run as i64,
+        .apply_effect => RenderResourceKind.effect as i64,
+        .save => 0 - 1,
+        .restore => 0 - 1,
+        .clip_rect => 0 - 1,
+        .concat_transform => 0 - 1,
+        .fill_rect => 0 - 1,
+        .stroke_rect => 0 - 1,
+        .begin_layer => 0 - 1,
+        .end_layer => 0 - 1,
+    };
+}
+
+fn display_resource_reference_valid(list: DisplayList, op: DisplayOp) i32 {
+    let expected: i64 = display_expected_resource_kind(op.kind);
+    if (expected < 0) { return 1; }
+    let index: i32 = render_resource_find_index(list.resources, op.resource_id);
+    if (index < 0) { return 0; }
+    return (list.resources.resources.data[index].kind as i64 == expected) as i32;
 }
 
 fn display_op_requires_bounds(kind: DisplayOpKind) i32 {
@@ -227,7 +306,7 @@ fn display_list_push(list: *DisplayList, op: DisplayOp) DisplayError {
     if (op.kind == DisplayOpKind.restore) { list.*.stack_depth = list.*.stack_depth - 1; }
     if (op.kind == DisplayOpKind.begin_layer) { list.*.layer_depth = list.*.layer_depth + 1; }
     if (op.kind == DisplayOpKind.end_layer) { list.*.layer_depth = list.*.layer_depth - 1; }
-    list.*.revision = list.*.revision + 1;
+    list.*.revision = list.*.ops.len as i64 + list.*.resources.revision;
     list.*.content_hash = display_hash_op(list.*.content_hash, op);
     list.*.last_error = DisplayError.none;
     list.*.error_index = 0 - 1;
@@ -238,6 +317,18 @@ fn display_list_seal(list: *DisplayList) DisplayError {
     if (list.*.sealed != 0) { return DisplayError.none; }
     if (list.*.stack_depth != 0) { return display_fail(list, DisplayError.unbalanced_stack); }
     if (list.*.layer_depth != 0) { return display_fail(list, DisplayError.unbalanced_layers); }
+    let i: i32 = 0;
+    while (i < list.*.ops.len) {
+        if (display_resource_reference_valid(list.*, list.*.ops.data[i]) == 0) {
+            return display_fail_at(list, DisplayError.invalid_resource, i);
+        }
+        i = i + 1;
+    }
+    if (render_resource_store_seal(&list.*.resources) != RenderResourceError.none) {
+        return display_fail(list, DisplayError.invalid_resource);
+    }
+    list.*.content_hash = display_list_calculate_hash(list.*);
+    list.*.revision = list.*.ops.len as i64 + list.*.resources.revision;
     list.*.sealed = 1;
     list.*.last_error = DisplayError.none;
     list.*.error_index = 0 - 1;
@@ -246,12 +337,18 @@ fn display_list_seal(list: *DisplayList) DisplayError {
 
 fn display_list_verify(list: DisplayList) DisplayError {
     if (list.sealed == 0) { return DisplayError.not_sealed; }
-    let hash: i64 = 17;
+    if (render_resource_store_verify(list.resources) != RenderResourceError.none) {
+        return DisplayError.content_mutated;
+    }
+    let hash: i64 = display_mix(17, list.resources.content_hash);
     let stack_depth: i32 = 0;
     let layer_depth: i32 = 0;
     let i: i32 = 0;
     while (i < list.ops.len) {
         let op: DisplayOp = list.ops.data[i];
+        if (display_resource_reference_valid(list, op) == 0) {
+            return DisplayError.content_mutated;
+        }
         hash = display_hash_op(hash, op);
         if (op.kind == DisplayOpKind.save) { stack_depth = stack_depth + 1; }
         if (op.kind == DisplayOpKind.restore) {
@@ -266,7 +363,7 @@ fn display_list_verify(list: DisplayList) DisplayError {
         i = i + 1;
     }
     if (stack_depth != 0 || layer_depth != 0 || hash != list.content_hash ||
-        list.revision != list.ops.len as i64) {
+        list.revision != list.ops.len as i64 + list.resources.revision) {
         return DisplayError.content_mutated;
     }
     return DisplayError.none;

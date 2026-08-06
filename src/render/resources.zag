@@ -169,7 +169,8 @@ fn render_resource_fail(store: *RenderResourceStore,
 fn render_resource_spec_valid(spec: RenderResourceSpec) RenderResourceError {
     if (spec.id <= 0) { return RenderResourceError.invalid_id; }
     if (spec.payload.len <= 0) { return RenderResourceError.invalid_payload; }
-    if (spec.revision < 0 || spec.format_tag <= 0 || spec.width < 0 ||
+    if (spec.revision < 0 || spec.revision > 2147483647 ||
+        spec.format_tag <= 0 || spec.width < 0 ||
         spec.height < 0 || spec.width > 1048576 || spec.height > 1048576) {
         return RenderResourceError.invalid_metadata;
     }
@@ -327,6 +328,7 @@ fn render_resource_store_verify(store: RenderResourceStore) RenderResourceError 
     if (render_resource_store_configuration_valid(store) == 0 ||
         store.resources.len > store.max_resources) { return RenderResourceError.content_mutated; }
     let total: i64 = 0;
+    let expected_revision: i64 = 0;
     let i: i32 = 0;
     while (i < store.resources.len) {
         let resource: RenderResource = store.resources.data[i];
@@ -337,10 +339,14 @@ fn render_resource_store_verify(store: RenderResourceStore) RenderResourceError 
             return RenderResourceError.content_mutated;
         }
         total = total + resource.payload.len as i64;
+        if (resource.revision < 0 || resource.revision > 2147483647) {
+            return RenderResourceError.content_mutated;
+        }
+        expected_revision = expected_revision + resource.revision + 1;
         if (total > store.max_total_bytes) { return RenderResourceError.content_mutated; }
         i = i + 1;
     }
-    if (total != store.total_bytes || store.revision < store.resources.len as i64 ||
+    if (total != store.total_bytes || store.revision != expected_revision ||
         render_resource_store_hash(store) != store.content_hash) {
         return RenderResourceError.content_mutated;
     }
