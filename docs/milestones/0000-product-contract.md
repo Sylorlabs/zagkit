@@ -25,11 +25,12 @@
 ## Zag audit boundary
 
 The release pin resolves the clean Zag `agent/zagkit-prerequisites` commit
-`63e3979d91bfd06f53ee317bd6bf428673814bdf`. It was exported from the exact Git
+`43870455a07bf8e7d4adf38fad807fe3baee4e26`. It was exported from the exact Git
 tree, self-hosted to a byte-identical stage-2/stage-3 fixpoint without external
-tools, and passed the resource, aggregate switch value-flow, foreground-cache,
-cache-integration, tooling, checksum, stored-zlib, and general DEFLATE gates on
-x86-64 and qemu-user ARM64. The neighboring
+tools, and passed resource embedding plus the 14-check general DEFLATE suite on
+x86-64 and qemu-user ARM64. It also passed generic numeric raw-pointer slice
+formation, aliasing, nested-slice, explicit-bound, and negative contracts on both
+compiled architectures. The neighboring
 local Zag checkout still contains extensive unrelated
 changes; those changes were not used to claim capabilities or construct this
 release identity.

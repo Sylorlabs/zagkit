@@ -4,17 +4,18 @@
   "zag": {
     "repository": "https://github.com/Sylorlabs/zag",
     "resolved_ref": "refs/heads/agent/zagkit-prerequisites",
-    "commit": "63e3979d91bfd06f53ee317bd6bf428673814bdf",
+    "commit": "43870455a07bf8e7d4adf38fad807fe3baee4e26",
     "compiler_version": "2026.07.0-dev",
     "edition": "2026"
   },
   "audited_on": "2026-08-06",
   "pin_policy": "Every Zagkit release replaces this record with the exact Zag source commit used to build and test it. Branch names and local dirty state are never release identities.",
   "evidence": [
-    "Zag commit 63e3979d91bfd06f53ee317bd6bf428673814bdf was exported from the exact clean Git tree and audited on 2026-08-06.",
+    "Zag commit 43870455a07bf8e7d4adf38fad807fe3baee4e26 was exported from the exact clean Git tree and audited on 2026-08-06.",
     "zag-poc/zag.mod at the pinned commit declares version 2026.07.0-dev and edition 2026.",
     "The clean pinned tree self-hosted to a byte-identical stage-2/stage-3 fixpoint with no external tools and rebuilt zagd.",
-    "The clean pinned tree passed resource embedding and aggregate switch value-flow witnesses on x86-64 and qemu-user ARM64 plus foreground-cache, cache-integration, and tooling gates.",
+    "The clean pinned tree self-hosts the generic numeric raw-pointer slice repair to a byte-identical compiler fixpoint; its aliasing, mutation, nested-slice, explicit-bound, and negative contracts pass on x86-64 and qemu-user ARM64.",
+    "The clean pinned tree passes compiler-owned resource embedding conformance on x86-64 and qemu-user ARM64, including parser, formatter, cache, and deterministic identity cases.",
     "The pinned tree provides pure-Zag CRC32, Adler32, deterministic stored-zlib output, and general stored/fixed/dynamic DEFLATE inflate; the same 14-check suite passes on x86-64 and qemu-user ARM64."
   ]
 }

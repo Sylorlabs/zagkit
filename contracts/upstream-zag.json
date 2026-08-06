@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "audited_repository": "https://github.com/Sylorlabs/zag",
-  "audited_commit": "63e3979d91bfd06f53ee317bd6bf428673814bdf",
+  "audited_commit": "43870455a07bf8e7d4adf38fad807fe3baee4e26",
   "audited_on": "2026-08-06",
   "state_vocabulary": ["available", "partial", "missing"],
   "evidence_rule": "Available requires native executable conformance at the audited commit. Source presence, a cross compile, or a dirty working tree does not qualify.",
@@ -125,6 +125,14 @@
       "needed_by": [2, 3, 5, 6, 7],
       "evidence": "The pinned zagd architecture documents a checksummed incremental declaration index and background semantic rechecking, but not an in-process incremental parser or stable state-preserving library reload contract.",
       "exit_gate": "Dependency invalidation, state preserving reload, ABI rejection, rollback, file race, crash recovery, and deterministic event hooks pass end to end."
+    },
+    {
+      "id": "generic-numeric-pointer-slices",
+      "category": "language-runtime",
+      "state": "available",
+      "needed_by": [2, 3, 4, 5, 6, 7],
+      "evidence": "The exact clean pinned commit self-hosts bounded *E[lo..hi] formation for every supported numeric slice family. zag-poc/tests/run_generic_pointer_slice.sh passes typed []i64 formation, parameter flow, backing-store mutation aliasing, nested slices, x86-64 execution, qemu-user ARM64 execution, and rejection of open-ended raw-pointer slices.",
+      "exit_gate": "Keep typed bounded raw-pointer slice formation, element stride, aliasing, nested slicing, negative diagnostics, and cross-target execution green at every pinned compiler revision."
     },
     {
       "id": "checksum-and-zlib-inflate",
