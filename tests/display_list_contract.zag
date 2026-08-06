@@ -1,0 +1,141 @@
+@import("../src/render/display_list.zag")
+
+struct TestState { passed: i32, failed: i32 }
+
+fn expect(state: *TestState, condition: i32, name: []u8) void {
+    if (condition != 0) {
+        state.*.passed = state.*.passed + 1;
+        _zag_print("ok  "); _zag_println(name);
+    } else {
+        state.*.failed = state.*.failed + 1;
+        _zag_print("FAIL "); _zag_println(name);
+    }
+}
+
+fn build_scene(color: i64) DisplayList {
+    let list: DisplayList = display_list_make();
+    let owner: NodeKey = node_key(7);
+    _ = display_list_push(&list, display_op(DisplayOpKind.save, owner));
+
+    let clip: DisplayOp = display_op(DisplayOpKind.clip_rect, owner);
+    clip.bounds = rect(0, 0, 200 * unit_scale(), 100 * unit_scale());
+    _ = display_list_push(&list, clip);
+
+    let transform: DisplayOp = display_op(DisplayOpKind.concat_transform, owner);
+    transform.transform.translate_x = 4 * unit_scale();
+    transform.transform.translate_y = 8 * unit_scale();
+    _ = display_list_push(&list, transform);
+
+    let fill: DisplayOp = display_op(DisplayOpKind.fill_rect, owner);
+    fill.bounds = rect(0 - unit_scale(), 0, 80 * unit_scale(), 40 * unit_scale());
+    fill.paint = paint_rgba16(color, 20000, 30000, 65535);
+    _ = display_list_push(&list, fill);
+
+    let path: DisplayOp = display_op(DisplayOpKind.draw_path, owner);
+    path.resource_id = 101;
+    path.paint = paint_rgba16(65535, 65535, 65535, 50000);
+    _ = display_list_push(&list, path);
+
+    let image: DisplayOp = display_op(DisplayOpKind.draw_image, owner);
+    image.resource_id = 202;
+    image.bounds = rect(10, 20, 32 * unit_scale(), 24 * unit_scale());
+    _ = display_list_push(&list, image);
+
+    let glyphs: DisplayOp = display_op(DisplayOpKind.draw_glyph_run, owner);
+    glyphs.resource_id = 303;
+    _ = display_list_push(&list, glyphs);
+
+    let layer: DisplayOp = display_op(DisplayOpKind.begin_layer, owner);
+    layer.bounds = rect(0, 0, 100 * unit_scale(), 50 * unit_scale());
+    layer.parameter = 50000;
+    _ = display_list_push(&list, layer);
+
+    let effect: DisplayOp = display_op(DisplayOpKind.apply_effect, owner);
+    effect.resource_id = 404;
+    effect.parameter = 12 * unit_scale();
+    _ = display_list_push(&list, effect);
+    _ = display_list_push(&list, display_op(DisplayOpKind.end_layer, owner));
+    _ = display_list_push(&list, display_op(DisplayOpKind.restore, owner));
+    return list;
+}
+
+fn scene_contract(state: *TestState) void {
+    let first: DisplayList = build_scene(10000);
+    let second: DisplayList = build_scene(10000);
+    let changed: DisplayList = build_scene(10001);
+    expect(state, first.ops.len == 11 && first.stack_depth == 0 && first.layer_depth == 0, "display list records a balanced scene");
+    expect(state, first.ops.data[4].kind == DisplayOpKind.draw_path && first.ops.data[5].kind == DisplayOpKind.draw_image && first.ops.data[6].kind == DisplayOpKind.draw_glyph_run, "paths, images, and glyph runs remain explicit operations");
+    expect(state, first.ops.data[7].kind == DisplayOpKind.begin_layer && first.ops.data[8].kind == DisplayOpKind.apply_effect, "layers and effects remain explicit operations");
+    expect(state, first.content_hash == second.content_hash, "identical scenes produce the same deterministic content hash");
+    expect(state, first.content_hash != changed.content_hash, "one paint-channel change alters content identity");
+
+    let old_hash: i64 = first.content_hash;
+    let old_len: i32 = first.ops.len;
+    expect(state, display_list_seal(&first) == DisplayError.none && first.sealed == 1, "balanced display lists seal immutably");
+    expect(state, display_list_verify(first) == DisplayError.none, "sealed content verifies against its deterministic identity");
+    expect(state, display_list_push(&first, display_op(DisplayOpKind.save, node_key(7))) == DisplayError.sealed, "sealed display lists reject mutation");
+    expect(state, first.ops.len == old_len && first.content_hash == old_hash, "rejected mutation preserves list content and identity");
+    first.ops.data[3].paint.red = first.ops.data[3].paint.red + 1;
+    expect(state, display_list_verify(first) == DisplayError.content_mutated, "out-of-contract raw mutation is detected before rendering");
+    first.ops.data[3].paint.red = first.ops.data[3].paint.red - 1;
+    expect(state, display_list_verify(first) == DisplayError.none, "restored sealed content verifies again");
+
+    display_list_free(&changed);
+    display_list_free(&second);
+    display_list_free(&first);
+}
+
+fn rejection_contract(state: *TestState) void {
+    let list: DisplayList = display_list_make();
+    expect(state, display_list_verify(list) == DisplayError.not_sealed, "unsealed builders cannot claim immutable verification");
+    expect(state, display_list_push(&list, display_op(DisplayOpKind.restore, node_key(1))) == DisplayError.stack_underflow && list.ops.len == 0, "restore underflow fails before mutation");
+    expect(state, display_list_push(&list, display_op(DisplayOpKind.end_layer, node_key(1))) == DisplayError.layer_underflow && list.ops.len == 0, "layer underflow fails before mutation");
+
+    let invalid_rect: DisplayOp = display_op(DisplayOpKind.fill_rect, node_key(1));
+    invalid_rect.bounds = rect(0, 0, 0, 10);
+    expect(state, display_list_push(&list, invalid_rect) == DisplayError.invalid_geometry, "empty draw geometry fails visibly");
+
+    let missing_image: DisplayOp = display_op(DisplayOpKind.draw_image, node_key(1));
+    missing_image.bounds = rect(0, 0, 10, 10);
+    expect(state, display_list_push(&list, missing_image) == DisplayError.invalid_resource, "resource operations require explicit identity");
+
+    let bad_layer: DisplayOp = display_op(DisplayOpKind.begin_layer, node_key(1));
+    bad_layer.bounds = rect(0, 0, 10, 10);
+    bad_layer.parameter = 70000;
+    expect(state, display_list_push(&list, bad_layer) == DisplayError.invalid_parameter, "layer opacity outside RGBA16 range is rejected");
+
+    _ = display_list_push(&list, display_op(DisplayOpKind.save, node_key(1)));
+    expect(state, display_list_seal(&list) == DisplayError.unbalanced_stack && list.sealed == 0, "unbalanced save state cannot seal");
+    _ = display_list_push(&list, display_op(DisplayOpKind.restore, node_key(1)));
+    expect(state, display_list_seal(&list) == DisplayError.none && list.sealed == 1, "a corrected stack seals without rebuilding the list");
+    display_list_free(&list);
+}
+
+fn deterministic_sweep(state: *TestState) void {
+    let expected_hash: i64 = 0;
+    let stable: i32 = 1;
+    let i: i32 = 0;
+    while (i < 50) {
+        let list: DisplayList = build_scene(12000);
+        if (i == 0) { expected_hash = list.content_hash; }
+        if (list.content_hash != expected_hash) { stable = 0; }
+        display_list_free(&list);
+        i = i + 1;
+    }
+    expect(state, stable, "50-build sweep preserves deterministic operation identity");
+}
+
+fn main() i32 {
+    let state: TestState = TestState{ .passed = 0, .failed = 0 };
+    scene_contract(&state);
+    rejection_contract(&state);
+    deterministic_sweep(&state);
+    let passed_text: []u8 = _zag_i64_to_str(state.passed as i64);
+    let failed_text: []u8 = _zag_i64_to_str(state.failed as i64);
+    _zag_print("Display-list contract: pass="); _zag_print(passed_text);
+    _zag_print(" fail="); _zag_println(failed_text);
+    _zag_str_free(passed_text);
+    _zag_str_free(failed_text);
+    if (state.failed == 0) { return 0; }
+    return 1;
+}

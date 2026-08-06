@@ -40,3 +40,10 @@ roles, actions, focus order, live regions, ranges, selection, and text
 navigation. Its stable `NodeKey` identity is shared with rendering, so future
 accessibility adapters, semantic tests, and Zagkit Talkback automation can
 query product meaning without reconstructing it from pixels.
+
+Rendering begins with an experimental immutable `DisplayList`. Every operation
+retains its owning `NodeKey`; paths, images, glyph runs, clips, transforms,
+RGBA16 paints, layers, and effects remain explicit rather than backend calls.
+Balanced lists seal with deterministic content identity, and verification
+detects mutation outside the builder contract before rendering. Resource
+storage, serialization, damage, the CPU oracle, and GPU transports remain open.

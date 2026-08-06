@@ -21,6 +21,8 @@ include a generated capability record and exact Zag compiler revision.
   live regions, ranges, selection, text navigation, and stable generated IDs.
 - The first in-process Zagkit Talkback dispatcher and machine-readable protocol
   contract with ID-first targeting and explicit scale-aware pixel fallback.
+- An experimental immutable display list for explicit paints, resources, clips,
+  transforms, layers, and effects with deterministic content identity.
 
 ## 0.1.0-experimental.0 (unreleased)
 

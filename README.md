@@ -11,8 +11,8 @@ modern materials and asset fidelity, and a complete PrismStudio UI replacement.
 
 This repository is at **0.1.0-experimental.0**. It currently contains the
 accepted product contract, executable Milestone 0 checks, and the first
-deterministic state, keyed reconciliation, geometry, Flex, and semantics
-slices. It does not yet contain a usable renderer, window shell, component
+deterministic state, keyed reconciliation, geometry, Flex, semantics, Talkback,
+and display-list slices. It does not yet contain a usable renderer, window shell, component
 library, or supported platform backend. Nothing in this repository is a Zagkit
 1.0 release.
 
@@ -41,7 +41,7 @@ is normative in [DEPENDENCIES.md](DEPENDENCIES.md).
 | Product and architecture contract | accepted | [RFC index](docs/rfcs/README.md) |
 | Compiler dependency | pinned, prerequisites incomplete | [toolchain lock](contracts/toolchain.json) |
 | Platform shells | unavailable | [support matrix](SUPPORT.md) |
-| Headless core | experimental state dependencies, keyed reconciliation, geometry, Flex, and semantics | [headless test](tools/test-headless.sh) |
+| Headless core | experimental state, reconciliation, geometry, Flex, semantics, Talkback, and display lists | [headless test](tools/test-headless.sh) |
 | Components and visual language | inventory only, visual review pending | [component inventory](contracts/components.json) |
 | Flex and Zagkit Talkback | Flex foundation and in-process ID-first Talkback dispatch executing; native transport remains unavailable | [Talkback contract](docs/automation/talkback.md) |
 | Benchmarks | scene specifications only, no results | [benchmark contract](benchmarks/README.md) |
@@ -77,6 +77,14 @@ advertised, applies recorded display scale to pixel bounds, and logs accepted
 and rejected requests in one ordered stream.
 It is not yet a native automation transport; the exact available and unavailable
 surface is documented in [the protocol contract](docs/automation/talkback.md).
+
+The immutable display-list slice records retained ownership, clips, transforms,
+fixed-point geometry, RGBA16 paints, paths, images, glyph runs, layers, and
+effects as explicit operations. Invalid geometry, resources, parameters, and
+stack balance fail before mutation; the builder rejects writes after sealing,
+and verification detects out-of-contract raw mutation against deterministic
+content identity. Path/resource storage, serialization, damage, CPU
+rasterization, and GPU transport remain open.
 
 Run the deterministic headless foundation test with:
 

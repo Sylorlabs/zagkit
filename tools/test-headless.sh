@@ -22,5 +22,7 @@ cd "$root"
 "$tmp/semantics-contract"
 "$znc" tests/talkback_contract.zag --no-zagd --no-analyze --no-foreground-cache -o "$tmp/talkback-contract"
 "$tmp/talkback-contract"
+"$znc" tests/display_list_contract.zag --no-zagd --no-analyze --no-foreground-cache -o "$tmp/display-list-contract"
+"$tmp/display-list-contract"
 
-printf 'headless test: PASS (state, reconciliation, constraints, Flex, semantics, and Zagkit Talkback)\n'
+printf 'headless test: PASS (state, reconciliation, constraints, Flex, semantics, Talkback, and display lists)\n'
