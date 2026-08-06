@@ -24,6 +24,7 @@ for path in \
     LICENSE README.md GOAL.md CHANGELOG.md CONTRIBUTING.md GOVERNANCE.md VERSIONING.md \
     SUPPORT.md SECURITY.md DEPENDENCIES.md ROADMAP.md zag.mod \
     docs/design/visual-direction.md docs/quality/release-gates.md \
+    docs/automation/talkback.md \
     docs/architecture/README.md docs/milestones/0000-product-contract.md \
     benchmarks/README.md; do
     require_file "$path"
@@ -61,7 +62,7 @@ done
 
 for path in contracts/toolchain.json contracts/platforms.json \
     contracts/upstream-zag.json contracts/components.json \
-    contracts/benchmark-scenes.json; do
+    contracts/benchmark-scenes.json contracts/talkback-protocol.json; do
     require_json "$path"
 done
 
@@ -178,6 +179,28 @@ jq -e '
   (.global_performance_contract.unexplained_two_frame_stalls_per_ten_minutes_max == 0) and
   (.global_performance_contract.regression_without_reviewed_waiver_percent_max == 5.0)
 ' contracts/benchmark-scenes.json >/dev/null || fail "benchmark scene contract is incomplete"
+
+jq -e '
+  .name == "Zagkit Talkback" and
+  .android_assistive_technology == "Android TalkBack" and
+  (.version | test("^[0-9]+\\.[0-9]+\\.[0-9]+-experimental$")) and
+  .targeting.primary == "semantic-id" and
+  .targeting.pixel_fallback.capability_gated == true and
+  .targeting.pixel_fallback.record_coordinates == true and
+  .targeting.pixel_fallback.record_scale == true and
+  .targeting.pixel_fallback.may_report_as_id_target == false and
+  (.commands | length == 16) and
+  ((.commands | unique | length) == (.commands | length)) and
+  (.statuses | length >= 9) and
+  ((.statuses | unique | length) == (.statuses | length)) and
+  (.request_fields | index("target-kind") != null) and
+  (.request_fields | index("semantics-revision") != null) and
+  (.response_fields | index("event-sequence") != null) and
+  (.response_fields | index("emitted-action") != null) and
+  .event_contract.ordered == true and
+  .event_contract.records_accepted_and_rejected == true and
+  .current_runtime_truth."native-transport" == "unavailable"
+' contracts/talkback-protocol.json >/dev/null || fail "Zagkit Talkback protocol contract is incomplete"
 
 if [ -d ../zag/.git ]; then
     git -C ../zag cat-file -e "$compiler_commit^{commit}" 2>/dev/null \

@@ -43,7 +43,7 @@ is normative in [DEPENDENCIES.md](DEPENDENCIES.md).
 | Platform shells | unavailable | [support matrix](SUPPORT.md) |
 | Headless core | experimental state dependencies, keyed reconciliation, geometry, Flex, and semantics | [headless test](tools/test-headless.sh) |
 | Components and visual language | inventory only, visual review pending | [component inventory](contracts/components.json) |
-| Flex and Zagkit Talkback | Flex foundation executing; wrap, grid, overlay, breakpoints, and Talkback remain | [Flex contract](tests/flex_contract.zag) |
+| Flex and Zagkit Talkback | Flex foundation and in-process ID-first Talkback dispatch executing; native transport remains unavailable | [Talkback contract](docs/automation/talkback.md) |
 | Benchmarks | scene specifications only, no results | [benchmark contract](benchmarks/README.md) |
 
 Run the repository contract gate with:
@@ -69,6 +69,14 @@ capabilities, deterministic focus order, live-region state, ranges, selection,
 and text-navigation bounds. Invalid parents, duplicate IDs and focus order,
 malformed ranges, and malformed selections fail visibly before tree mutation.
 Native accessibility adapters and the Zagkit Talkback protocol remain open.
+
+The first in-process Zagkit Talkback dispatcher now resolves queries and emits
+validated actions against those semantic IDs, rejects stale revisions and
+unavailable actions, keeps pixel fallback disabled unless explicitly
+advertised, applies recorded display scale to pixel bounds, and logs accepted
+and rejected requests in one ordered stream.
+It is not yet a native automation transport; the exact available and unavailable
+surface is documented in [the protocol contract](docs/automation/talkback.md).
 
 Run the deterministic headless foundation test with:
 

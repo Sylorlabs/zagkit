@@ -19,6 +19,8 @@ include a generated capability record and exact Zag compiler revision.
 - Deterministic fixed-point geometry, constraints, and single-line Flex.
 - An experimental owned semantics tree with roles, actions, focus order,
   live regions, ranges, selection, text navigation, and stable generated IDs.
+- The first in-process Zagkit Talkback dispatcher and machine-readable protocol
+  contract with ID-first targeting and explicit scale-aware pixel fallback.
 
 ## 0.1.0-experimental.0 (unreleased)
 

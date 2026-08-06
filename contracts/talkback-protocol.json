@@ -1,0 +1,83 @@
+{
+  "name": "Zagkit Talkback",
+  "version": "0.1.0-experimental",
+  "android_assistive_technology": "Android TalkBack",
+  "transport": "not-yet-available",
+  "targeting": {
+    "primary": "semantic-id",
+    "id_scope": ["application", "window", "retained-node", "generation"],
+    "pixel_fallback": {
+      "state": "experimental",
+      "capability_gated": true,
+      "record_coordinates": true,
+      "record_scale": true,
+      "may_report_as_id_target": false
+    }
+  },
+  "commands": [
+    "discover",
+    "query",
+    "click",
+    "type",
+    "key",
+    "focus",
+    "scroll",
+    "drag",
+    "gesture",
+    "wait",
+    "assert",
+    "screenshot",
+    "timeline",
+    "capability-report",
+    "snapshot",
+    "replay"
+  ],
+  "statuses": [
+    "accepted",
+    "invalid-request",
+    "invalid-timeout",
+    "stale-semantics",
+    "target-not-found",
+    "action-unavailable",
+    "pixel-fallback-disabled",
+    "pixel-out-of-bounds",
+    "unsupported-command"
+  ],
+  "request_fields": [
+    "request-id",
+    "command",
+    "target-kind",
+    "target-id",
+    "semantics-revision",
+    "timeout-ms",
+    "pixel-x",
+    "pixel-y",
+    "scale-numerator",
+    "scale-denominator"
+  ],
+  "response_fields": [
+    "request-id",
+    "status",
+    "target-kind",
+    "target-id",
+    "semantics-revision",
+    "event-sequence",
+    "resolved-node-index",
+    "result-count",
+    "emitted-action"
+  ],
+  "event_contract": {
+    "ordered": true,
+    "records_accepted_and_rejected": true,
+    "retains_target_kind": true,
+    "retains_pixel_scale": true
+  },
+  "current_runtime_truth": {
+    "semantic-query": "experimental",
+    "id-actions": "experimental-event-emission",
+    "pixel-fallback": "experimental-disabled-by-default",
+    "screenshots": "unavailable",
+    "replay": "unavailable",
+    "native-transport": "unavailable"
+  }
+}
