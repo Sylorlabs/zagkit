@@ -55,12 +55,17 @@ records the fallback as assumed.
 adapts a successful owned result to the normal copying resource-store API, so
 the decoder can be freed immediately after insertion.
 
+The end-to-end CPU contract decodes an encoded alpha image, transfers it through
+the canonical resource store, and compares full-surface hashes at 1x, 1.25x,
+1.5x, 2x, and 3x. The same golden hashes pass on x86-64 and ARM64; this is
+headless scale evidence, not native compositor or monitor evidence.
+
 Dimension, encoded-data, decompressed-scanline, output-pixel, palette-index,
 filter, and arithmetic limits fail before out-of-bounds access. Explicit iCCP,
 non-sRGB chromaticity conversion, and non-sRGB gAMA values fail as unsupported
 color profiles. Unknown interlace methods fail before decompression. These
-unavailable paths keep `G3-PNG` open until general profile conversion, scale
-suites, and broader malformed-input fuzzing land.
+unavailable paths keep `G3-PNG` open until general profile conversion and
+broader malformed-input fuzzing land.
 
 Linear-light filtering, Display P3 conversion, wide-gamut surfaces, mipmapping,
 high-quality downsampling, image tiling, and GPU upload caches also remain

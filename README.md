@@ -180,8 +180,9 @@ sRGB RGBA8. Both noninterlaced rows and all seven Adam7 passes are supported.
 Focused contracts pass identically on x86-64 and ARM64/qemu, an independent
 240-file corpus covers every accepted color and bit-depth family across five
 zlib strategies, and an independently encoded Adam7 image matches exact source
-pixels. Arbitrary ICC/chromaticity conversion, scale goldens, and broader
-fuzzing remain open, so the `G3-PNG`
+pixels. End-to-end decoded-resource CPU goldens pass at 1x, 1.25x, 1.5x, 2x,
+and 3x on both compiled architectures. Arbitrary ICC/chromaticity conversion
+and broader fuzzing remain open, so the `G3-PNG`
 completion box remains deliberately unchecked. See the
 [image and PNG ingestion contract](docs/architecture/images.md).
 
