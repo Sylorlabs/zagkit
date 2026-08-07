@@ -10,22 +10,30 @@
 - Repository contracts:
   - `./tools/check-contracts.sh`
   - Evidence: [check-contracts](check-contracts-2026-08-07.log)
-  - Evidence (this session): [check-contracts-late](check-contracts-2026-08-07-late2.log)
+  - Evidence (this session): [check-contracts-late](check-contracts-2026-08-07-late5.log)
+  - Evidence (this continuation): [check-contracts-lateb](check-contracts-2026-08-07-late6b.log), [check-contracts-continued](check-contracts-2026-08-07-final.log)
 - CLI smoke:
   - `./tools/test-zagkit-cli.sh`
   - Evidence: [cli smoke](cli-smoke-2026-08-07.log)
-  - Evidence (this session): [cli smoke-late](cli-smoke-2026-08-07-late.log)
+  - Evidence (this session): [cli smoke-late](cli-smoke-2026-08-07-late5.log)
+  - Evidence (this continuation): [cli smoke-lateb](cli-smoke-2026-08-07-late6b.log), [cli smoke-final](cli-smoke-2026-08-07-final.log)
 - Visual-direction pilot scope:
   - `./tools/verify-visual-direction-artifacts.sh --mode pilot --exact`
-  - Evidence: [pilot verification](visual-direction-pilot-2026-08-07.log)
+  - Evidence: [pilot verification latest](visual-direction-pilot-2026-08-07-late5.log)
+  - Visual-direction launch: [artifacts completeness check (continued)](visual-direction-matrix-req-existing-2026-08-07-final.log)
+- Launch path:
+  - `./zagkit run --headless-only --show-ascii` and `./zagkit --help`
+  - Evidence: [headless launch latest](headless-launch-2026-08-07-latest.log), [headless-launch help](headless-launch-help-2026-08-07-latest.log), [headless launch open attempt](headless-launch-open-2026-08-07-latest.log)
 - Headless core:
   - `./zagkit test`
-  - Evidence (this session): [headless-contract-latest](headless-contract-latest-2026-08-07.log)
+  - Evidence (this session): [headless-contract-latest (new)](headless-contract-latest-2026-08-07-late6.log)
+  - Evidence (this continuation): [headless-contract-latest (new)](headless-contract-latest-2026-08-07-late7.log), [headless-contract-latest-final](headless-contract-latest-2026-08-07-final.log)
 - Visual-direction generation behavior:
   - `./tools/generate-visual-direction-pilot.sh` (324 placeholders rendered)
+  - Output location: [artifacts/visual-direction](../../artifacts/visual-direction)
 - Visual-direction completeness gating:
   - `./tools/visual-direction-matrix-report.sh --require-existing` (reports 100,368 artifacts missing)
-  - Evidence: [matrix completeness check](visual-direction-matrix-req-existing-2026-08-07.log)
+  - Evidence: [matrix completeness check latest](visual-direction-matrix-req-existing-2026-08-07-late2.log)
 
 ### Talkback inspection movement
 
@@ -33,7 +41,11 @@
   - `discover` now includes deterministic tree evidence hash and result count.
   - `timeline`, `capability_report`, `snapshot`, `replay`, and action commands emit deterministic evidence hashes.
   - `replay` now records retained timeline length in `row_count`.
-  - Evidence: [headless contracts](headless-contract-latest-2026-08-07.log), [talkback-contract](talkback-contract-2026-08-07.log), [talkback source](../automation/talkback.zag), [talkback test](../tests/talkback_contract.zag)
+  - Evidence: [headless contracts](headless-contract-latest-2026-08-07.log), [talkback-contract](talkback-contract-2026-08-07.log), [talkback source](../../src/automation/talkback.zag), [talkback test](../../tests/talkback_contract.zag)
+
+- `G0-VISUAL-DIRECTION` moved from stalling to evidence-backed pilot scope:
+  - `./tools/generate-visual-direction-pilot.sh` produced the required 324-capture pilot set.
+  - Evidence: [pilot verification latest](visual-direction-pilot-2026-08-07-late5.log)
 
 ## Milestone movement
 
@@ -51,7 +63,7 @@
 
 ## Remaining blockers
 
-- `G0-VISUAL-DIRECTION` is still pending acceptance of an RFC and full comparison evidence.
+- `G0-VISUAL-DIRECTION` is still blocked waiting for full matrix captures and RFC acceptance.
 - Native platform milestones and Zag upstream prerequisites still require work outside this writable workspace:
   - Milestones 1, 5, 6, 7
   - Complete Linux/macOS/Windows/iOS/Android shells and platform seams

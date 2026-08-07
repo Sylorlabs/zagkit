@@ -1,0 +1,613 @@
+znc: wrote native binary /tmp/zagkit-headless.FMDX60/flex-contract (101299 bytes main, 0 external tools)
+ok  tight constraints define the container
+ok  leading padding is exact
+ok  gap is exact
+ok  third placement is deterministic
+ok  grow weight one receives one third
+ok  last grow item receives exact remainder
+ok  growth conserves the main extent
+ok  RTL starts at the physical right inset
+ok  RTL preserves logical order and exact gap
+ok  baseline style mutation persists before layout
+ok  baseline alignment is exact
+ok  baseline offsets remain deterministic
+ok  space-between keeps first edge
+ok  space-between distributes the first interval
+ok  space-between keeps last edge
+ok  invalid width constraints collapse safely
+ok  negative height constraints clamp safely
+ok  duplicate stable IDs fail visibly
+ok  min-size overflow is explicit
+ok  malformed single-line items fail at the exact index before placement
+ok  single-line intrinsic totals fail visibly before signed overflow
+ok  193-width property sweep conserves bounds and gaps
+Flex contract: pass=22 fail=0
+znc: wrote native binary /tmp/zagkit-headless.FMDX60/flex-adaptive-contract (148079 bytes main, 0 external tools)
+ok  semantic spacing resolves to exact density-aware units
+ok  spacing scale keeps explicit zero and largest token stable
+ok  adaptive style composes token padding and physical safe areas exactly
+ok  breakpoint boundaries are exact in density-independent content width
+ok  large text moves the same viewport to a safer compact composition
+ok  safe areas participate in breakpoint truth rather than clipping afterward
+ok  extreme platform insets clamp before content arithmetic
+ok  token padding cannot push normalized safe areas outside bounded layout geometry
+ok  row wrapping creates deterministic stable-ID line ranges
+ok  item gaps and line reset positions stay exact
+ok  line gaps and outer padding stay exact
+ok  wrapped layout reports clean overflow and deterministic identity
+ok  identical wrap inputs produce identical placement identity
+ok  RTL wrap reverses physical placement while preserving logical item order
+ok  center line alignment distributes cross-axis room exactly
+ok  line stretching distributes the exact remainder without changing item size
+ok  column wrapping advances physical columns with exact line gaps
+ok  column main-axis gaps remain exact
+ok  RTL column wrapping advances line bands from the physical right
+ok  wrapped baseline lines reserve ascent plus descent without clipping
+ok  grow and exact remainder distribution execute independently per wrapped line
+ok  oversized minimums wrap individually and retain exact main overflow truth
+ok  disabled wrapping preserves one line and reports all constrained overflow
+ok  duplicate stable IDs remain fail-visible through wrapped layout
+ok  25-width wrap sweep preserves logical IDs and physical content bounds
+ok  malformed item geometry fails at the exact item before placement
+ok  unsafe style extents fail before layout arithmetic
+ok  unbounded intrinsic totals fail visibly instead of wrapping signed arithmetic
+Flex adaptive contract: pass=28 fail=0
+znc: wrote native binary /tmp/zagkit-headless.FMDX60/measure-contract (143566 bytes main, 0 external tools)
+ok  intrinsic row visits its exact retained subtree
+ok  row intrinsic widths aggregate children gaps and padding exactly
+ok  row baseline aggregation reserves ascent descent and physical padding
+ok  unbounded constraints preserve preferred intrinsic size
+ok  tight constraints retain the exact rule that overrode preferred size
+ok  resolved baselines clamp safely while minimum overflow remains explicit
+ok  minimum constraints expand intrinsic preference with explicit per-axis rules
+ok  nested column and overlay measurement traverses each retained node once
+ok  overlay max and column sum aggregation compose deterministically
+ok  column baseline follows its first child and measurement retains identity
+ok  identical intrinsic trees produce bit-identical measurement identity
+ok  constraint input remains visible in identity even when resolved size is unchanged
+ok  intrinsic content changes alter deterministic measurement identity
+ok  Flex priorities map to explicit shrink resistance and intrinsic bounds
+ok  required intrinsic items preserve their exact extent under pressure
+ok  lower priority content yields more space than higher priority content
+ok  column intrinsic conversion maps vertical main and horizontal cross axes explicitly
+ok  layout trace retains independent measure and placement dependencies
+ok  duplicate dependency reads collapse without losing their phase or rule
+ok  one state change reports every affected layout operation
+ok  measurement invalidation names the exact reader generation ancestor phase and rule
+ok  placement invalidation retains the exact state revision edge and breakpoint reason
+ok  unread state produces no phantom layout work
+ok  duplicate retained IDs fail at the exact node before measurement
+ok  missing intrinsic children fail at the exact edge
+ok  missing intrinsic parents fail as missing retained nodes rather than child errors
+ok  retained intrinsic nodes cannot silently remain outside the measured root tree
+ok  one retained intrinsic node cannot have multiple layout owners
+ok  leaf nodes cannot masquerade as intrinsic layout containers
+ok  intrinsic cycles fail visibly without recursive runaway
+ok  nonmonotonic intrinsic ranges fail before constraint resolution
+ok  finite intrinsic aggregation cannot wrap bounded geometry
+ok  adversarial retained depth fails before exhausting the native call stack
+ok  first intrinsic observation retains a revisioned stability witness
+ok  changed intrinsic input at one revision fails as unstable measurement
+ok  an explicit content revision permits and records changed intrinsic input
+ok  intrinsic content revisions cannot regress behind retained stability truth
+ok  256-constraint sweep preserves exact bounded size and baseline invariants
+ok  288-tree aggregation sweep conserves child extents gaps padding and ownership
+Measurement contract: pass=39 fail=0
+znc: wrote native binary /tmp/zagkit-headless.FMDX60/overlay-contract (97348 bytes main, 0 external tools)
+ok  overlay resolves every stable item inside exact constrained bounds
+ok  logical start composes outer padding item insets and retained z-order
+ok  overlay center alignment distributes odd-independent free space deterministically
+ok  overlay end alignment reaches the physical trailing content edges
+ok  overlay stretch consumes available content without discarding intrinsic maxima
+ok  overlay retains baseline identity and explicit clean overflow truth
+ok  identical overlay inputs produce identical layout identity
+ok  RTL swaps logical start and end while preserving physical padding truth
+ok  layout identity records direction even when other overlay inputs match
+ok  unbounded overlay container derives exact preferred size from padding and insets
+ok  minimum intrinsic overlay size remains visible as per-axis overflow under pressure
+ok  overlay reports outer padding overflow even without children
+ok  duplicate overlay IDs fail at the exact item with owned empty output
+ok  unsupported overlay baseline alignment fails instead of pretending to align
+ok  nonmonotonic overlay intrinsics fail before placement
+ok  unsafe overlay insets fail before bounded arithmetic
+ok  253-extent overlay sweep preserves exact padding and stretch bounds
+Overlay contract: pass=17 fail=0
+znc: wrote native binary /tmp/zagkit-headless.FMDX60/grid-contract (148410 bytes main, 0 external tools)
+ok  grid resolves fixed and weighted fraction tracks against exact available width
+ok  grid auto placement is deterministic row-major and preserves input identity
+ok  grid spans include interior gaps and retained z-order without geometry ambiguity
+ok  grid exposes clean per-axis overflow and stable nonzero layout identity
+ok  identical grid inputs produce identical track and placement identity
+ok  spanning intrinsic content grows eligible tracks and determines an unbounded container
+ok  RTL mirrors logical grid columns and records direction in deterministic identity
+ok  single-row baseline alignment preserves typography across unequal glyph boxes
+ok  explicit grid collisions fail at the exact item by default
+ok  explicit overlap is opt-in and reports every occupied collision cell
+ok  duplicate grid IDs fail before placement
+ok  auto placement fails closed when no unoccupied span remains
+ok  partial auto coordinates are rejected instead of guessed
+ok  zero-weight fraction tracks fail typed validation
+ok  unshrinkable fixed tracks remain exact and expose quantified overflow
+ok  122-extent fraction sweep fills exact padded bounds without drift or hidden overflow
+Grid contract: pass=16 fail=0
+znc: wrote native binary /tmp/zagkit-headless.FMDX60/scroll-virtual-contract (95654 bytes main, 0 external tools)
+ok  scroll consumes exact in-bounds deltas and advances one revision
+ok  scroll exposes unconsumed boundary deltas for nested gesture handoff
+ok  boundary pressure performs no phantom state revision
+ok  identical scroll inputs produce identical mutation and retained-state identity
+ok  nearest reveal moves only enough to expose the complete target
+ok  center reveal resolves both axes against the authoritative viewport
+ok  logical horizontal scroll start mirrors to the physical RTL content edge
+ok  content reconciliation preserves an explicit anchor viewport position
+ok  identical anchored reconciliation stays completely idle
+ok  malformed scroll state fails before mutation
+ok  malformed reveal geometry fails closed
+ok  million-row layout finds the exact semantic visible range without a linear scan
+ok  million-row virtualization keeps live nodes and examined work independently bounded
+ok  virtual placement retains stable IDs and exact viewport-local geometry
+ok  identical million-row inputs produce bit-identical virtual layout identity
+ok  sparse variable extents preserve stable item identity and measured height revisions
+ok  anchor reconciliation absorbs size changes above the viewport without visible jumps
+ok  extent revisions and changed geometry alter deterministic virtual identity
+ok  horizontal virtualization mirrors logical item order under RTL
+ok  empty virtual collections retain padding and canonical empty semantic ranges
+ok  a viewport containing only leading padding reports no phantom visible item
+ok  live-node ceilings fail before unbounded viewport allocation
+ok  unsorted sparse extent overrides fail at the exact record
+ok  billion-row content extent overflow fails before multiplication or allocation
+ok  out-of-contract scroll coordinates fail with an exact typed reason
+ok  28-position virtual sweep preserves stable IDs exact anchors and logarithmic bounded work
+Scroll/virtual contract: pass=26 fail=0
+znc: wrote native binary /tmp/zagkit-headless.FMDX60/virtual-collections-contract (155429 bytes main, 0 external tools)
+ok  million-row Table projects the exact semantic row range without materializing the collection
+ok  Table bounds two-axis live cells while retaining pinned and overscanned columns
+ok  pinned headers and rows remain fixed while the body scrolls to a stable row ID
+ok  scrolling columns resolve exact logical offsets and maximum horizontal range
+ok  identical Table inputs produce identical cell identity and geometry
+ok  RTL mirrors pinned and scrolling Table columns without changing semantic order
+ok  Table resize exposes clamped consumption and advances exact model and column revisions
+ok  nonresizable pinned columns reject mutation without losing requested delta truth
+ok  Table cell residency ceilings fail before cell allocation
+ok  pinned Table columns must form one deterministic logical-leading region
+ok  duplicate Table column IDs fail at the exact column before layout
+ok  Tree projection removes collapsed descendants while preserving source and sibling identity
+ok  Tree virtualizes the expanded semantic projection with exact visible and live ranges
+ok  Tree indentation is logical and preserves the full selectable row frame
+ok  RTL moves Tree indentation to logical start without reordering nodes
+ok  expansion revisions restore descendants and alter deterministic projection identity
+ok  expanded Tree placement retains parent identity and original source index
+ok  duplicate Tree IDs fail before visible projection
+ok  Tree depth jumps fail at the exact malformed preorder node
+ok  Tree parent mismatches fail instead of inferring ownership
+ok  Tree leaves cannot silently own child nodes
+ok  initial virtual residency allocates one retained instance per live stable ID
+ok  virtual focus attaches to a retained stable ID
+ok  offscreen focus remains retained while nonfocused instances recycle within capacity
+ok  returning focused IDs restore the exact retained instance without generation drift
+ok  identical live residency performs no lifecycle revision or identity churn
+ok  duplicate live IDs fail before retained-store mutation
+ok  offscreen focus consumes explicit capacity instead of being silently recycled
+ok  Table scroll 4096-node Tree expansion and 100-window recycling sweeps preserve bounded stable identity
+Virtual collections contract: pass=29 fail=0
+znc: wrote native binary /tmp/zagkit-headless.FMDX60/state-reconcile-contract (33433 bytes main, 0 external tools)
+ok  state read returns the typed value
+ok  duplicate reads collapse to one exact dependency
+ok  state change records exact revisions
+ok  the recorded reader invalidates for its state change
+ok  invalidation names the exact read, reader, and revision edge
+ok  unread state does not invalidate the reader
+ok  binding reads and writes the target state
+ok  binding emits an auditable action
+ok  a fresh read is not invalidated by an older change
+ok  environment miss uses its explicit fallback
+ok  environment revisions change only when values change
+ok  environment returns the latest value
+ok  reconciliation reports reuse, update, and insertion exactly
+ok  stable keys preserve identity through reorder
+ok  fingerprint change advances only the updated node generation
+ok  kind replacement and missing keys retire old nodes
+ok  replacement gets a new identity while retained key stays stable
+ok  duplicate keys fail visibly and deterministically keep the first node
+ok  20-permutation sweep preserves identity without phantom work
+State/reconcile contract: pass=19 fail=0
+znc: wrote native binary /tmp/zagkit-headless.FMDX60/semantics-contract (91967 bytes main, 0 external tools)
+ok  a semantic root is accepted
+ok  a named actionable child is accepted
+ok  editable text navigation data is accepted
+ok  range semantics preserve value and step
+ok  owned semantic names are queryable by stable ID
+ok  owned descriptions and exact logical bounds are inspectable
+ok  semantic actions are explicit capabilities
+ok  selection and live-region state remain explicit
+ok  text value and selection remain inspectable
+ok  range value remains inspectable
+ok  semantic relationships retain their stable target ID
+ok  focus order is deterministic rather than insertion based
+ok  disabled nodes are excluded from focus traversal
+ok  tree revision advances exactly once per accepted node
+ok  duplicate IDs fail without mutating the tree
+ok  reserved sentinel IDs cannot masquerade as semantic nodes
+ok  missing parents report the exact rejected node
+ok  duplicate explicit focus order fails visibly
+ok  malformed range semantics are rejected
+ok  out-of-bounds text selection is rejected
+ok  negative semantic geometry is rejected without mutation
+ok  dangling semantic relationships fail closed
+ok  collection indices require a positive span
+ok  noncanonical semantic flags fail instead of leaking ambiguous state
+ok  virtual collection roots retain full logical row and column counts
+ok  live cells retain zero-based logical collection coordinates
+ok  tree level, set position, and expansion truth are explicit
+ok  tree metadata remains inspectable after ownership transfer
+ok  generated semantic IDs are deterministic for the same structural input
+ok  100 generated sibling IDs remain unique
+ok  generated IDs preserve parent scope generation
+ok  semantic transactions can roll back owned nodes and exact revision truth
+Semantics contract: pass=32 fail=0
+znc: wrote native binary /tmp/zagkit-headless.FMDX60/collection-semantics-contract (189668 bytes main, 0 external tools)
+ok  Table semantics retain full logical counts while materializing only live cells
+ok  Table semantic residency stays bounded by live layout output
+ok  Table cells expose stable ID-first coordinates and exact layout geometry
+ok  Table cell semantic IDs are deterministic from authoritative composite identity
+ok  Table identity collisions fail during preflight without partial tree mutation
+ok  fabricated Table cell identity is rejected before semantic mutation
+ok  Tree semantics retain the full expanded projection count with bounded live nodes
+ok  Tree items expose one-based level and truthful expansion action
+ok  Tree semantic position and row bounds follow stable visible identity
+ok  invalid virtual layouts cannot leak partial semantic nodes
+Collection semantics contract: pass=10 fail=0
+znc: wrote native binary /tmp/zagkit-headless.FMDX60/talkback-contract (121715 bytes main, 0 external tools)
+ok  discover returns node count and deterministic tree evidence hash
+ok  ID queries and declared semantic actions are accepted
+ok  ID queries resolve to an inspectable semantic node
+ok  Talkback query evidence exposes role, exact bounds, and declared actions
+ok  Talkback query evidence fingerprints owned text and explicit state
+ok  responses distinguish emitted actions from read-only queries
+ok  an ID action absent from semantics fails visibly
+ok  query and discover evidence hashes are deterministic and retained
+ok  failures retain deterministic evidence and stay inspectable
+ok  stale semantic revisions cannot silently target replacement nodes
+ok  missing ID targets return a structured failure
+ok  all action-oriented commands are accepted when command capabilities are enabled
+ok  interactive commands and inspectors emit deterministic evidence hashes
+ok  action dispatch is recorded in emitted-action evidence
+ok  inspect and timeline expose deterministic result counts
+ok  replay exposes retained timeline length as result metadata
+ok  commands not advertised by capability remain fail-closed
+ok  invalid timeout policy is rejected before dispatch
+ok  fail-closed results preserve deterministic evidence
+ok  accepted and rejected requests share one ordered evidence log
+ok  pixel fallback is disabled unless the backend advertises it
+ok  pixel attempts are never reported as ID targeting
+ok  pixel fallback resolves physical pixels through recorded display scale
+ok  pixel action emission is independent from ID-action capability
+ok  scaled pixel targets outside the viewport fail visibly
+ok  pixel evidence retains coordinates and scale
+ok  capability reporting is always queryable
+ok  screenshot remains unsupported until transport capture is implemented
+ok  snapshot and replay primitives are accepted when supported
+ok  query helpers expose deterministic result counts
+ok  the experimental protocol version is explicit
+Zagkit Talkback contract: pass=31 fail=0
+znc: wrote native binary /tmp/zagkit-headless.FMDX60/render-resources-contract (41089 bytes main, 0 external tools)
+ok  resource store accepts valid typed payloads with explicit metadata
+ok  owned resources are kept in canonical stable-ID order with exact byte accounting
+ok  resource payload bytes are copied into store ownership
+ok  binary lookup resolves exact IDs without fabricating missing resources
+ok  revisioned replacement preserves identity and updates owned bytes and content truth
+ok  stale replacement fails before payload mutation
+ok  resource identity cannot silently change kind during replacement
+ok  sealed resource stores verify complete owned content identity
+ok  sealed resource stores reject further mutation
+ok  out-of-contract payload mutation is detected before rendering
+ok  insertion order cannot change canonical resource identity
+ok  canonical stores remain independently verifiable after sealing
+ok  invalid allocation policy fails before payload ownership
+ok  nonpositive resource IDs fail visibly
+ok  empty resource payloads cannot claim an asset
+ok  new resource IDs must begin at canonical revision zero
+ok  decoded images require dimensions and color-space truth
+ok  per-resource byte ceilings fail before copying payloads
+ok  duplicate stable resource IDs fail before ownership changes
+ok  total byte ceilings are transactional and preserve prior resources
+ok  replacement of a missing ID fails without becoming insertion
+ok  unsealed stores cannot masquerade as immutable render evidence
+ok  resource-count ceilings fail before allocating a second payload
+Render resources contract: pass=23 fail=0
+znc: wrote native binary /tmp/zagkit-headless.FMDX60/path-contract (50568 bytes main, 0 external tools)
+ok  line commands require an open contour
+ok  close commands require an open contour
+ok  move line and close build a canonical contour
+ok  closed contours require a new move before geometry
+ok  coordinates outside the shared fixed-point domain fail before ownership changes
+ok  valid paths seal with deterministic immutable identity
+ok  sealed paths reject builder mutation
+ok  raw command mutation is detected by immutable verification
+ok  restoring exact command bytes restores path identity
+ok  empty paths cannot claim renderable identity
+ok  canonical path encoding has one bounded fixed-width record per command
+ok  path bytes carry the ZKPATH01 magic
+ok  valid bytes decode to the requested fill rule and a sealed path
+ok  round trip preserves signed coordinates and every curve verb
+ok  round trip preserves deterministic path identity
+ok  decode and re-encode are byte identical
+ok  bad path magic fails at byte zero
+ok  unknown path versions fail visibly
+ok  unknown fill rules fail before command allocation
+ok  unknown path verbs fail at the exact command record
+ok  unused coordinate fields must be canonical zeroes
+ok  path payload tampering fails deterministic identity verification
+ok  truncated command data reports the observed length
+ok  trailing path bytes fail canonical decoding
+ok  100-build sweep preserves canonical path identity
+Path contract: pass=25 fail=0
+znc: wrote native binary /tmp/zagkit-headless.FMDX60/image-contract (32414 bytes main, 0 external tools)
+ok  one RGBA8 texel with explicit sRGB metadata is canonical
+ok  non-image resources cannot masquerade as decoded pixels
+ok  unknown decoded-image schemas fail closed
+ok  RGBA8 payload length must match dimensions exactly
+ok  decoded images require explicit color-space truth
+ok  zero dimensions fail before size arithmetic
+ok  decoded RGBA8 byte accounting is exact
+ok  invalid dimensions never produce allocation sizes
+ok  multiplication beyond the hard byte domain fails without overflow
+Image contract: pass=9 fail=0
+znc: wrote native binary /tmp/zagkit-headless.FMDX60/png-encode-contract (196233 bytes main, 0 external tools)
+ok  one RGBA8 pixel produces the exact canonical PNG size
+ok  snapshot bytes begin with the PNG signature
+ok  IHDR declares one by one noninterlaced RGBA8 pixels
+ok  snapshot color intent is explicitly sRGB perceptual
+ok  every PNG chunk carries a valid IEEE CRC32
+ok  IEND terminates the file with no trailing bytes
+ok  IDAT decodes to filter zero followed by exact RGBA bytes
+ok  identical CPU surfaces produce byte-identical PNG snapshots
+ok  invalid surfaces cannot become screenshot evidence
+ok  surface byte-count mutation fails before PNG encoding
+PNG encode contract: pass=10 fail=0
+znc: wrote native binary /tmp/zagkit-headless.FMDX60/png-decode-contract (553245 bytes main, 0 external tools)
+ok  canonical screenshot PNG decodes to exact owned RGBA8 pixels
+ok  decoded PNG becomes a canonical owned image resource
+ok  None, Sub, Up, Average, and Paeth filters reconstruct exact bytes
+ok  decoded PNG resources match CPU goldens at 1x 1.25x 1.5x 2x and 3x
+ok  packed one-bit grayscale expands and applies transparent gray
+ok  packed indexed color expands palette entries and per-index alpha
+ok  RGB16 uses deterministic high-byte conversion and exact tRNS matching
+ok  grayscale-alpha16 expands to canonical RGBA8
+ok  RGBA16 expands each channel with one documented conversion policy
+ok  declared gamma and standard primaries convert without assumed profile truth
+ok  gamma without declared primaries keeps the fallback-profile truth visible
+ok  linear-gamma samples convert deterministically into canonical sRGB
+ok  meaningless zero gamma is ignored while fallback truth stays visible
+ok  Display P3 primaries convert through the bounded linear matrix path
+ok  non-D65 white points use deterministic Bradford adaptation
+ok  chromaticities without a transfer curve preserve fallback-profile truth
+ok  explicit sRGB takes precedence over accompanying gamma and chromaticities
+ok  duplicate color metadata fails before image decompression
+ok  singular chromaticities fail before decompression or conversion
+ok  bounded ICC matrix and identity TRCs execute as declared profile truth
+ok  Display P3 ICC matrix columns convert through the D50 PCS
+ok  understood iCCP takes precedence over compatibility color chunks
+ok  ICC tag offsets cannot escape the bounded decompressed profile
+ok  two-entry sampled ICC curves interpolate the complete input domain
+ok  multi-entry sampled ICC curves use deterministic linear interpolation
+ok  4096 sampled ICC parse decode and cleanup cycles preserve exact output
+ok  ICC lut16 input tables CLUT and output tables execute in declared order
+ok  4096 ICC lut16 parse decode and cleanup cycles preserve exact output
+ok  ICC lut16 grids above the bounded three dimensional ceiling fail closed
+ok  RGB to PCS lut16 profiles require the ICC mandated identity matrix
+ok  ambiguous lut8 PCSXYZ profiles remain an explicit unsupported path
+ok  ICC lut16 tables must consume exactly their declared bounded tag
+ok  ICC lut16 one dimensional tables require at least two entries
+ok  A2B0 LUT execution cannot impersonate a non-perceptual rendering intent
+ok  ICC mAB A curves nonuniform CLUT and B curves execute in declared order
+ok  4096 ICC mAB curve CLUT and cleanup cycles preserve exact output
+ok  ICC mAB unused CLUT dimensions must remain canonical zeroes
+ok  ICC mAB A CLUT B execution requires the complete permitted combination
+ok  ICC mAB embedded curve types fail before CLUT ownership escapes
+ok  ICC mAB CLUT precision is restricted to declared 8 or 16 bit data
+ok  ICC mAB CLUT bytes cannot overlap an embedded curve sequence
+ok  sampled ICC curve counts above the execution ceiling fail before allocation
+ok  sampled ICC curve tables cannot cross their declared tag bounds
+ok  iCCP profile names reject leading and consecutive spaces
+ok  unknown iCCP compression methods fail before profile inflate
+ok  duplicate iCCP chunks fail before image decompression
+ok  ICC parametric gamma curves execute through the same linear pipeline
+ok  ICC type-3 sRGB parametric curves execute both piecewise branches
+ok  ICC parametric curve types 1 2 and 4 execute their declared equations
+ok  differing ICC channel TRCs execute independently before matrix conversion
+ok  unimplemented higher-precedence cICP metadata fails explicitly
+ok  duplicate required ICC tags fail without ambiguous profile execution
+ok  ICC declared size must equal the bounded decompressed profile
+ok  corrupt iCCP zlib streams fail before ICC tag parsing
+ok  eight full gamma ramps match independent sRGB transfer references
+ok  all seven Adam7 passes reconstruct exact RGBA8 pixels through every filter
+ok  144 Adam7 dimension combinations preserve empty-pass and edge geometry
+ok  Adam7 deinterlaces packed sub-byte samples without losing bit identity
+ok  PNG IDAT accepts independently generated dynamic-Huffman zlib streams
+ok  invalid signatures fail before chunk parsing
+ok  chunk corruption fails CRC validation before decompression
+ok  bytes after IEND fail canonical full-file decoding
+ok  every strict PNG prefix fails without reading beyond available bytes
+ok  unknown PNG interlace methods fail before decompression
+ok  chunk type reserved bits fail even when the attacker repairs the CRC
+ok  oversized dimensions fail before allocation or decompression
+ok  unknown scanline filters fail explicitly
+ok  compressed expansion beyond exact scanline size hits the inflate ceiling
+ok  indexed images require a palette before inflate
+ok  palette indices outside declared entries fail without out-of-bounds access
+PNG decode contract: pass=70 fail=0
+znc: wrote native binary /tmp/zagkit-headless.FMDX60/png-decode-fuzz (441723 bytes main, 0 external tools)
+ok  20000 deterministic arbitrary byte streams remain bounded and owned
+ok  20000 structured PNG mutations fail closed or retain canonical output
+ok  20000 arbitrary ICC profiles remain bounded and fail closed
+ok  every strict canonical prefix preserves failure-result ownership invariants
+ok  4096 decode and cleanup cycles preserve exact pixels without state leakage
+PNG decode fuzz: pass=5 fail=0
+znc: wrote native binary /tmp/zagkit-headless.FMDX60/render-headless-reference (200921 bytes main, 0 external tools)
+Reference snapshot contract: pass=3 fail=0
+znc: wrote native binary /tmp/zagkit-headless.FMDX60/display-list-contract (123983 bytes main, 0 external tools)
+ok  display list records a balanced scene
+ok  display list owns every referenced resource and includes resource revisions
+ok  paths, images, and glyph runs remain explicit operations
+ok  layers and effects remain explicit operations
+ok  identical scenes produce the same deterministic content hash
+ok  one paint-channel change alters content identity
+ok  balanced display lists seal immutably
+ok  sealed content verifies against its deterministic identity
+ok  sealed display lists reject mutation
+ok  rejected mutation preserves list content and identity
+ok  out-of-contract raw mutation is detected before rendering
+ok  restored sealed content verifies again
+ok  display verification detects owned resource payload mutation
+ok  restored resource bytes restore complete display identity
+ok  unsealed builders cannot claim immutable verification
+ok  restore underflow fails before mutation
+ok  layer underflow fails before mutation
+ok  empty draw geometry fails visibly
+ok  resource operations require explicit identity
+ok  layer opacity outside RGBA16 range is rejected
+ok  raw paint channels outside RGBA16 fail before mutation
+ok  rectangle strokes require a positive logical width
+ok  draw-image paint keeps RGB and stroke fields canonical while alpha owns opacity
+ok  unbalanced save state cannot seal
+ok  a corrected stack seals without rebuilding the list
+ok  sealing fails at the exact missing resource reference
+ok  resource kind mismatches cannot masquerade as drawable payloads
+ok  canonical path validation rejects opaque owned bytes before operation validation
+ok  decoded image byte counts are validated before operation references
+ok  50-build sweep preserves deterministic operation identity
+Display-list contract: pass=30 fail=0
+znc: wrote native binary /tmp/zagkit-headless.FMDX60/display-list-codec-contract (156447 bytes main, 0 external tools)
+ok  sealed display list encodes resource records payload bytes and operations to the exact size
+ok  codec carries the ZKDL magic
+ok  valid bytes decode to a sealed display list
+ok  round trip preserves deterministic identity
+ok  round trip preserves retained ownership
+ok  round trip preserves signed geometry and RGBA16 paint
+ok  round trip preserves replacement revision metadata and exact owned payload bytes
+ok  decode and re-encode are byte identical
+ok  bad magic fails at byte zero
+ok  unsupported versions fail visibly
+ok  unknown operation kinds fail at the exact record
+ok  content tampering fails deterministic identity verification
+ok  unknown resource kinds fail at the exact resource record
+ok  decoded resource kind mismatch fails before the referenced operation can seal
+ok  invalid resource metadata fails at its record before payload ownership
+ok  payload lengths cannot cross the declared bounded resource section
+ok  serialized allocation policy must remain within hard decoder limits
+ok  resource history revisions must reconstruct exactly before sealing
+ok  decoded operations cannot reference absent resource IDs
+ok  malformed typed path payloads fail at their resource payload before operation decoding
+ok  truncated headers fail with the observed length
+ok  trailing bytes fail canonical decoding
+ok  unsealed builders cannot be serialized as immutable replay input
+ok  64 payload lengths preserve canonical resource bytes through decode and re-encode
+Display-list codec contract: pass=24 fail=0
+znc: wrote native binary /tmp/zagkit-headless.FMDX60/cpu-raster-contract (232787 bytes main, 0 external tools)
+ok  sealed fill list rasterizes successfully
+ok  opaque RGBA16 red resolves exactly to RGBA8
+ok  fill bounds include only covered pixels
+ok  raster evidence counts touched pixels exactly
+ok  left fractional edge receives exact half coverage
+ok  right fractional edge receives matching half coverage
+ok  source-over alpha is deterministic and rounded symmetrically
+ok  clip and translation compose in fixed-point logical space
+ok  state operations and clipped work are counted exactly
+ok  identical sealed lists produce identical CPU pixels
+ok  centered rectangle strokes rasterize as bounded analytic rings
+ok  one logical pixel strokes split exact coverage across inner and outer edges
+ok  stroke corners subtract inner area with deterministic rounding
+ok  canonical decoded images render through the explicit draw-image operation
+ok  one-to-one image rendering preserves exact RGBA8 texels including transparency
+ok  bilinear scaling is symmetric and aligns source and destination pixel centers
+ok  fractional image edges and operation opacity compose without dark fringes
+ok  unimplemented color conversion fails before image pixels are touched
+ok  canonical line paths rasterize as one deterministic display operation
+ok  8 by 8 path sampling produces exact symmetric diagonal coverage
+ok  even-odd fill removes nested contours regardless of matching orientation
+ok  non-zero fill retains nested contours with matching winding
+ok  quadratic and cubic flattening produces stable nonempty CPU output
+ok  path raster work exceeding the deterministic budget fails before touching pixels
+ok  path rendering participates in the retained transform and clip stack
+ok  transformed path coverage is clipped at subpixel sample positions
+ok  unsealed display lists cannot reach the CPU oracle
+ok  unimplemented layer compositing fails closed at the exact operation
+ok  invalid surface dimensions fail without allocation claims
+ok  unsafe transform arithmetic is rejected before multiplication
+CPU raster contract: pass=30 fail=0
+znc: wrote native binary /tmp/zagkit-headless.FMDX60/input-contract (139392 bytes main, 0 external tools)
+ok  highest z-order clipped node wins overlap
+ok  local clip excludes the top node without hiding lower content
+ok  affine inverse returns exact local coordinates for rotated content
+ok  duplicate hit IDs fail before mutation
+ok  missing hit parent fails visibly
+ok  singular transforms never enter the hit tree
+ok  unsafe transform translation never enters the hit tree
+ok  unsafe direct hit coordinates fail closed before affine arithmetic
+ok  capture cannot target a pointer before its down phase
+ok  pointer down targets top node and advances focus
+ok  enabled node can capture an active pointer identity
+ok  captured move remains ID-routed outside bounds with local coordinates
+ok  pointer up routes to capture then releases it
+ok  uncaptured outside move has no phantom target
+ok  input evidence is one monotonic ordered stream
+ok  invalid pointers fail visibly without escaping the event log
+ok  focus requests enforce enabled focusable targets
+ok  disabled capture target releases and reroutes from current truth
+ok  cancel routes once to capture then clears active pointer state
+Input contract: pass=19 fail=0
+znc: wrote native binary /tmp/zagkit-headless.FMDX60/replay-contract (664961 bytes main, 0 external tools)
+ok  sealed tape preserves one canonical ordered event stream
+ok  complete tape applies every event without hidden skips
+ok  state revisions and monotonic clock replay exactly
+ok  backend activation loss and recovery remain observable in final truth
+ok  replay regenerates input motion semantics measurement layout display and CPU identities
+ok  replayed clock samples advance interruptible motion state
+ok  replayed state regenerates the expected wrapped Flex line structure
+ok  two executions of the same sealed tape are bit-identical
+ok  sealed tape mutation fails before any event is applied
+ok  unsealed tapes cannot masquerade as replay evidence
+ok  sealed tapes reject appended events without mutation
+ok  invalid events fail before tape revision or hash changes
+ok  unused event fields must stay zero for one canonical tape representation
+ok  stale state revisions fail at the exact ordered event
+ok  clock regression fails at the exact ordered event
+ok  device loss without an active backend fails closed
+ok  recovery without a recorded loss fails closed
+ok  backend identity cannot silently change during loss
+ok  state changes propagate through motion semantics measurement layout display and CPU output
+ok  state replay crosses Flex wrapping boundaries deterministically
+ok  pointer differences change input identity without contaminating scene generation
+Replay contract: pass=21 fail=0
+znc: wrote native binary /tmp/zagkit-headless.FMDX60/motion-contract (148884 bytes main, 0 external tools)
+ok  idle clocks perform no motion work and schedule no phantom frame
+ok  refresh-rate changes update the explicit frame deadline
+ok  refresh-rate changes retain an observable frame reason
+ok  invalid display rates fail without mutating scheduler truth
+ok  fixed-step springs are independent of refresh callback grouping
+ok  spring integration advances position and velocity without teleporting
+ok  running motion requests another frame even when a callback repeats the same clock
+ok  identical supplied clocks produce identical full motion evidence
+ok  settled springs snap exactly and produce no continuous idle work
+ok  interruption preserves exact position and incoming velocity
+ok  reversal preserves exact position and incoming velocity
+ok  resize retargeting preserves continuity while changing destination
+ok  gesture handoff transfers position and velocity exactly
+ok  continuity changes retain ordered semantic frame reasons
+ok  keyframes interpolate exact position and segment velocity from owned data
+ok  keyframe direction changes preserve exact deterministic velocity
+ok  keyframe timelines settle exactly and stop scheduling frames
+ok  settled timelines remain completely idle
+ok  reduced motion uses an explicit snap substitution for spatial movement
+ok  reduced motion can use a caller-authored opacity substitution timeline
+ok  tracks cannot start without an authoritative supplied clock
+ok  duplicate stable motion IDs fail before allocation
+ok  running motion cannot be skipped by advancing the clock outside tick
+ok  clock regression fails before scheduler or track mutation
+ok  unbounded suspend jumps fail visibly before expensive catch-up
+ok  retargeting a missing stable ID fails visibly
+ok  malformed keyframe order fails before ownership transfer
+ok  reduced opacity substitution rejects spatial values masquerading as a fade
+ok  spatial springs require an explicit snap reduced-motion substitution
+Motion contract: pass=29 fail=0
+headless test: PASS (state, reconciliation, intrinsic measurement, constraints, Flex, Grid, Overlay, scroll, virtual list, Table, Tree, recycling, collection semantics, Talkback, owned render resources, canonical paths and images, bounded PNG decode, display lists, CPU shape and image raster, deterministic PNG snapshots, input, replay, and motion)

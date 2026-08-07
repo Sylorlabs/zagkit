@@ -332,7 +332,7 @@ fn talkback_emits_action(command: TalkbackCommand) i32 {
 fn talkback_record(session: *TalkbackSession, tree_revision: i64, request: TalkbackRequest, status: TalkbackStatus) TalkbackResponse {
     let sequence: i64 = session.*.next_sequence;
     session.*.next_sequence = session.*.next_sequence + 1;
-    push[TalkbackEvent](&session.*.events, TalkbackEvent{
+    let recorded_event: TalkbackEvent = TalkbackEvent{
         .sequence = sequence,
         .request_id = request.request_id,
         .command = request.command,
@@ -344,7 +344,8 @@ fn talkback_record(session: *TalkbackSession, tree_revision: i64, request: Talkb
         .pixel_y = request.pixel_y,
         .scale_numerator = request.scale_numerator,
         .scale_denominator = request.scale_denominator,
-    });
+    };
+    push[TalkbackEvent](&session.*.events, recorded_event);
     return TalkbackResponse{
         .request_id = request.request_id,
         .status = status,
@@ -369,7 +370,7 @@ fn talkback_record(session: *TalkbackSession, tree_revision: i64, request: Talkb
         .description_length = 0,
         .value_length = 0,
         .state_flags = 0,
-        .evidence_hash = 0,
+        .evidence_hash = talkback_event_hash(recorded_event),
     };
 }
 

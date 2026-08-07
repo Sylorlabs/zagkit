@@ -246,8 +246,17 @@ You can also use the local CLI shim for the current headless-only phase:
 viewer to open `artifacts/launch/headless-reference.png` when a viewer command
 is available (`xdg-open`/`open`).
 
-`./zagkit run` currently builds and executes the deterministic headless reference
-scene, then writes `artifacts/launch/headless-reference.png`.
+`./zagkit build` and `./zagkit run` now support project paths for the bootstrap
+flow:
+
+```sh
+./zagkit build --path <project-dir> --output <binary>
+./zagkit run --project <project-dir> --output <png>
+```
+
+When no explicit `--binary` is provided, `./zagkit run` compiles the default
+headless reference source and writes `artifacts/launch/headless-reference.png`.
+When `--binary` is provided, it executes that binary directly.
 
 `./zagkit init` and `./zagkit build` are scaffolding today. They are intentionally
 not a full platform CLI yet because native shells and packaging are still

@@ -1,0 +1,4 @@
+zagkit: running headless-only reference path
+zagkit: running headless reference from /home/micah/Desktop/Sylorlabs/zagkit/tools/render-headless-reference.zag
+znc: wrote native binary /home/micah/Desktop/Sylorlabs/zagkit/.zagkit/headless-reference (200921 bytes main, 0 external tools)
+zagkit: wrote /home/micah/Desktop/Sylorlabs/zagkit/artifacts/launch/headless-reference.png

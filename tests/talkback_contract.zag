@@ -42,6 +42,8 @@ fn id_target_contract(state: *TestState) void {
     let type_button: TalkbackResponse = talkback_dispatch(&session, tree, viewport, talkback_request(5, TalkbackCommand.type_text, node_key(2), tree.revision));
     expect(state, discover.status == TalkbackStatus.accepted && discover.result_count == 3 && discover.evidence_hash != 0,
         "discover returns node count and deterministic tree evidence hash");
+    let stale: TalkbackResponse = talkback_dispatch(&session, tree, viewport, talkback_request(6, TalkbackCommand.click, node_key(2), tree.revision - 1));
+    let missing: TalkbackResponse = talkback_dispatch(&session, tree, viewport, talkback_request(7, TalkbackCommand.click, node_key(99), tree.revision));
     expect(state, query.status == TalkbackStatus.accepted && click.status == TalkbackStatus.accepted && type_field.status == TalkbackStatus.accepted, "ID queries and declared semantic actions are accepted");
     expect(state, query.resolved_node_index == semantics_find_index(tree, node_key(2)) && query.result_count == 1, "ID queries resolve to an inspectable semantic node");
     expect(state, query.resolved_role == SemanticRole.button && query.has_bounds == 1 &&
@@ -55,8 +57,8 @@ fn id_target_contract(state: *TestState) void {
     expect(state, type_button.status == TalkbackStatus.action_unavailable, "an ID action absent from semantics fails visibly");
 
     expect(state, query.evidence_hash != 0 && discover.evidence_hash != 0, "query and discover evidence hashes are deterministic and retained");
-    let stale: TalkbackResponse = talkback_dispatch(&session, tree, viewport, talkback_request(6, TalkbackCommand.click, node_key(2), tree.revision - 1));
-    let missing: TalkbackResponse = talkback_dispatch(&session, tree, viewport, talkback_request(7, TalkbackCommand.click, node_key(99), tree.revision));
+    expect(state, stale.evidence_hash != 0 && missing.evidence_hash != 0,
+        "failures retain deterministic evidence and stay inspectable");
     expect(state, stale.status == TalkbackStatus.stale_semantics, "stale semantic revisions cannot silently target replacement nodes");
     expect(state, missing.status == TalkbackStatus.target_not_found, "missing ID targets return a structured failure");
 
@@ -90,6 +92,7 @@ fn id_target_contract(state: *TestState) void {
     expect(state, replay.row_count == 13, "replay exposes retained timeline length as result metadata");
     expect(state, unsupported.status == TalkbackStatus.unsupported_command, "commands not advertised by capability remain fail-closed");
     expect(state, bad_timeout.status == TalkbackStatus.invalid_timeout, "invalid timeout policy is rejected before dispatch");
+    expect(state, unsupported.evidence_hash != 0 && bad_timeout.evidence_hash != 0, "fail-closed results preserve deterministic evidence");
     expect(state, session.events.len == 17 && session.events.data[16].sequence == 17, "accepted and rejected requests share one ordered evidence log");
 
     talkback_session_free(&session);
