@@ -6,13 +6,13 @@ variant tuple, and interaction state.
 - Directions: `direction-a-glass-clarity`, `direction-b-precision-fabric`,
   `direction-c-vector-utility`.
 - Variant tuple: `scale` x `theme` x `contrast` x `direction` x `text_scale` x
-  `motion` x `transparency`.
+  `motion` x `transparency` x `locale`.
 - Locale set: `en-US`, `ar-EG`, `he-IL`, `hi-IN`, `ja-JP`, `th-TH`,
   `zh-Hant-TW`.
 
 ## Capture naming convention
 
-`artifacts/visual-direction/<direction-id>/<scene-id>/<variant-key>.png`
+`artifacts/visual-direction/<direction-id>/<scene-id>/<locale>/<variant-key>.png`
 
 `variant-key` is canonicalized as:
 
@@ -73,4 +73,3 @@ When the comparison is complete, this section becomes the final recommendation:
 - Tradeoffs accepted:
 - Known risks:
 - Additional waivers required:
-

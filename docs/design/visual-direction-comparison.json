@@ -61,6 +61,23 @@
       "dragging"
     ]
   },
+  "artifact_layout": {
+    "root": "artifacts/visual-direction",
+    "capture_path_template": "{root}/{direction}/{scene}/{locale}/{variant_key}.png",
+    "variant_key_template": "scale-{scale}-theme-{theme}-contrast-{contrast}-dir-{direction}-text-{text_scale}-motion-{motion}-trans-{transparency}",
+    "scale_format": {
+      "1.0": "1p0",
+      "1.25": "1p25",
+      "1.5": "1p5",
+      "2.0": "2p0",
+      "3.0": "3p0"
+    },
+    "text_scale_format": {
+      "1.0": "1p0",
+      "1.3": "1p3",
+      "2.0": "2p0"
+    }
+  },
   "evidence_requirements": {
     "visual": [
       "crisp-type-at-all-scales",

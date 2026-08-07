@@ -30,7 +30,17 @@ Deliverables:
   final target.
 
 
-A machine-readable comparison manifest now lives at `docs/design/visual-direction-comparison.json` and records exact scenes, variants, states, and decision questions.
+A machine-readable comparison manifest now lives at
+`docs/design/visual-direction-comparison.json` and records exact scenes,
+variants, states, and decision questions.
+
+Run:
+
+```sh
+./tools/visual-direction-matrix-report.sh
+```
+
+to print expected scope and detect missing recommendation fields.
 
 ## Required decision package
 

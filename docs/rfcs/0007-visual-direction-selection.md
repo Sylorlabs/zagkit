@@ -42,6 +42,15 @@ The manifest defines the exact comparison scope:
 - `docs/design/visual-direction-comparison.json`
 - `docs/design/visual-direction-comparison-matrix.md`
 
+Execution command:
+
+```sh
+./tools/visual-direction-matrix-report.sh
+```
+
+Use `./tools/visual-direction-matrix-report.sh --require-existing` once captures
+exist to validate a complete pass.
+
 ## Acceptance criteria for this RFC
 
 This RFC is accepted only if:
@@ -57,4 +66,3 @@ This RFC is accepted only if:
 
 Until this RFC is accepted, visual production is paused and component state must
 remain `planned`.
-
