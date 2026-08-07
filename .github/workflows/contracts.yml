@@ -43,6 +43,8 @@ jobs:
         run: |
           chmod +x "$ZNC"
           ./tools/test-headless.sh
+      - name: Smoke test local CLI launcher
+        run: ./tools/test-zagkit-cli.sh
       - name: Validate product contracts
         run: ./tools/check-contracts.sh
       - name: Reject whitespace errors
