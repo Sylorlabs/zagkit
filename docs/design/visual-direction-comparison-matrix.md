@@ -52,6 +52,31 @@ variant tuple, and interaction state.
 - failure or fallback cases
 - deterministic checksum hash
 
+## Pilot capture subset (for first pass)
+
+Run this first to seed evidence before full matrix expansion:
+
+- Directions: all three candidate directions
+- Scenes: `type-ramp`, `semantic-form`, `material-fidelity`
+- Locales: `en-US`, `ja-JP`, `ar-EG`
+- Scales: `1.0`, `1.5`, `2.0`
+- Themes: `light`
+- Contrast: `standard`, `high`
+- Directions: `ltr`
+- Text scales: `1.0`, `2.0`
+- Motion: `full`
+- Transparency: `normal`
+
+Pilot scope cardinality:
+
+`3 (directions) × 3 (scenes) × 3 (locales) × 3 (scales) × 1 (theme) × 2 (contrast) × 1 (layout direction) × 2 (text scale) × 1 (motion) × 1 (transparency) = 324 artifacts`
+
+If a headless capture tool is available, write files to:
+
+`artifacts/visual-direction/<direction>/<scene>/<locale>/scale-<...>-theme-...-contrast-...-dir-...-text-...-motion-...-trans-...png`
+
+Append one row per captured direction+scene+variant to the matrix before moving to the full set.
+
 ## Candidate matrix (initial)
 
 This table starts as empty and fills only after each complete scene sweep.
