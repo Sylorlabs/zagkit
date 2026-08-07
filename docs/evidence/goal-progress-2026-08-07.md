@@ -18,6 +18,7 @@
   - Evidence: [cli smoke](cli-smoke-2026-08-07.log)
   - Evidence (this session): [cli smoke-late](cli-smoke-2026-08-07-late5.log)
   - Evidence (this continuation): [cli smoke-latest2](cli-smoke-2026-08-07-latest2.log), [cli smoke-final](cli-smoke-2026-08-07-final.log), [cli smoke-cont2](cli-smoke-2026-08-07-cont2.log)
+  - Evidence (this run): [cli smoke live3](cli-smoke-2026-08-07-live3.log)
 - Visual-direction pilot scope:
   - `./tools/verify-visual-direction-artifacts.sh --mode pilot --exact`
   - Evidence (this continuation): [pilot generation](visual-direction-pilot-generate-2026-08-07-final.log), [pilot verification latest](visual-direction-pilot-2026-08-07-latest.log)
@@ -34,9 +35,11 @@
 - Contract check:
   - `./tools/check-contracts.sh`
   - Evidence (this continuation): [check-contracts latest live](check-contracts-latest2-live.log)
+  - Evidence (this run): [check-contracts latest3 live](check-contracts-latest3-live.log)
 - PrismStudio migration inventory:
   - `./tools/generate-prismstudio-migration-map.sh`
   - Evidence: [inventory json](../../contracts/prismstudio-migration-inventory.json), [inventory markdown](prismstudio-migration-inventory-2026-08-06.md), [migration evidence log now](prismstudio-migration-inventory-2026-08-07-now.log), [migration evidence log latest](prismstudio-migration-inventory-2026-08-07-latest.log)
+  - Evidence (this run): [migration evidence now3](prismstudio-migration-inventory-2026-08-07-now3.log)
 - Visual-direction generation behavior:
   - `./tools/generate-visual-direction-pilot.sh` (324 placeholders rendered)
   - Output location: [artifacts/visual-direction](../../artifacts/visual-direction)
@@ -49,6 +52,7 @@
 - Visual-direction completeness gating:
   - `./tools/visual-direction-matrix-report.sh --require-existing` (reports 100,368 artifacts missing)
   - Evidence: [matrix completeness check latest](visual-direction-matrix-req-existing-2026-08-07-late2.log), [matrix completeness check now](visual-direction-matrix-report-2026-08-07-now.log), [matrix completeness check now output](visual-direction-matrix-full-2026-08-07-now.log)
+  - Evidence (this run): [visual-direction completion snapshot](visual-direction-completion-2026-08-07-live4.log)
 
 ### Talkback inspection movement
 
