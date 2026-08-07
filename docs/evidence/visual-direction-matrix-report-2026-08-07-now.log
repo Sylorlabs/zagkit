@@ -1,0 +1,22 @@
+missing: artifacts/visual-direction/direction-a-glass-clarity/type-ramp/en-US/scale-1p0-theme-light-contrast-standard-dir-ltr-text-2p0-motion-full-trans-reduced.png
+missing: artifacts/visual-direction/direction-a-glass-clarity/type-ramp/en-US/scale-1p0-theme-light-contrast-standard-dir-ltr-text-2p0-motion-reduced-trans-normal.png
+missing: artifacts/visual-direction/direction-a-glass-clarity/type-ramp/en-US/scale-1p0-theme-light-contrast-standard-dir-ltr-text-2p0-motion-reduced-trans-reduced.png
+missing: artifacts/visual-direction/direction-a-glass-clarity/type-ramp/en-US/scale-1p0-theme-light-contrast-standard-dir-rtl-text-1p0-motion-full-trans-normal.png
+missing: artifacts/visual-direction/direction-a-glass-clarity/type-ramp/en-US/scale-1p0-theme-light-contrast-standard-dir-rtl-text-1p0-motion-full-trans-reduced.png
+missing: artifacts/visual-direction/direction-a-glass-clarity/type-ramp/en-US/scale-1p0-theme-light-contrast-standard-dir-rtl-text-1p0-motion-reduced-trans-normal.png
+missing: artifacts/visual-direction/direction-a-glass-clarity/type-ramp/en-US/scale-1p0-theme-light-contrast-standard-dir-rtl-text-1p0-motion-reduced-trans-reduced.png
+missing: artifacts/visual-direction/direction-a-glass-clarity/type-ramp/en-US/scale-1p0-theme-light-contrast-standard-dir-rtl-text-1p3-motion-full-trans-normal.png
+missing: artifacts/visual-direction/direction-a-glass-clarity/type-ramp/en-US/scale-1p0-theme-light-contrast-standard-dir-rtl-text-1p3-motion-full-trans-reduced.png
+missing: artifacts/visual-direction/direction-a-glass-clarity/type-ramp/en-US/scale-1p0-theme-light-contrast-standard-dir-rtl-text-1p3-motion-reduced-trans-normal.png
+missing: artifacts/visual-direction/direction-a-glass-clarity/type-ramp/en-US/scale-1p0-theme-light-contrast-standard-dir-rtl-text-1p3-motion-reduced-trans-reduced.png
+missing: artifacts/visual-direction/direction-a-glass-clarity/type-ramp/en-US/scale-1p0-theme-light-contrast-standard-dir-rtl-text-2p0-motion-full-trans-normal.png
+missing: artifacts/visual-direction/direction-a-glass-clarity/type-ramp/en-US/scale-1p0-theme-light-contrast-standard-dir-rtl-text-2p0-motion-full-trans-reduced.png
+missing: artifacts/visual-direction/direction-a-glass-clarity/type-ramp/en-US/scale-1p0-theme-light-contrast-standard-dir-rtl-text-2p0-motion-reduced-trans-normal.png
+missing: artifacts/visual-direction/direction-a-glass-clarity/type-ramp/en-US/scale-1p0-theme-light-contrast-standard-dir-rtl-text-2p0-motion-reduced-trans-reduced.png
+missing: artifacts/visual-direction/direction-a-glass-clarity/type-ramp/en-US/scale-1p0-theme-light-contrast-high-dir-ltr-text-1p0-motion-full-trans-reduced.png
+missing: artifacts/visual-direction/direction-a-glass-clarity/type-ramp/en-US/scale-1p0-theme-light-contrast-high-dir-ltr-text-1p0-motion-reduced-trans-normal.png
+missing: artifacts/visual-direction/direction-a-glass-clarity/type-ramp/en-US/scale-1p0-theme-light-contrast-high-dir-ltr-text-1p0-motion-reduced-trans-reduced.png
+missing: artifacts/visual-direction/direction-a-glass-clarity/type-ramp/en-US/scale-1p0-theme-light-contrast-high-dir-ltr-text-1p3-motion-full-trans-normal.png
+missing: artifacts/visual-direction/direction-a-glass-clarity/type-ramp/en-US/scale-1p0-theme-light-contrast-high-dir-ltr-text-1p3-motion-full-trans-reduced.png
+expected=100800 missing=100361
+FAIL: missing visual-direction captures; run again without --require-existing to preview matrix scope

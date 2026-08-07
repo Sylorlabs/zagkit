@@ -40,11 +40,11 @@
   - `./tools/generate-visual-direction-matrix.sh --mode pilot --dry-run`
   - Evidence: [pilot scope calculation](visual-direction-matrix-pilot-2026-08-07-cont2.log) (expected 324 captures)
   - `./tools/generate-visual-direction-matrix.sh --mode full --allow-full --dry-run`
-  - Evidence: [full scope calculation limited sample](visual-direction-matrix-full-2026-08-07-cont2.log), [full scope count](visual-direction-matrix-full-2026-08-07-cont2b.log) (expected 100,800 captures)
+  - Evidence: [full scope calculation limited sample](visual-direction-matrix-full-2026-08-07-cont2.log), [full scope count](visual-direction-matrix-full-2026-08-07-cont2b.log), [full scope verification now (8 captures)](visual-direction-matrix-full-2026-08-07-now.log) (expected 100,800 captures)
   - Note: full mode is gated by `--allow-full` and supports `--max-items` for controlled runs.
 - Visual-direction completeness gating:
   - `./tools/visual-direction-matrix-report.sh --require-existing` (reports 100,368 artifacts missing)
-  - Evidence: [matrix completeness check latest](visual-direction-matrix-req-existing-2026-08-07-late2.log)
+  - Evidence: [matrix completeness check latest](visual-direction-matrix-req-existing-2026-08-07-late2.log), [matrix completeness check now](visual-direction-matrix-report-2026-08-07-now.log), [matrix completeness check now output](visual-direction-matrix-full-2026-08-07-now.log)
 
 ### Talkback inspection movement
 
