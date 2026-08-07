@@ -106,6 +106,21 @@ done < <(jq -r '.artifact_layout.text_scale_format | to_entries[] | "\(.key)|\(.
 
 total_expected=0
 missing=0
+invalid=0
+
+require_png() {
+  local file="$1"
+  python3 - "$file" <<'PY'
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+data = path.read_bytes()
+if data[:8] != b"\x89PNG\r\n\x1a\n":
+    raise SystemExit(1)
+PY
+}
+
 for direction in "${directions[@]}"; do
   for scene in "${scenes[@]}"; do
     for locale in "${locales[@]}"; do
@@ -126,6 +141,11 @@ for direction in "${directions[@]}"; do
                       if [ "$missing" -le 20 ]; then
                         echo "missing: $artifact_path"
                       fi
+                    elif ! require_png "$artifact_path" >/dev/null 2>&1; then
+                      invalid=$((invalid + 1))
+                      if [ "$invalid" -le 20 ]; then
+                        echo "invalid artifact: $artifact_path"
+                      fi
                     fi
                   done
                 done
@@ -141,6 +161,12 @@ done
 if [ "$missing" -ne 0 ]; then
   echo "mode=$MODE expected=$total_expected missing=$missing"
   echo "FAIL: missing artifacts"
+  exit 1
+fi
+
+if [ "$invalid" -ne 0 ]; then
+  echo "mode=$MODE expected=$total_expected invalid_png=$invalid"
+  echo "FAIL: non-PNG artifacts found"
   exit 1
 fi
 

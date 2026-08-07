@@ -59,6 +59,73 @@ for direction in "${directions[@]}"; do
   done
 done
 
+render_placeholder() {
+  local output_path="$1"
+  local direction="$2"
+  local scene="$3"
+  local locale="$4"
+  local variant="$5"
+
+  python3 - "$output_path" "$direction" "$scene" "$locale" "$variant" <<'PY'
+import sys
+import struct
+import zlib
+from pathlib import Path
+
+output_path, direction, scene, locale, variant = sys.argv[1:6]
+width, height = 960, 540
+Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+
+signature = b"\x89PNG\r\n\x1a\n"
+
+accent_map = {
+    "direction-a-glass-clarity": (124, 123, 255),
+    "direction-b-precision-fabric": (59, 130, 246),
+    "direction-c-vector-utility": (16, 185, 129),
+}
+base = accent_map.get(direction, (148, 163, 184))
+base = tuple(int(v) for v in base)
+
+def crc32(data):
+    return zlib.crc32(data) & 0xFFFFFFFF
+
+def chunk(type_, data):
+    return struct.pack('>I', len(data)) + type_ + data + struct.pack('>I', crc32(type_ + data))
+
+ihdr = struct.pack('>IIBBBBB', width, height, 8, 2, 0, 0, 0)
+ihdr_chunk = chunk(b"IHDR", ihdr)
+
+seed = 0
+for b in direction.encode():
+    seed = (seed * 131 + b) & 0xFFFFFFFF
+for b in scene.encode():
+    seed = (seed * 131 + b) & 0xFFFFFFFF
+for b in locale.encode():
+    seed = (seed * 131 + b) & 0xFFFFFFFF
+for b in variant.encode():
+    seed = (seed * 131 + b) & 0xFFFFFFFF
+
+rows = []
+for y in range(height):
+    row = bytearray()
+    row.append(0)  # filter method
+    for x in range(width):
+        phase = (x * 3 + y * 7 + seed) % 256
+        r = (base[0] + (x % 16) * 7 + phase // 4) % 256
+        g = (base[1] + (y % 12) * 9 + phase // 2) % 256
+        b = (base[2] + ((x + y) % 11) * 5 + phase) % 256
+        row.extend((r, g, b))
+    rows.append(bytes(row))
+
+idat = zlib.compress(b''.join(rows), level=9)
+idat_chunk = chunk(b"IDAT", idat)
+
+png = signature + ihdr_chunk + idat_chunk + chunk(b"IEND", b"")
+
+Path(output_path).write_bytes(png)
+PY
+}
+
 created_count=0
 skipped_count=0
 for direction in "${directions[@]}"; do
@@ -79,8 +146,7 @@ for direction in "${directions[@]}"; do
                     if [ -f "$out" ]; then
                       skipped_count=$((skipped_count + 1))
                     else
-                      printf 'pilot placeholder direction=%s scene=%s locale=%s variant=%s\n' \
-                        "$direction" "$scene" "$locale" "$variant" > "$out"
+                      render_placeholder "$out" "$direction" "$scene" "$locale" "$variant"
                       created_count=$((created_count + 1))
                     fi
                   done
