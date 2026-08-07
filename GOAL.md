@@ -137,3 +137,12 @@ more precision is needed and preserve its original ID as the parent.
 unique IDs, retains the non-negotiable requirements, and gives every checked
 item evidence and every unchecked item an exit condition. That check validates
 the plan's integrity; it does not certify the unfinished work.
+
+Run `./tools/report-goal-progress.sh` for a current checkpoint snapshot used by
+the live coordination sessions and by release readiness reviews. It outputs:
+`docs/evidence/goal-progress-live.md` and
+`docs/evidence/goal-progress-live.json` with live checklist counts, upstream
+prerequisite status, and platform capability blockers.
+
+Run `./tools/report-goal-milestones.sh` for per-milestone progress:
+total/completed/blocked counts and exact blocked item IDs per milestone section.

@@ -40,7 +40,20 @@ Run:
 ./tools/visual-direction-matrix-report.sh
 ```
 
-to print expected scope and detect missing recommendation fields.
+This prints the currently selected scope. Use pilot mode for the first pass:
+
+```sh
+./tools/visual-direction-matrix-report.sh --mode pilot
+./tools/visual-direction-matrix-report.sh --mode pilot --require-existing
+```
+
+Switch to full mode only after pilot evidence exists:
+
+```sh
+./tools/visual-direction-matrix-report.sh --mode full --require-existing
+```
+
+to print scope size and detect missing recommendation fields.
 
 ## Required decision package
 

@@ -49,8 +49,13 @@ Execution command:
 ./tools/visual-direction-matrix-report.sh
 ```
 
-Use `./tools/visual-direction-matrix-report.sh --require-existing` once captures
-exist to validate a complete pass.
+Use pilot mode first:
+
+```sh
+./tools/visual-direction-matrix-report.sh --mode pilot --require-existing
+```
+
+Use `--mode full` only after all pilot artifacts are complete and validated.
 
 ## Acceptance criteria for this RFC
 

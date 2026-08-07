@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 MANIFEST="$ROOT/docs/design/visual-direction-comparison.json"
 MATRIX="$ROOT/docs/design/visual-direction-comparison-matrix.md"
+MODE="pilot"
 REQUIRE_EXISTING=0
 
 MANIFEST_SET=0
@@ -11,9 +12,10 @@ MATRIX_SET=0
 
 usage() {
     cat <<'USAGE'
-Usage: visual-direction-matrix-report.sh [--require-existing] [manifest-path] [matrix-path]
+Usage: visual-direction-matrix-report.sh [--mode pilot|full] [--require-existing] [manifest-path] [matrix-path]
 
 - --require-existing: verify every expected artifact file exists.
+- --mode pilot|full: choose the variant scope (default: pilot).
 - manifest-path: defaults to docs/design/visual-direction-comparison.json
 - matrix-path: defaults to docs/design/visual-direction-comparison-matrix.md
 USAGE
@@ -21,6 +23,15 @@ USAGE
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
+        --mode)
+            if [ "$#" -lt 2 ]; then
+                echo "missing mode value" >&2
+                usage
+                exit 1
+            fi
+            MODE="$2"
+            shift 2
+            ;;
         --require-existing)
             REQUIRE_EXISTING=1
             shift
@@ -46,6 +57,12 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 
+[ "$MODE" = "pilot" ] || [ "$MODE" = "full" ] || {
+    echo "mode must be pilot or full" >&2
+    usage
+    exit 1
+}
+
 [ -f "$MANIFEST" ] || { echo "missing manifest: $MANIFEST" >&2; usage; exit 1; }
 [ -f "$MATRIX" ] || { echo "missing matrix document: $MATRIX" >&2; usage; exit 1; }
 
@@ -60,15 +77,27 @@ if ! jq -e '.candidate_directions and .required_scene_ids and .variant_matrix an
 fi
 
 mapfile -t directions < <(jq -r '.candidate_directions[]' "$MANIFEST")
-mapfile -t scenes < <(jq -r '.required_scene_ids[]' "$MANIFEST")
-mapfile -t scales < <(jq -r '.variant_matrix.scale_factors[]' "$MANIFEST")
-mapfile -t themes < <(jq -r '.variant_matrix.themes[]' "$MANIFEST")
-mapfile -t contrasts < <(jq -r '.variant_matrix.contrast[]' "$MANIFEST")
-mapfile -t layout_dirs < <(jq -r '.variant_matrix.directions[]' "$MANIFEST")
-mapfile -t text_scales < <(jq -r '.variant_matrix.text_scales[]' "$MANIFEST")
-mapfile -t motions < <(jq -r '.variant_matrix.motion[]' "$MANIFEST")
-mapfile -t transparencies < <(jq -r '.variant_matrix.transparency[]' "$MANIFEST")
-mapfile -t locales < <(jq -r '.variant_matrix.locales[]' "$MANIFEST")
+if [ "$MODE" = "pilot" ]; then
+  mapfile -t scenes < <(jq -r '.required_scene_ids[] | select(. == "type-ramp" or . == "semantic-form" or . == "material-fidelity")' "$MANIFEST")
+  mapfile -t locales < <(jq -r '.variant_matrix.locales[] | select(. == "en-US" or . == "ar-EG" or . == "ja-JP")' "$MANIFEST")
+  mapfile -t scales < <(jq -r '.variant_matrix.scale_factors[] | select(. == 1.0 or . == 1.5 or . == 2.0)' "$MANIFEST")
+  mapfile -t themes < <(jq -r '.variant_matrix.themes[] | select(. == "light")' "$MANIFEST")
+  mapfile -t layout_dirs < <(jq -r '.variant_matrix.directions[] | select(. == "ltr")' "$MANIFEST")
+  mapfile -t text_scales < <(jq -r '.variant_matrix.text_scales[] | select(. == 1.0 or . == 2.0)' "$MANIFEST")
+  mapfile -t motions < <(jq -r '.variant_matrix.motion[] | select(. == "full")' "$MANIFEST")
+  mapfile -t transparencies < <(jq -r '.variant_matrix.transparency[] | select(. == "normal")' "$MANIFEST")
+  mapfile -t contrasts < <(jq -r '.variant_matrix.contrast[]' "$MANIFEST")
+else
+  mapfile -t scenes < <(jq -r '.required_scene_ids[]' "$MANIFEST")
+  mapfile -t locales < <(jq -r '.variant_matrix.locales[]' "$MANIFEST")
+  mapfile -t scales < <(jq -r '.variant_matrix.scale_factors[]' "$MANIFEST")
+  mapfile -t themes < <(jq -r '.variant_matrix.themes[]' "$MANIFEST")
+  mapfile -t contrasts < <(jq -r '.variant_matrix.contrast[]' "$MANIFEST")
+  mapfile -t layout_dirs < <(jq -r '.variant_matrix.directions[]' "$MANIFEST")
+  mapfile -t text_scales < <(jq -r '.variant_matrix.text_scales[]' "$MANIFEST")
+  mapfile -t motions < <(jq -r '.variant_matrix.motion[]' "$MANIFEST")
+  mapfile -t transparencies < <(jq -r '.variant_matrix.transparency[]' "$MANIFEST")
+fi
 
 declare -A scale_formats
 declare -A text_formats
@@ -82,7 +111,16 @@ done < <(jq -r '.artifact_layout.text_scale_format | to_entries[] | "\(.key)|\(.
 
 root_dir="$(jq -r '.artifact_layout.root // "artifacts/visual-direction"' "$MANIFEST")"
 
-if [ "${#directions[@]}" -eq 0 ] || [ "${#scenes[@]}" -eq 0 ] || [ "${#scales[@]}" -eq 0 ]; then
+if [ "${#directions[@]}" -eq 0 ] \
+  || [ "${#scenes[@]}" -eq 0 ] \
+  || [ "${#scales[@]}" -eq 0 ] \
+  || [ "${#themes[@]}" -eq 0 ] \
+  || [ "${#contrasts[@]}" -eq 0 ] \
+  || [ "${#layout_dirs[@]}" -eq 0 ] \
+  || [ "${#text_scales[@]}" -eq 0 ] \
+  || [ "${#motions[@]}" -eq 0 ] \
+  || [ "${#transparencies[@]}" -eq 0 ] \
+  || [ "${#locales[@]}" -eq 0 ]; then
     echo "manifest contains empty required arrays" >&2
     exit 1
 fi
@@ -124,15 +162,23 @@ done
 
 if [ "$REQUIRE_EXISTING" -eq 1 ] && [ "$missing_files" -gt 0 ]; then
     echo "expected=$total_expected missing=$missing_files"
-    echo "FAIL: missing visual-direction captures; run again without --require-existing to preview matrix scope"
+    echo "mode=$MODE"
+    echo "FAIL: missing visual-direction captures; for full-gate verification run with --mode full and verify capture availability separately."
     exit 1
 fi
 
 if [ "$REQUIRE_EXISTING" -ne 1 ]; then
     echo "No artifact existence check requested."
+    echo "mode=$MODE"
     echo "expected_total_artifacts=$total_expected"
     echo "artifact_root=$root_dir"
     echo "direction_count=${#directions[@]} scene_count=${#scenes[@]} locale_count=${#locales[@]}"
+fi
+
+if [ "$REQUIRE_EXISTING" -eq 1 ] && [ "$total_expected" -eq 0 ]; then
+    echo "mode=$MODE"
+    echo "artifact scope is empty"
+    exit 1
 fi
 
 if ! grep -q "Final accepted direction" "$MATRIX"; then

@@ -9,6 +9,7 @@ zag-out/
 artifacts/
 benchmark-results/
 capability-reports/
+docs/evidence/*.log
 
 # Platform build products
 .DS_Store
