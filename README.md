@@ -234,6 +234,20 @@ Run the deterministic headless foundation test with:
 ./tools/test-headless.sh
 ```
 
+You can also use the local CLI shim for the current headless-only phase:
+
+```sh
+./zagkit run --headless-only --show-ascii
+./zagkit test
+```
+
+`./zagkit run` currently builds and executes the deterministic headless reference
+scene, then writes `artifacts/launch/headless-reference.png`.
+
+`./zagkit init` and `./zagkit build` are scaffolding today. They are intentionally
+not a full platform CLI yet because native shells and packaging are still
+unimplemented per the roadmap.
+
 The script compiles every executable contract with strict Zag semantic
 analysis. CI checks out the exact compiler revision from the toolchain contract,
 self-hosts that pinned source to a byte-identical compiler fixed point, and runs

@@ -1,0 +1,179 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+ZAG_BIN=${ZAG_BIN:-/home/micah/Desktop/Sylorlabs/zag/zag-poc/znc}
+LAUNCH_DIR="$ROOT_DIR/artifacts/launch"
+BUILD_DIR="$ROOT_DIR/.zagkit"
+HEADLESS_REFERENCE="$ROOT_DIR/tools/render-headless-reference.zag"
+REF_BINARY="$BUILD_DIR/headless-reference"
+REF_IMAGE="$LAUNCH_DIR/headless-reference.png"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  ./zagkit init [path]
+  ./zagkit build [--output <binary>]
+  ./zagkit run [--binary <binary>] [--output <png>] [--headless-only] [--show-ascii]
+  ./zagkit test
+
+Current status: this command only exposes the headless reference and contract
+test surface. It does not launch a native desktop, Wayland, macOS,
+Windows, iOS, or Android shell yet.
+EOF
+}
+
+require_toolchain() {
+  if ! [ -x "$ZAG_BIN" ]; then
+    printf 'zagkit: missing compiler executable: %s\n' "$ZAG_BIN" >&2
+    printf 'Set ZAG_BIN to a valid executable and retry.\n' >&2
+    exit 2
+  fi
+}
+
+run_headless_reference() {
+  local binary output
+  binary="${1}"
+  output="${2}"
+  printf 'zagkit: building headless reference with %s\n' "$ZAG_BIN"
+  mkdir -p "$BUILD_DIR" "$LAUNCH_DIR"
+  "$ZAG_BIN" "$HEADLESS_REFERENCE" --no-zagd --analyze-strict --no-foreground-cache -o "$binary"
+  "$binary" "$output"
+}
+
+build_headless_reference() {
+  local output="$1"
+  require_toolchain
+  mkdir -p "$BUILD_DIR"
+  printf 'zagkit: building headless reference binary to %s\n' "$output"
+  "$ZAG_BIN" "$HEADLESS_REFERENCE" --no-zagd --analyze-strict --no-foreground-cache -o "$output"
+  printf '%s\n' "$output"
+}
+
+cmd_init() {
+  local target="${1:-.}"
+  target=$(CDPATH= cd -- "$target" && pwd)
+  mkdir -p "$target/src" "$target/.zagkit"
+  if [ ! -f "$target/zag.mod" ]; then
+    cat > "$target/zag.mod" <<'EOF'
+name = "zagkit-app"
+version = "0.0.0"
+main = "src/main.zag"
+EOF
+  fi
+  if [ ! -f "$target/src/main.zag" ]; then
+    cat > "$target/src/main.zag" <<'EOF'
+// Placeholder Zag app entrypoint.
+// This repository currently supports headless reference rendering only.
+
+fn main() i32 {
+    _zag_eprintln("zagkit: add your app entrypoint scene here");
+    return 0;
+}
+EOF
+  fi
+  printf 'zagkit: initialized project scaffold at %s\n' "$target"
+  printf 'zagkit: use `./zagkit build` from that project root for current headless reference tooling\n'
+}
+
+cmd_build() {
+  local output="$REF_BINARY"
+  if [ "${1:-}" = "--output" ] && [ $# -ge 2 ]; then
+    output="$2"
+  fi
+  build_headless_reference "$output"
+}
+
+cmd_test() {
+  "$ROOT_DIR/tools/test-headless.sh"
+}
+
+cmd_run() {
+  local binary="$REF_BINARY"
+  local output="$REF_IMAGE"
+  local headless_only=1
+  local show_ascii=0
+  local arg
+  while [ $# -gt 0 ]; do
+    arg="$1"; shift
+    case "$arg" in
+      --binary)
+        [ $# -ge 1 ] || { printf "zagkit run: --binary needs a path\n" >&2; exit 2; }
+        binary="$1"; shift;;
+      --output)
+        [ $# -ge 1 ] || { printf "zagkit run: --output needs a path\n" >&2; exit 2; }
+        output="$1"; shift;;
+      --headless-only)
+        headless_only=1;;
+      --show-ascii)
+        show_ascii=1;;
+      *)
+        printf 'zagkit run: unknown flag: %s\n' "$arg" >&2
+        usage
+        exit 2;;
+    esac
+  done
+
+  if [ "$headless_only" -eq 1 ]; then
+    printf 'zagkit: running headless-only reference path\n'
+    run_headless_reference "$binary" "$output"
+    printf 'zagkit: wrote %s\n' "$output"
+    if [ "$show_ascii" -eq 1 ]; then
+      python3 - <<'PY' "$output"
+from PIL import Image
+import sys
+
+path = sys.argv[1]
+img = Image.open(path).convert("RGB")
+w, h = img.size
+new_w = 120
+new_h = max(1, int(h * new_w / w * 0.5))
+img = img.resize((new_w, new_h))
+chars = ' .:-=+*#%@'
+for y in range(new_h):
+    row = []
+    for x in range(new_w):
+        r, g, b = img.getpixel((x, y))
+        lum = 0.2126 * r + 0.7152 * g + 0.0722 * b
+        idx = int((lum / 255) * (len(chars) - 1))
+        row.append(chars[idx])
+    print(''.join(row))
+PY
+    fi
+    exit 0
+  fi
+
+  printf 'zagkit: only --headless-only is currently implemented\n' >&2
+  exit 2
+}
+
+if [ $# -eq 0 ]; then
+  usage
+  exit 1
+fi
+
+subcommand=$1
+shift
+case "$subcommand" in
+  init)
+    cmd_init "$@"
+    ;;
+  build)
+    cmd_build "$@"
+    ;;
+  run)
+    cmd_run "$@"
+    ;;
+  test)
+    cmd_test
+    ;;
+  help|-h|--help)
+    usage
+    ;;
+  *)
+    printf 'zagkit: unknown command: %s\n' "$subcommand" >&2
+    usage
+    exit 2
+    ;;
+esac
