@@ -15,7 +15,7 @@ usage() {
 Usage:
   ./zagkit init [path]
   ./zagkit build [--output <binary>]
-  ./zagkit run [--binary <binary>] [--output <png>] [--headless-only] [--show-ascii]
+  ./zagkit run [--binary <binary>] [--output <png>] [--headless-only] [--show-ascii] [--open]
   ./zagkit test
 
 Current status: this command only exposes the headless reference and contract
@@ -129,6 +129,7 @@ cmd_run() {
   local output="$REF_IMAGE"
   local headless_only=1
   local show_ascii=0
+  local open_output=0
   local arg
   while [ $# -gt 0 ]; do
     arg="$1"; shift
@@ -143,6 +144,8 @@ cmd_run() {
         headless_only=1;;
       --show-ascii)
         show_ascii=1;;
+      --open)
+        open_output=1;;
       *)
         printf 'zagkit run: unknown flag: %s\n' "$arg" >&2
         usage
@@ -159,7 +162,7 @@ cmd_run() {
         printf 'zagkit run: --show-ascii requires Pillow in python (import PIL)\n' >&2
         exit 2
       fi
-      python3 - <<'PY' "$output"
+python3 - <<'PY' "$output"
 from PIL import Image
 import sys
 
@@ -179,6 +182,16 @@ for y in range(new_h):
         row.append(chars[idx])
     print(''.join(row))
 PY
+    fi
+    if [ "$open_output" -eq 1 ]; then
+      if command -v xdg-open >/dev/null 2>&1; then
+        setsid xdg-open "$output" >/dev/null 2>&1 < /dev/null || true
+      elif command -v open >/dev/null 2>&1; then
+        setsid open "$output" >/dev/null 2>&1 < /dev/null || true
+      else
+        printf 'zagkit run: no supported output opener found (xdg-open or open)\n' >&2
+        exit 2
+      fi
     fi
     exit 0
   fi

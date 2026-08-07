@@ -238,8 +238,13 @@ You can also use the local CLI shim for the current headless-only phase:
 
 ```sh
 ./zagkit run --headless-only --show-ascii
+./zagkit run --headless-only --open
 ./zagkit test
 ```
+
+`./zagkit run --open` writes the same PNG artifact and then asks the local desktop
+viewer to open `artifacts/launch/headless-reference.png` when a viewer command
+is available (`xdg-open`/`open`).
 
 `./zagkit run` currently builds and executes the deterministic headless reference
 scene, then writes `artifacts/launch/headless-reference.png`.
