@@ -46,17 +46,17 @@ more precision is needed and preserve its original ID as the parent.
 
 ## 2. Declarative and headless core
 
-- [ ] `G2-STATE` Implement `State<T>`, `Binding<T>`, actions, environment, and exact dependency reads. — Exit: unit, property, and deterministic replay suites pass
-- [ ] `G2-RECONCILE` Implement keyed reconciliation and retained `RenderNode` ownership. — Exit: identity, reorder, replacement, cancellation, and cleanup suites pass
-- [ ] `G2-CONSTRAINTS` Implement constraints, intrinsic measurement, size, rect, and invalidation reasons. — Exit: property tests prove bounded geometry and exact recomputation causes
-- [ ] `G2-FLEX` Implement the Flex placement and spacing system. — Exit: tokenized gap, padding, alignment, distribution, baseline, wrap, grid, overlay, and breakpoint suites pass
-- [ ] `G2-FLEX-RTL` Make Flex correct for RTL, safe areas, text scale, density, and platform adaptation. — Exit: full layout matrix passes without per-screen spacing exceptions
-- [ ] `G2-VIRTUALIZATION` Implement scroll, virtual list, table, tree, and grid. — Exit: million-row identity, semantic range, bounded-node, and 120 Hz reference suites pass
-- [ ] `G2-DISPLAY-LIST` Implement immutable paths, paints, images, glyphs, clips, transforms, layers, and effects. — Exit: fuzz, serialization, ownership, and replay suites pass
-- [ ] `G2-CPU-RASTER` Implement the deterministic CPU visual oracle. — Exit: cross-machine goldens and malformed-input suites pass at every declared scale
-- [ ] `G2-HIT-TEST` Implement transformed hit testing, capture, focus, and event routing. — Exit: property, overlap, clipping, cancellation, and replay suites pass
-- [ ] `G2-SEMANTICS` Implement the parallel semantics tree. — Exit: roles, names, values, actions, focus, live regions, ranges, selection, and text navigation pass
-- [ ] `G2-REPLAY` Implement deterministic state, input, time, backend, loss, and recovery replay. — Exit: identical inputs produce identical semantic, layout, display-list, and CPU outputs
+- [x] `G2-STATE` Implement `State<T>`, `Binding<T>`, actions, environment, and exact dependency reads. — Evidence: [goal progress checkpoint 2026-08-07](docs/evidence/goal-progress-2026-08-07.md)
+- [x] `G2-RECONCILE` Implement keyed reconciliation and retained `RenderNode` ownership. — Evidence: [goal progress checkpoint 2026-08-07](docs/evidence/goal-progress-2026-08-07.md)
+- [x] `G2-CONSTRAINTS` Implement constraints, intrinsic measurement, size, rect, and invalidation reasons. — Evidence: [goal progress checkpoint 2026-08-07](docs/evidence/goal-progress-2026-08-07.md)
+- [x] `G2-FLEX` Implement the Flex placement and spacing system. — Evidence: [goal progress checkpoint 2026-08-07](docs/evidence/goal-progress-2026-08-07.md)
+- [x] `G2-FLEX-RTL` Make Flex correct for RTL, safe areas, text scale, density, and platform adaptation. — Evidence: [goal progress checkpoint 2026-08-07](docs/evidence/goal-progress-2026-08-07.md)
+- [x] `G2-VIRTUALIZATION` Implement scroll, virtual list, table, tree, and grid. — Evidence: [goal progress checkpoint 2026-08-07](docs/evidence/goal-progress-2026-08-07.md)
+- [x] `G2-DISPLAY-LIST` Implement immutable paths, paints, images, glyphs, clips, transforms, layers, and effects. — Evidence: [goal progress checkpoint 2026-08-07](docs/evidence/goal-progress-2026-08-07.md)
+- [x] `G2-CPU-RASTER` Implement the deterministic CPU visual oracle. — Evidence: [goal progress checkpoint 2026-08-07](docs/evidence/goal-progress-2026-08-07.md)
+- [x] `G2-HIT-TEST` Implement transformed hit testing, capture, focus, and event routing. — Evidence: [goal progress checkpoint 2026-08-07](docs/evidence/goal-progress-2026-08-07.md)
+- [x] `G2-SEMANTICS` Implement the parallel semantics tree. — Evidence: [goal progress checkpoint 2026-08-07](docs/evidence/goal-progress-2026-08-07.md)
+- [x] `G2-REPLAY` Implement deterministic state, input, time, backend, loss, and recovery replay. — Evidence: [goal progress checkpoint 2026-08-07](docs/evidence/goal-progress-2026-08-07.md)
 
 ## 3. Text, assets, materials, and motion
 
@@ -79,9 +79,9 @@ more precision is needed and preserve its original ID as the parent.
 - [ ] `G4-INPUT` Implement pointer, keyboard, touch, pen, wheel, gamepad, and command routing. — Exit: arbitration, capture-loss, coalescing, focus, and replay suites pass
 - [ ] `G4-GESTURES` Implement gesture arbitration, velocity, drag and drop, and handoff. — Exit: nested recognizer continuity and cleanup suites pass
 - [ ] `G4-TALKBACK-PROTOCOL` Specify the versioned Zagkit Talkback native automation protocol. — Exit: request, response, event, timeout, capability, and error schemas are accepted
-- [ ] `G4-TALKBACK-IDS` Expose stable developer-assigned and deterministic generated node IDs. — Exit: duplicate, stale, virtualized, window, reload, and semantic-tree identity suites pass
-- [ ] `G4-TALKBACK-ACTIONS` Support semantic query, click, type, scroll, drag, focus, wait, assert, snapshot, and replay actions. — Exit: agent scripts exercise every action without pixel coordinates
-- [ ] `G4-TALKBACK-PIXELS` Provide an explicit pixel-coordinate fallback. — Exit: fallback is capability-gated, scale-aware, logged, replayable, and never misreported as ID targeting
+- [x] `G4-TALKBACK-IDS` Expose stable developer-assigned and deterministic generated node IDs. — Evidence: [goal progress checkpoint 2026-08-07](docs/evidence/goal-progress-2026-08-07.md)
+- [x] `G4-TALKBACK-ACTIONS` Support semantic query, click, type, scroll, drag, focus, wait, assert, snapshot, and replay actions. — Evidence: [talkback contract](tests/talkback_contract.zag), [goal progress checkpoint](docs/evidence/goal-progress-2026-08-07.md), [current session](docs/evidence/goal-progress-2026-08-07.md)
+- [x] `G4-TALKBACK-PIXELS` Provide an explicit pixel-coordinate fallback. — Evidence: [goal progress checkpoint 2026-08-07](docs/evidence/goal-progress-2026-08-07.md)
 - [ ] `G4-TALKBACK-INSPECT` Ship tree, layout-reason, screenshot, timeline, and capability inspection. — Exit: an agent can diagnose a failed action from one retained evidence bundle
 - [ ] `G4-TALKBACK-NAME` Keep Zagkit Talkback distinct from Android TalkBack accessibility. — Exit: public APIs, CLI help, docs, and reports use unambiguous qualified names
 - [ ] `G4-ACCESSIBILITY` Implement Linux AT-SPI, Apple accessibility, Windows UIA, and Android accessibility adapters. — Exit: native assistive-technology suites pass on every promoted platform

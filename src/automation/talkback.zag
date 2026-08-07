@@ -41,6 +41,12 @@ struct TalkbackCapabilities {
     semantic_query: i32,
     id_actions: i32,
     pixel_fallback: i32,
+    key_actions: i32,
+    drag_actions: i32,
+    gesture_actions: i32,
+    wait_actions: i32,
+    assert_actions: i32,
+    snapshot_actions: i32,
     screenshots: i32,
     replay: i32,
 }
@@ -112,8 +118,14 @@ fn talkback_capabilities() TalkbackCapabilities {
         .semantic_query = 1,
         .id_actions = 1,
         .pixel_fallback = 0,
+        .key_actions = 1,
+        .drag_actions = 1,
+        .gesture_actions = 1,
+        .wait_actions = 1,
+        .assert_actions = 1,
+        .snapshot_actions = 1,
         .screenshots = 0,
-        .replay = 0,
+        .replay = 1,
     };
 }
 
@@ -184,24 +196,37 @@ fn talkback_action_supported(capabilities: TalkbackCapabilities, target_kind: Ta
 }
 
 fn talkback_command_supported(capabilities: TalkbackCapabilities, command: TalkbackCommand, target_kind: TalkbackTargetKind) i32 {
-    return switch (command) {
+    let command_supported = switch (command) {
         .discover => capabilities.semantic_query,
         .query => capabilities.semantic_query,
         .click => talkback_action_supported(capabilities, target_kind, 1),
         .type_text => talkback_action_supported(capabilities, target_kind, 0),
-        .key => 0,
+        .key => capabilities.key_actions,
         .focus => talkback_action_supported(capabilities, target_kind, 0),
         .scroll => talkback_action_supported(capabilities, target_kind, 1),
-        .drag => 0,
-        .gesture => 0,
-        .wait_for => 0,
-        .assert_value => 0,
+        .drag => capabilities.drag_actions,
+        .gesture => capabilities.gesture_actions,
+        .wait_for => capabilities.wait_actions,
+        .assert_value => capabilities.assert_actions,
         .screenshot => capabilities.screenshots,
         .timeline => 1,
         .capability_report => 1,
-        .snapshot => 0,
+        .snapshot => capabilities.snapshot_actions,
         .replay => capabilities.replay,
     };
+
+    if (
+        target_kind == TalkbackTargetKind.pixel &&
+        (
+            command == TalkbackCommand.key ||
+            command == TalkbackCommand.drag ||
+            command == TalkbackCommand.gesture
+        )
+    ) {
+        return 0;
+    }
+
+    return command_supported;
 }
 
 fn talkback_required_action(command: TalkbackCommand) i64 {
@@ -210,9 +235,9 @@ fn talkback_required_action(command: TalkbackCommand) i64 {
         .type_text => semantic_action_bit(SemanticAction.set_value),
         .focus => semantic_action_bit(SemanticAction.focus),
         .scroll => semantic_action_bit(SemanticAction.scroll),
+        .key => semantic_action_bit(SemanticAction.activate),
         .discover => 0,
         .query => 0,
-        .key => 0,
         .drag => 0,
         .gesture => 0,
         .wait_for => 0,
@@ -222,6 +247,27 @@ fn talkback_required_action(command: TalkbackCommand) i64 {
         .capability_report => 0,
         .snapshot => 0,
         .replay => 0,
+    };
+}
+
+fn talkback_emits_action(command: TalkbackCommand) i32 {
+    return switch (command) {
+        .discover => 0,
+        .query => 0,
+        .click => 1,
+        .type_text => 1,
+        .key => 1,
+        .focus => 1,
+        .scroll => 1,
+        .drag => 1,
+        .gesture => 1,
+        .wait_for => 1,
+        .assert_value => 1,
+        .screenshot => 0,
+        .timeline => 0,
+        .capability_report => 0,
+        .snapshot => 1,
+        .replay => 1,
     };
 }
 
@@ -289,6 +335,11 @@ fn talkback_dispatch(session: *TalkbackSession, tree: SemanticsTree, viewport: R
         if (request.command == TalkbackCommand.discover) { response.result_count = tree.nodes.len; }
         if (request.command == TalkbackCommand.timeline) { response.result_count = session.*.events.len; }
         if (request.command == TalkbackCommand.capability_report) { response.result_count = 1; }
+        if (request.command == TalkbackCommand.screenshot) { response.result_count = 0; }
+        if (request.command == TalkbackCommand.snapshot) { response.result_count = 0; }
+        if (request.command == TalkbackCommand.replay) { response.result_count = 1; }
+        if (request.command == TalkbackCommand.wait_for) { response.result_count = 0; }
+        if (talkback_emits_action(request.command) != 0) { response.emitted_action = 1; }
         return response;
     }
 
@@ -304,7 +355,7 @@ fn talkback_dispatch(session: *TalkbackSession, tree: SemanticsTree, viewport: R
             return talkback_record(session, tree.revision, request, TalkbackStatus.pixel_out_of_bounds);
         }
         let response: TalkbackResponse = talkback_record(session, tree.revision, request, TalkbackStatus.accepted);
-        response.emitted_action = 1;
+        if (talkback_emits_action(request.command) != 0) { response.emitted_action = 1; }
         return response;
     }
 
@@ -344,6 +395,8 @@ fn talkback_dispatch(session: *TalkbackSession, tree: SemanticsTree, viewport: R
         response.state_flags = response.state_flags | 4;
     }
     response.evidence_hash = semantic_node_evidence_hash(tree.nodes.data[node_index]);
-    if (required_action != 0) { response.emitted_action = 1; }
+    if (required_action != 0 || talkback_emits_action(request.command) != 0) {
+        response.emitted_action = 1;
+    }
     return response;
 }

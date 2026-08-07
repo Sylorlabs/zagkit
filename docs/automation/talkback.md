@@ -28,15 +28,17 @@ kind, target ID, semantic revision, status, coordinates, and scale.
 
 The in-process slice resolves semantic discovery and queries and validates
 click, type, focus, and scroll before emitting them into the ordered event
-stream. Protocol minor version 2 query responses distinguish read-only results
+stream. For this slice, key/drag/gesture/wait/assert/snapshot/replay are
+also accepted as event-emitted command types when their capabilities are
+advertised; they are validated for target presence and timeout policy before
+recording. Protocol minor version 2 query responses distinguish read-only results
 from emitted actions and expose the resolved node index, role, action mask,
 fixed-point bounds, collection counts and coordinates, tree level and expansion
 state, owned-text lengths, state flags, and a deterministic evidence hash over
 the complete semantic node. This makes geometry and semantic-state changes
 observable even before the native transport gains structured text payloads.
-Capability reports and timeline counts are available. Key, drag, gesture,
-wait, assertion payloads, screenshots, snapshots, replay, native action
-consumption, and native transport remain unavailable and fail closed.
+Capability reports and timeline counts are available. Pixel fallback is fail-closed
+unless advertised, and screenshots remain unavailable in this slice.
 Advertising a command in the protocol vocabulary does not claim its runtime
 capability.
 

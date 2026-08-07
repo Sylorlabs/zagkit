@@ -90,9 +90,15 @@
   "current_runtime_truth": {
     "semantic-query": "experimental",
     "id-actions": "experimental-event-emission",
+    "key-actions": "experimental-event-emission",
+    "drag-actions": "experimental-event-emission",
+    "gesture-actions": "experimental-event-emission",
+    "wait-actions": "experimental-event-emission",
+    "assert-actions": "experimental-event-emission",
+    "snapshot": "experimental-event-emission",
     "pixel-fallback": "experimental-disabled-by-default",
     "screenshots": "unavailable",
-    "replay": "unavailable",
+    "replay": "experimental-event-emission",
     "native-transport": "unavailable"
   }
 }

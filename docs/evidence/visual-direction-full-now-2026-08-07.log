@@ -1,0 +1,22 @@
+missing: /home/micah/Desktop/Sylorlabs/zagkit/artifacts/visual-direction/direction-a-glass-clarity/type-ramp/en-US/scale-1p0-theme-light-contrast-standard-dir-ltr-text-1p0-motion-full-trans-reduced.png
+missing: /home/micah/Desktop/Sylorlabs/zagkit/artifacts/visual-direction/direction-a-glass-clarity/type-ramp/en-US/scale-1p0-theme-light-contrast-standard-dir-ltr-text-1p0-motion-reduced-trans-normal.png
+missing: /home/micah/Desktop/Sylorlabs/zagkit/artifacts/visual-direction/direction-a-glass-clarity/type-ramp/en-US/scale-1p0-theme-light-contrast-standard-dir-ltr-text-1p0-motion-reduced-trans-reduced.png
+missing: /home/micah/Desktop/Sylorlabs/zagkit/artifacts/visual-direction/direction-a-glass-clarity/type-ramp/en-US/scale-1p0-theme-light-contrast-standard-dir-ltr-text-1p3-motion-full-trans-normal.png
+missing: /home/micah/Desktop/Sylorlabs/zagkit/artifacts/visual-direction/direction-a-glass-clarity/type-ramp/en-US/scale-1p0-theme-light-contrast-standard-dir-ltr-text-1p3-motion-full-trans-reduced.png
+missing: /home/micah/Desktop/Sylorlabs/zagkit/artifacts/visual-direction/direction-a-glass-clarity/type-ramp/en-US/scale-1p0-theme-light-contrast-standard-dir-ltr-text-1p3-motion-reduced-trans-normal.png
+missing: /home/micah/Desktop/Sylorlabs/zagkit/artifacts/visual-direction/direction-a-glass-clarity/type-ramp/en-US/scale-1p0-theme-light-contrast-standard-dir-ltr-text-1p3-motion-reduced-trans-reduced.png
+missing: /home/micah/Desktop/Sylorlabs/zagkit/artifacts/visual-direction/direction-a-glass-clarity/type-ramp/en-US/scale-1p0-theme-light-contrast-standard-dir-ltr-text-2p0-motion-full-trans-reduced.png
+missing: /home/micah/Desktop/Sylorlabs/zagkit/artifacts/visual-direction/direction-a-glass-clarity/type-ramp/en-US/scale-1p0-theme-light-contrast-standard-dir-ltr-text-2p0-motion-reduced-trans-normal.png
+missing: /home/micah/Desktop/Sylorlabs/zagkit/artifacts/visual-direction/direction-a-glass-clarity/type-ramp/en-US/scale-1p0-theme-light-contrast-standard-dir-ltr-text-2p0-motion-reduced-trans-reduced.png
+missing: /home/micah/Desktop/Sylorlabs/zagkit/artifacts/visual-direction/direction-a-glass-clarity/type-ramp/en-US/scale-1p0-theme-light-contrast-standard-dir-rtl-text-1p0-motion-full-trans-normal.png
+missing: /home/micah/Desktop/Sylorlabs/zagkit/artifacts/visual-direction/direction-a-glass-clarity/type-ramp/en-US/scale-1p0-theme-light-contrast-standard-dir-rtl-text-1p0-motion-full-trans-reduced.png
+missing: /home/micah/Desktop/Sylorlabs/zagkit/artifacts/visual-direction/direction-a-glass-clarity/type-ramp/en-US/scale-1p0-theme-light-contrast-standard-dir-rtl-text-1p0-motion-reduced-trans-normal.png
+missing: /home/micah/Desktop/Sylorlabs/zagkit/artifacts/visual-direction/direction-a-glass-clarity/type-ramp/en-US/scale-1p0-theme-light-contrast-standard-dir-rtl-text-1p0-motion-reduced-trans-reduced.png
+missing: /home/micah/Desktop/Sylorlabs/zagkit/artifacts/visual-direction/direction-a-glass-clarity/type-ramp/en-US/scale-1p0-theme-light-contrast-standard-dir-rtl-text-1p3-motion-full-trans-normal.png
+missing: /home/micah/Desktop/Sylorlabs/zagkit/artifacts/visual-direction/direction-a-glass-clarity/type-ramp/en-US/scale-1p0-theme-light-contrast-standard-dir-rtl-text-1p3-motion-full-trans-reduced.png
+missing: /home/micah/Desktop/Sylorlabs/zagkit/artifacts/visual-direction/direction-a-glass-clarity/type-ramp/en-US/scale-1p0-theme-light-contrast-standard-dir-rtl-text-1p3-motion-reduced-trans-normal.png
+missing: /home/micah/Desktop/Sylorlabs/zagkit/artifacts/visual-direction/direction-a-glass-clarity/type-ramp/en-US/scale-1p0-theme-light-contrast-standard-dir-rtl-text-1p3-motion-reduced-trans-reduced.png
+missing: /home/micah/Desktop/Sylorlabs/zagkit/artifacts/visual-direction/direction-a-glass-clarity/type-ramp/en-US/scale-1p0-theme-light-contrast-standard-dir-rtl-text-2p0-motion-full-trans-normal.png
+missing: /home/micah/Desktop/Sylorlabs/zagkit/artifacts/visual-direction/direction-a-glass-clarity/type-ramp/en-US/scale-1p0-theme-light-contrast-standard-dir-rtl-text-2p0-motion-full-trans-reduced.png
+mode=full expected=100800 missing=100368
+FAIL: missing artifacts

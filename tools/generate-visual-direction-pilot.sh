@@ -127,7 +127,7 @@ PY
 }
 
 created_count=0
-skipped_count=0
+overwritten_count=0
 for direction in "${directions[@]}"; do
   for scene in "${scenes[@]}"; do
     for locale in "${locales[@]}"; do
@@ -144,11 +144,10 @@ for direction in "${directions[@]}"; do
                     out="$OUT_ROOT/$direction/$scene/$locale/$variant.png"
                     mkdir -p "$(dirname "$out")"
                     if [ -f "$out" ]; then
-                      skipped_count=$((skipped_count + 1))
-                    else
-                      render_placeholder "$out" "$direction" "$scene" "$locale" "$variant"
-                      created_count=$((created_count + 1))
+                      overwritten_count=$((overwritten_count + 1))
                     fi
+                    render_placeholder "$out" "$direction" "$scene" "$locale" "$variant"
+                    created_count=$((created_count + 1))
                   done
                 done
               done
@@ -169,4 +168,4 @@ fi
 echo "pilot placeholder outputs ready under $OUT_ROOT"
 echo "expected_pilot_count=$expected_count"
 echo "created_count=$created_count"
-echo "skipped_count=$skipped_count"
+echo "overwritten_count=$overwritten_count"

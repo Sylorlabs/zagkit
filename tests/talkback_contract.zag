@@ -56,13 +56,28 @@ fn id_target_contract(state: *TestState) void {
     expect(state, stale.status == TalkbackStatus.stale_semantics, "stale semantic revisions cannot silently target replacement nodes");
     expect(state, missing.status == TalkbackStatus.target_not_found, "missing ID targets return a structured failure");
 
-    let unsupported: TalkbackResponse = talkback_dispatch(&session, tree, viewport, talkback_request(7, TalkbackCommand.drag, node_key(2), tree.revision));
-    let bad_timeout_request: TalkbackRequest = talkback_request(8, TalkbackCommand.query, node_key(2), tree.revision);
+    let drag: TalkbackResponse = talkback_dispatch(&session, tree, viewport, talkback_request(7, TalkbackCommand.drag, node_key(2), tree.revision));
+    let gesture: TalkbackResponse = talkback_dispatch(&session, tree, viewport, talkback_request(8, TalkbackCommand.gesture, node_key(2), tree.revision));
+    let wait_for: TalkbackResponse = talkback_dispatch(&session, tree, viewport, talkback_request(9, TalkbackCommand.wait_for, node_key(2), tree.revision));
+    let assertion: TalkbackResponse = talkback_dispatch(&session, tree, viewport, talkback_request(10, TalkbackCommand.assert_value, node_key(2), tree.revision));
+    let snapshot: TalkbackResponse = talkback_dispatch(&session, tree, viewport, talkback_request(11, TalkbackCommand.snapshot, semantic_root_key(), 0 - 1));
+    let replay: TalkbackResponse = talkback_dispatch(&session, tree, viewport, talkback_request(12, TalkbackCommand.replay, semantic_root_key(), 0 - 1));
+    session.capabilities.key_actions = 0;
+    let unsupported: TalkbackResponse = talkback_dispatch(&session, tree, viewport, talkback_request(13, TalkbackCommand.key, node_key(3), tree.revision));
+    let bad_timeout_request: TalkbackRequest = talkback_request(14, TalkbackCommand.query, node_key(2), tree.revision);
     bad_timeout_request.timeout_ms = 0;
     let bad_timeout: TalkbackResponse = talkback_dispatch(&session, tree, viewport, bad_timeout_request);
-    expect(state, unsupported.status == TalkbackStatus.unsupported_command, "unimplemented commands remain fail-closed in capability truth");
+    expect(state, drag.status == TalkbackStatus.accepted && gesture.status == TalkbackStatus.accepted &&
+        wait_for.status == TalkbackStatus.accepted && assertion.status == TalkbackStatus.accepted &&
+        snapshot.status == TalkbackStatus.accepted && replay.status == TalkbackStatus.accepted,
+        "all action-oriented commands are accepted when command capabilities are enabled");
+    expect(state, drag.emitted_action == 1 && gesture.emitted_action == 1 &&
+        wait_for.emitted_action == 1 && assertion.emitted_action == 1 &&
+        snapshot.emitted_action == 1 && replay.emitted_action == 1,
+        "action dispatch is recorded in emitted-action evidence");
+    expect(state, unsupported.status == TalkbackStatus.unsupported_command, "commands not advertised by capability remain fail-closed");
     expect(state, bad_timeout.status == TalkbackStatus.invalid_timeout, "invalid timeout policy is rejected before dispatch");
-    expect(state, session.events.len == 8 && session.events.data[7].sequence == 8, "accepted and rejected requests share one ordered evidence log");
+    expect(state, session.events.len == 14 && session.events.data[13].sequence == 14, "accepted and rejected requests share one ordered evidence log");
 
     talkback_session_free(&session);
     semantics_tree_free(&tree);
@@ -103,9 +118,12 @@ fn capability_contract(state: *TestState) void {
     let screenshot: TalkbackResponse = talkback_dispatch(&session, tree, viewport, talkback_request(31, TalkbackCommand.screenshot, semantic_root_key(), 0 - 1));
     let replay: TalkbackResponse = talkback_dispatch(&session, tree, viewport, talkback_request(32, TalkbackCommand.replay, semantic_root_key(), 0 - 1));
     let assertion: TalkbackResponse = talkback_dispatch(&session, tree, viewport, talkback_request(33, TalkbackCommand.assert_value, node_key(2), tree.revision));
+    let timeline: TalkbackResponse = talkback_dispatch(&session, tree, viewport, talkback_request(34, TalkbackCommand.timeline, semantic_root_key(), 0 - 1));
+    let query: TalkbackResponse = talkback_dispatch(&session, tree, viewport, talkback_request(35, TalkbackCommand.query, node_key(2), tree.revision));
     expect(state, report.status == TalkbackStatus.accepted, "capability reporting is always queryable");
-    expect(state, screenshot.status == TalkbackStatus.unsupported_command && replay.status == TalkbackStatus.unsupported_command, "unavailable screenshot and replay capabilities fail closed");
-    expect(state, assertion.status == TalkbackStatus.unsupported_command, "assertions remain unavailable until payload comparison is implemented");
+    expect(state, screenshot.status == TalkbackStatus.unsupported_command, "screenshot remains unsupported until transport capture is implemented");
+    expect(state, replay.status == TalkbackStatus.accepted && assertion.status == TalkbackStatus.accepted, "snapshot and replay primitives are accepted when supported");
+    expect(state, timeline.result_count == 5 && query.result_count == 1, "query helpers expose deterministic result counts");
     expect(state, capabilities.protocol_major == 0 && capabilities.protocol_minor == 2, "the experimental protocol version is explicit");
     talkback_session_free(&session);
     semantics_tree_free(&tree);
