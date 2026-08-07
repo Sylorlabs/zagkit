@@ -1,0 +1,106 @@
+{
+  "schema_version": 1,
+  "direction_id": "direction-a-glass-clarity",
+  "focus_language": "depth-first translucent depth and soft gradient emphasis",
+  "palette": {
+    "surface": "#F4F6FA",
+    "surface-alt": "#E9EDF5",
+    "surface-dark": "#10141A",
+    "surface-alt-dark": "#171C23",
+    "text-primary": "#0B1020",
+    "text-primary-dark": "#EFF5FF",
+    "text-secondary": "#334155",
+    "text-secondary-dark": "#B6C2D4",
+    "brand": "#4F46E5",
+    "brand-on-surface": "#FFFFFF",
+    "focus": "#22D3EE",
+    "danger": "#DC2626",
+    "warning": "#D97706",
+    "success": "#16A34A",
+    "shadow": "rgba(2, 8, 23, 0.35)",
+    "reduced-contrast-overlay": "rgba(2, 8, 23, 0.70)"
+  },
+  "typography": {
+    "family": "Inter",
+    "family_fallbacks": ["Noto Sans", "Noto Sans Arabic", "Noto Sans Hebrew", "Noto Sans JP", "Noto Sans Thai"],
+    "scale_system": "fluid-4",
+    "line_height": 1.35,
+    "letter_spacing": "0.0em",
+    "monospace": "JetBrains Mono",
+    "minimum_click_target_dp": 24
+  },
+  "spacing": {
+    "unit": "4dp",
+    "base": 4,
+    "inline-x": 12,
+    "inline-y": 10,
+    "gutter": 16,
+    "panel-padding": 20,
+    "component-gap": 14,
+    "density": {
+      "compact": 0.9,
+      "standard": 1.0,
+      "expanded": 1.15
+    }
+  },
+  "shape": {
+    "corner-radius": 12,
+    "button-radius": 12,
+    "card-radius": 14,
+    "input-radius": 10,
+    "focus_ring_radius": 14
+  },
+  "elevation": {
+    "surface": 0,
+    "panel": 2,
+    "pop-over": 6,
+    "dialog": 8,
+    "focus-ring-thickness": 2
+  },
+  "materials": {
+    "glass": {
+      "blur_px": 20,
+      "tint_alpha": 0.20,
+      "vignette_alpha": 0.20,
+      "specular_gain": 0.12,
+      "edge_highlight_alpha": 0.18,
+      "reduced_transparency_fallback": "surface-opaque"
+    },
+    "light": {
+      "key_azimuth_deg": 40,
+      "key_zenith_deg": 60,
+      "ambient_intensity": 0.42,
+      "ambient_tint": "rgba(255,255,255,0.32)",
+      "rim_intensity": 0.22
+    },
+    "shadows": {
+      "soft": true,
+      "y_offset": 10,
+      "spread": 2,
+      "blur": 28,
+      "alpha": 0.28
+    }
+  },
+  "motion": {
+    "duration_ms": {
+      "short": 130,
+      "medium": 200,
+      "long": 320
+    },
+    "easing": "cubic-bezier(0.22, 0.61, 0.36, 1)",
+    "continuous": false,
+    "layout-interruption": "preserve-velocity",
+    "reduced_motion_substitution": "opacity"
+  },
+  "interaction_states": {
+    "focus": {
+      "ring": "focus",
+      "ring_width": 2,
+      "focus_alpha": 1.0
+    },
+    "disabled": {
+      "opacity": 0.45,
+      "contrast_delta": 0.55
+    }
+  }
+}

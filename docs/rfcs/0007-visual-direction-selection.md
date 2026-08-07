@@ -41,6 +41,7 @@ The manifest defines the exact comparison scope:
 
 - `docs/design/visual-direction-comparison.json`
 - `docs/design/visual-direction-comparison-matrix.md`
+- `docs/design/visual-direction-tokens/`
 
 Execution command:
 

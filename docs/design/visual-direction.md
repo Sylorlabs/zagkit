@@ -68,6 +68,8 @@ content and interactions. Each direction includes:
 
 ### A — Glass Clarity
 
+- Token manifest: `docs/design/visual-direction-tokens/direction-a-glass-clarity.json`
+
 - Focus language: depth-first, translucent surfaces, restrained color, soft motion.
 - Spacing model: clear two-token cadence (`inline-x`, `inline-y`) with compact
   and expanded multipliers.
@@ -78,6 +80,8 @@ content and interactions. Each direction includes:
 - Implementation risk: highest overdraw and sampling complexity in dense scenes.
 
 ### B — Precision Fabric
+
+- Token manifest: `docs/design/visual-direction-tokens/direction-b-precision-fabric.json`
 
 - Focus language: matte surfaces, sharp edge hierarchy, strict typographic rhythm,
   measurable density.
@@ -90,6 +94,8 @@ content and interactions. Each direction includes:
 - Implementation risk: can feel sterile without strong material compensation.
 
 ### C — Vector Utility
+
+- Token manifest: `docs/design/visual-direction-tokens/direction-c-vector-utility.json`
 
 - Focus language: token-first industrial palette, dense data surfaces, clear control
   states.
