@@ -18,7 +18,7 @@
   - Evidence: [cli smoke](cli-smoke-2026-08-07.log)
   - Evidence (this session): [cli smoke-late](cli-smoke-2026-08-07-late5.log)
   - Evidence (this continuation): [cli smoke-latest2](cli-smoke-2026-08-07-latest2.log), [cli smoke-final](cli-smoke-2026-08-07-final.log), [cli smoke-cont2](cli-smoke-2026-08-07-cont2.log)
-  - Evidence (this run): [cli smoke live3](cli-smoke-2026-08-07-live3.log)
+  - Evidence (this run): [cli smoke live3](cli-smoke-2026-08-07-live3.log), [cli smoke now4](cli-smoke-2026-08-07-now4.log)
 - Visual-direction pilot scope:
   - `./tools/verify-visual-direction-artifacts.sh --mode pilot --exact`
   - Evidence (this continuation): [pilot generation](visual-direction-pilot-generate-2026-08-07-final.log), [pilot verification latest](visual-direction-pilot-2026-08-07-latest.log)
@@ -27,15 +27,17 @@
   - `./zagkit run --headless-only --show-ascii` and `./zagkit --help`
   - Evidence: [headless launch latest](headless-launch-2026-08-07-latest.log), [headless-launch help](headless-launch-help-2026-08-07-latest.log), [headless launch open attempt](headless-launch-open-2026-08-07-latest.log)
   - Evidence this continuation: [headless launch now](headless-launch-2026-08-07-now.log), [headless launch live](headless-launch-live.log), [headless launch live open](headless-launch-live-open.log), [live PNG output](../../artifacts/launch/headless-reference-live.png)
+  - Evidence (this run): [headless launch now5](headless-launch-now5.log), [headless launch open now5](headless-launch-open-now5.log), [headless launch now6 open](headless-launch-now6-open.log), [live PNG output](../../artifacts/launch/headless-reference.png)
 - Headless core:
   - `./zagkit test`
   - Evidence (this session): [headless-contract-latest (new)](headless-contract-latest-2026-08-07-late6.log)
   - Evidence (this continuation): [headless test run from Zagkit CLI fresh](headless-contract-latest-2026-08-07-now.log), [headless-contract-latest (new)](headless-contract-latest-2026-08-07-late7.log), [headless-contract-latest-final](headless-contract-latest-2026-08-07-final.log), [headless-contract-latest-final2](headless-contract-latest-2026-08-07-final2.log), [headless test run from Zagkit CLI](headless-contract-latest-2026-08-07-latest2.log)
   - Evidence (this continuation): [headless core verification cont2](headless-contract-latest-2026-08-07-cont2.log), [headless-contract latest live](headless-contract-latest-2026-08-07-live.log)
+  - Evidence (this run): [headless-contract now4](headless-contract-latest-2026-08-07-now4.log)
 - Contract check:
   - `./tools/check-contracts.sh`
   - Evidence (this continuation): [check-contracts latest live](check-contracts-latest2-live.log)
-  - Evidence (this run): [check-contracts latest3 live](check-contracts-latest3-live.log)
+  - Evidence (this run): [check-contracts latest3 live](check-contracts-latest3-live.log), [check-contracts now4](check-contracts-2026-08-07-now4.log)
 - PrismStudio migration inventory:
   - `./tools/generate-prismstudio-migration-map.sh`
   - Evidence: [inventory json](../../contracts/prismstudio-migration-inventory.json), [inventory markdown](prismstudio-migration-inventory-2026-08-06.md), [migration evidence log now](prismstudio-migration-inventory-2026-08-07-now.log), [migration evidence log latest](prismstudio-migration-inventory-2026-08-07-latest.log)
