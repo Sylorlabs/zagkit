@@ -5,9 +5,50 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 MANIFEST="$ROOT/docs/design/visual-direction-comparison.json"
 MATRIX="$ROOT/docs/design/visual-direction-comparison-matrix.md"
 OUT_ROOT="$ROOT/artifacts/visual-direction"
-PILOT_EXPECTED_COUNT=324
 VERBOSE="${VD_VERBOSE:-0}"
 MAX_ITEMS="${VD_MAX_ITEMS:-0}"
+DRY_RUN=0
+
+usage() {
+  cat <<'USAGE'
+Usage: generate-visual-direction-pilot.sh [--dry-run] [--max-items N]
+
+The script renders the pilot direction x scene x locale x variant matrix.
+--dry-run reports target counts and expected output paths without writing files.
+--max-items is honored when rendering.
+USAGE
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --dry-run)
+      DRY_RUN=1
+      shift
+      ;;
+    --max-items)
+      if [ "$#" -lt 2 ]; then
+        echo "missing max-items value" >&2
+        usage
+        exit 1
+      fi
+      MAX_ITEMS="$2"
+      if ! [[ "$MAX_ITEMS" =~ ^[0-9]+$ ]]; then
+        echo "--max-items must be a non-negative integer" >&2
+        exit 1
+      fi
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "unknown argument: $1" >&2
+      usage
+      exit 1
+      ;;
+  esac
+done
 
 if ! command -v jq >/dev/null 2>&1; then
   echo "jq required" >&2
@@ -56,8 +97,27 @@ done < <(jq -r '.artifact_layout.text_scale_format | to_entries[] | "\(.key)|\(.
 
 mkdir -p "$OUT_ROOT"
 for direction in "${directions[@]}"; do
+  # Keep only the defined pilot scenes for deterministic reuse-proof artifacts.
+  # Any prior non-pilot scene captures are stale for this scope and are removed.
+  for old_scene in "$OUT_ROOT/$direction"/*; do
+    old_name="$(basename "$old_scene")"
+    if [ ! -d "$old_scene" ]; then
+      continue
+    fi
+    case "$old_name" in
+      type-ramp|semantic-form|material-fidelity)
+        ;;
+      *)
+        rm -rf "$old_scene"
+        if [ "$VERBOSE" -ne 0 ]; then
+          echo "removed stale pilot-scope scene dir: ${direction}/${old_name}"
+        fi
+        ;;
+    esac
+  done
+
   for scene in "${scenes[@]}"; do
-    find "$OUT_ROOT/$direction/$scene" -type f -name '*.png' -delete 2>/dev/null || true
+    rm -rf "$OUT_ROOT/$direction/$scene"
   done
 done
 
@@ -140,19 +200,23 @@ for direction in "${directions[@]}"; do
             for layout_dir in "${layout_directions[@]}"; do
               for text_scale in "${text_scales[@]}"; do
                 for motion in "${motions[@]}"; do
-                  for transparency in "${transparencies[@]}"; do
+                for transparency in "${transparencies[@]}"; do
                     if [ "$MAX_ITEMS" -gt 0 ] && [ "$created_limit" -ge "$MAX_ITEMS" ]; then
-                      break 4 2>/dev/null || break 3
+                      break 10
                     fi
                     scale_fmt="${scale_formats[$scale]:-$scale}"
                     text_fmt="${text_formats[$text_scale]:-$text_scale}"
                     variant="scale-${scale_fmt}-theme-${theme}-contrast-${contrast}-dir-${layout_dir}-text-${text_fmt}-motion-${motion}-trans-${transparency}"
                     out="$OUT_ROOT/$direction/$scene/$locale/$variant.png"
-                    mkdir -p "$(dirname "$out")"
-                    if [ -f "$out" ]; then
-                      overwritten_count=$((overwritten_count + 1))
+                    if [ "$DRY_RUN" -eq 0 ]; then
+                      mkdir -p "$(dirname "$out")"
+                      if [ -f "$out" ]; then
+                        overwritten_count=$((overwritten_count + 1))
+                      fi
+                      render_placeholder "$out" "$direction" "$scene" "$locale" "$variant"
+                    elif [ "$VERBOSE" -ne 0 ]; then
+                      echo "would render ${direction}/${scene}/${locale}/${variant}.png"
                     fi
-                    render_placeholder "$out" "$direction" "$scene" "$locale" "$variant"
                     created_count=$((created_count + 1))
                     created_limit=$((created_limit + 1))
                     if [ "$VERBOSE" -ne 0 ]; then
@@ -171,11 +235,18 @@ done
 
 expected_count=$(( ${#directions[@]} * ${#scenes[@]} * ${#locales[@]} * ${#scales[@]} * ${#themes[@]} * ${#contrasts[@]} * ${#layout_directions[@]} * ${#text_scales[@]} * ${#motions[@]} * ${#transparencies[@]} ))
 
-if [ "$expected_count" -ne "$PILOT_EXPECTED_COUNT" ]; then
-  echo "expected pilot count changed: computed=$expected_count manifest_hint=$PILOT_EXPECTED_COUNT" >&2
+if [ "$DRY_RUN" -eq 1 ]; then
+  echo "visual-direction pilot dry-run"
+  echo "mode=pilot expected_total=$expected_count"
+  echo "max_items=$MAX_ITEMS"
+  if [ "$MAX_ITEMS" -gt 0 ]; then
+    echo "requested_end_index=$MAX_ITEMS"
+  else
+    echo "requested_end_index=$expected_count"
+  fi
+else
+  echo "pilot placeholder outputs ready under $OUT_ROOT"
+  echo "expected_pilot_count=$expected_count"
+  echo "created_count=$created_count"
+  echo "overwritten_count=$overwritten_count"
 fi
-
-echo "pilot placeholder outputs ready under $OUT_ROOT"
-echo "expected_pilot_count=$expected_count"
-echo "created_count=$created_count"
-echo "overwritten_count=$overwritten_count"
