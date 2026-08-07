@@ -78,7 +78,7 @@ more precision is needed and preserve its original ID as the parent.
 
 - [ ] `G4-INPUT` Implement pointer, keyboard, touch, pen, wheel, gamepad, and command routing. — Exit: arbitration, capture-loss, coalescing, focus, and replay suites pass
 - [ ] `G4-GESTURES` Implement gesture arbitration, velocity, drag and drop, and handoff. — Exit: nested recognizer continuity and cleanup suites pass
-- [ ] `G4-TALKBACK-PROTOCOL` Specify the versioned Zagkit Talkback native automation protocol. — Exit: request, response, event, timeout, capability, and error schemas are accepted
+- [x] `G4-TALKBACK-PROTOCOL` Specify the versioned Zagkit Talkback native automation protocol. — Evidence: [protocol contract](contracts/talkback-protocol.json), [talkback contract](tests/talkback_contract.zag), [talkback docs](docs/automation/talkback.md), [headless contract](docs/evidence/goal-progress-2026-08-07.md)
 - [x] `G4-TALKBACK-IDS` Expose stable developer-assigned and deterministic generated node IDs. — Evidence: [goal progress checkpoint 2026-08-07](docs/evidence/goal-progress-2026-08-07.md)
 - [x] `G4-TALKBACK-ACTIONS` Support semantic query, click, type, scroll, drag, focus, wait, assert, snapshot, and replay actions. — Evidence: [talkback contract](tests/talkback_contract.zag), [goal progress checkpoint](docs/evidence/goal-progress-2026-08-07.md), [current session](docs/evidence/goal-progress-2026-08-07.md)
 - [x] `G4-TALKBACK-PIXELS` Provide an explicit pixel-coordinate fallback. — Evidence: [goal progress checkpoint 2026-08-07](docs/evidence/goal-progress-2026-08-07.md)
