@@ -3,7 +3,7 @@
 ## Scope
 - Scope: `/home/micah/Desktop/Sylorlabs/zagkit`
 - Date: 2026-08-07
-- Note: this workspace is write-restricted for `/home/micah/Desktop/Sylorlabs/zag` and `/home/micah/Desktop/Sylorlabs/PrismStudio`; upstream and migration work remains out of scope in this session.
+- Note: this workspace is write-restricted for `/home/micah/Desktop/Sylorlabs/zag`; `/home/micah/Desktop/Sylorlabs/PrismStudio` is read/scan-only from this workspace. Upstream and migration edits remain constrained by this session.
 
 ## Verified in this session
 
@@ -11,26 +11,37 @@
   - `./tools/check-contracts.sh`
   - Evidence: [check-contracts](check-contracts-2026-08-07.log)
   - Evidence (this session): [check-contracts-late](check-contracts-2026-08-07-late5.log)
-  - Evidence (this continuation): [check-contracts-lateb](check-contracts-2026-08-07-late6b.log), [check-contracts-continued](check-contracts-2026-08-07-final.log)
+  - Evidence (this continuation): [check-contracts-latest2](check-contracts-2026-08-07-latest2.log), [check-contracts-final](check-contracts-2026-08-07-final.log), [check-contracts-cont2](check-contracts-2026-08-07-cont2.log)
 - CLI smoke:
   - `./tools/test-zagkit-cli.sh`
   - Evidence: [cli smoke](cli-smoke-2026-08-07.log)
   - Evidence (this session): [cli smoke-late](cli-smoke-2026-08-07-late5.log)
-  - Evidence (this continuation): [cli smoke-lateb](cli-smoke-2026-08-07-late6b.log), [cli smoke-final](cli-smoke-2026-08-07-final.log)
+  - Evidence (this continuation): [cli smoke-latest2](cli-smoke-2026-08-07-latest2.log), [cli smoke-final](cli-smoke-2026-08-07-final.log), [cli smoke-cont2](cli-smoke-2026-08-07-cont2.log)
 - Visual-direction pilot scope:
   - `./tools/verify-visual-direction-artifacts.sh --mode pilot --exact`
-  - Evidence: [pilot verification latest](visual-direction-pilot-2026-08-07-late5.log)
-  - Visual-direction launch: [artifacts completeness check (continued)](visual-direction-matrix-req-existing-2026-08-07-final.log)
+  - Evidence (this continuation): [pilot generation](visual-direction-pilot-generate-2026-08-07-final.log), [pilot verification latest](visual-direction-pilot-2026-08-07-latest.log)
+  - Visual-direction launch: [artifacts completeness check (continued)](visual-direction-matrix-req-existing-2026-08-07-latest2.log)
 - Launch path:
   - `./zagkit run --headless-only --show-ascii` and `./zagkit --help`
   - Evidence: [headless launch latest](headless-launch-2026-08-07-latest.log), [headless-launch help](headless-launch-help-2026-08-07-latest.log), [headless launch open attempt](headless-launch-open-2026-08-07-latest.log)
+  - Evidence this continuation: [headless launch now](headless-launch-2026-08-07-now.log)
 - Headless core:
   - `./zagkit test`
   - Evidence (this session): [headless-contract-latest (new)](headless-contract-latest-2026-08-07-late6.log)
-  - Evidence (this continuation): [headless-contract-latest (new)](headless-contract-latest-2026-08-07-late7.log), [headless-contract-latest-final](headless-contract-latest-2026-08-07-final.log)
+  - Evidence (this continuation): [headless test run from Zagkit CLI fresh](headless-contract-latest-2026-08-07-now.log), [headless-contract-latest (new)](headless-contract-latest-2026-08-07-late7.log), [headless-contract-latest-final](headless-contract-latest-2026-08-07-final.log), [headless-contract-latest-final2](headless-contract-latest-2026-08-07-final2.log), [headless test run from Zagkit CLI](headless-contract-latest-2026-08-07-latest2.log)
+  - Evidence (this continuation): [headless core verification cont2](headless-contract-latest-2026-08-07-cont2.log)
+- PrismStudio migration inventory:
+  - `./tools/generate-prismstudio-migration-map.sh`
+  - Evidence: [inventory json](../../contracts/prismstudio-migration-inventory.json), [inventory markdown](prismstudio-migration-inventory-2026-08-06.md), [migration evidence log now](prismstudio-migration-inventory-2026-08-07-now.log), [migration evidence log latest](prismstudio-migration-inventory-2026-08-07-latest.log)
 - Visual-direction generation behavior:
   - `./tools/generate-visual-direction-pilot.sh` (324 placeholders rendered)
   - Output location: [artifacts/visual-direction](../../artifacts/visual-direction)
+- Visual-direction matrix generation tooling:
+  - `./tools/generate-visual-direction-matrix.sh --mode pilot --dry-run`
+  - Evidence: [pilot scope calculation](visual-direction-matrix-pilot-2026-08-07-cont2.log) (expected 324 captures)
+  - `./tools/generate-visual-direction-matrix.sh --mode full --allow-full --dry-run`
+  - Evidence: [full scope calculation limited sample](visual-direction-matrix-full-2026-08-07-cont2.log), [full scope count](visual-direction-matrix-full-2026-08-07-cont2b.log) (expected 100,800 captures)
+  - Note: full mode is gated by `--allow-full` and supports `--max-items` for controlled runs.
 - Visual-direction completeness gating:
   - `./tools/visual-direction-matrix-report.sh --require-existing` (reports 100,368 artifacts missing)
   - Evidence: [matrix completeness check latest](visual-direction-matrix-req-existing-2026-08-07-late2.log)
@@ -45,7 +56,7 @@
 
 - `G0-VISUAL-DIRECTION` moved from stalling to evidence-backed pilot scope:
   - `./tools/generate-visual-direction-pilot.sh` produced the required 324-capture pilot set.
-  - Evidence: [pilot verification latest](visual-direction-pilot-2026-08-07-late5.log)
+  - Evidence: [pilot verification latest](visual-direction-pilot-2026-08-07-latest.log)
 
 ## Milestone movement
 

@@ -6,6 +6,8 @@ MANIFEST="$ROOT/docs/design/visual-direction-comparison.json"
 MATRIX="$ROOT/docs/design/visual-direction-comparison-matrix.md"
 OUT_ROOT="$ROOT/artifacts/visual-direction"
 PILOT_EXPECTED_COUNT=324
+VERBOSE="${VD_VERBOSE:-0}"
+MAX_ITEMS="${VD_MAX_ITEMS:-0}"
 
 if ! command -v jq >/dev/null 2>&1; then
   echo "jq required" >&2
@@ -128,6 +130,7 @@ PY
 
 created_count=0
 overwritten_count=0
+created_limit=0
 for direction in "${directions[@]}"; do
   for scene in "${scenes[@]}"; do
     for locale in "${locales[@]}"; do
@@ -138,6 +141,9 @@ for direction in "${directions[@]}"; do
               for text_scale in "${text_scales[@]}"; do
                 for motion in "${motions[@]}"; do
                   for transparency in "${transparencies[@]}"; do
+                    if [ "$MAX_ITEMS" -gt 0 ] && [ "$created_limit" -ge "$MAX_ITEMS" ]; then
+                      break 4 2>/dev/null || break 3
+                    fi
                     scale_fmt="${scale_formats[$scale]:-$scale}"
                     text_fmt="${text_formats[$text_scale]:-$text_scale}"
                     variant="scale-${scale_fmt}-theme-${theme}-contrast-${contrast}-dir-${layout_dir}-text-${text_fmt}-motion-${motion}-trans-${transparency}"
@@ -148,6 +154,10 @@ for direction in "${directions[@]}"; do
                     fi
                     render_placeholder "$out" "$direction" "$scene" "$locale" "$variant"
                     created_count=$((created_count + 1))
+                    created_limit=$((created_limit + 1))
+                    if [ "$VERBOSE" -ne 0 ]; then
+                      echo "rendered #${created_limit}: ${direction}/${scene}/${locale}/${variant}.png"
+                    fi
                   done
                 done
               done

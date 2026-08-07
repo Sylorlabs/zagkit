@@ -1,0 +1,1172 @@
+{
+  "source": {
+    "prismstudio_root": "/home/micah/Desktop/Sylorlabs/PrismStudio",
+    "inventory_module_count": 49,
+    "manifest_sections": 5,
+    "manifest_section_declared_total": 128,
+    "manifest_probe_total": 129,
+    "mcp_tool_count": 92,
+    "command_id_count": 46,
+    "workspace_sections": 11,
+    "hard_rules_count": 6
+  },
+  "migration_scope": {
+    "source_modules": [
+      {
+        "name": "agent.zag",
+        "role": "headless agent RPC for CLI and MCP wrappers."
+      },
+      {
+        "name": "app.zag",
+        "role": "application core: state, zones, tools, input, and the command"
+      },
+      {
+        "name": "builder.zag",
+        "role": "Engine Builder / Density Synthesizer (Masterplan \u00a722)."
+      },
+      {
+        "name": "capability.zag",
+        "role": "explicit local-agent grants and append-only request audit."
+      },
+      {
+        "name": "commands.zag",
+        "role": "stable command-id registry for palette + agent dispatch."
+      },
+      {
+        "name": "components.zag",
+        "role": "the photonic hardware library."
+      },
+      {
+        "name": "demo.zag",
+        "role": "reference photonic processor design (shared by GUI + agent)."
+      },
+      {
+        "name": "device_model.zag",
+        "role": "versioned physical assumptions with explicit provenance."
+      },
+      {
+        "name": "editops.zag",
+        "role": "editing operations above the raw scene: move with waveguide"
+      },
+      {
+        "name": "export.zag",
+        "role": "deterministic human/machine-readable project artifacts."
+      },
+      {
+        "name": "fb.zag",
+        "role": "software framebuffer for Zag Photonics Architect."
+      },
+      {
+        "name": "flash_ir.zag",
+        "role": "Flash FIR v1 importer and photonic execution verifier."
+      },
+      {
+        "name": "fontdata.zag",
+        "role": "5x9 bitmap font rows (bits 4..0)"
+      },
+      {
+        "name": "fontatlas.zag",
+        "role": "glyph atlas packer: bakes fontdata rows into a cacheable"
+      },
+      {
+        "name": "gpu_backend.zag",
+        "role": "User-selectable auto/CPU/virtual/physical backend policy; explicit CPU/virtual choices do not open or probe DRM."
+      },
+      {
+        "name": "gpu_compute.zag",
+        "role": "high-level GPU compute operations built on the verified"
+      },
+      {
+        "name": "gpu_isa_display.zag",
+        "role": "Compiler-ISA-executed virtual framebuffer with owned memory, ordered fences, complete-frame presentation, and no DRM access."
+      },
+      {
+        "name": "gpu_isa_raster.zag",
+        "role": "Strict virtual GFX10.1 tiled raster execution for compiler-emitted clear, depth, clipping, and fixed-point alpha compositing, with CPU shadow fallback."
+      },
+      {
+        "name": "gpu_raster.zag",
+        "role": "Compiler-bundle-gated tiled raster software model: clear, geometry, depth, clipping, compositing, per-tile fences, shadow comparison, double buffering, fallback, and mismatch input/image/diff/log/tuple evidence."
+      },
+      {
+        "name": "gpu_virtual_cert.zag",
+        "role": "Host-contained certification runner: 10,000 fills, one million actual VM submissions, exact ownership/fences, 86,400 logical soak ticks, raster differentials, and explicitly non-physical evidence."
+      },
+      {
+        "name": "gpu_rt.zag",
+        "role": "a pure-Zag AMDGPU runtime. No libc, no libdrm, no Mesa:"
+      },
+      {
+        "name": "io_chunks.zag",
+        "role": "chunked design I/O keyed by world 32\u00b3 chunks."
+      },
+      {
+        "name": "ioline.zag",
+        "role": "buffered stdin reads (chunked, not byte-per-syscall)."
+      },
+      {
+        "name": "limits.zag",
+        "role": "centralized, named, documented resource ceilings for untrusted"
+      },
+      {
+        "name": "main.zag",
+        "role": "photonic CPU designer entry point. 100% Zag, no C anywhere."
+      },
+      {
+        "name": "math3d.zag",
+        "role": "vectors, orbit camera, projection, and picking rays."
+      },
+      {
+        "name": "mcp.zag",
+        "role": "native MCP stdio server (JSON-RPC + Content-Length framing)."
+      },
+      {
+        "name": "optimizer.zag",
+        "role": "Continuous Optical-Computation Optimizer (Photon Solver)."
+      },
+      {
+        "name": "process_stack.zag",
+        "role": "physical process-stack layer model (plate, part, guide heights)."
+      },
+      {
+        "name": "rdna.zag",
+        "role": "a hand-written RDNA1 (GFX10.1) machine-code emitter, in pure Zag."
+      },
+      {
+        "name": "routing.zag",
+        "role": "waveguide routing engine. A* over the free voxel lattice,"
+      },
+      {
+        "name": "scene.zag",
+        "role": "the design database. The scene is stored as (a) a voxel"
+      },
+      {
+        "name": "session.zag",
+        "role": "live shared design: one .zpa for GUI + agent + MCP."
+      },
+      {
+        "name": "sim.zag",
+        "role": "wave-state simulation. The scene's directed optical graph is"
+      },
+      {
+        "name": "sim_region.zag",
+        "role": "incremental simulation recompile."
+      },
+      {
+        "name": "strutil.zag",
+        "role": "leak-free string helpers (s2..s6, fmt_i, fmt_f1) for ownership."
+      },
+      {
+        "name": "ternary.zag",
+        "role": "balanced ternary optical logic."
+      },
+      {
+        "name": "tiles.zag",
+        "role": "tile-based render cache for the 3D viewport."
+      },
+      {
+        "name": "timing.zag",
+        "role": "static timing analysis over the routed photonic fabric (Masterplan"
+      },
+      {
+        "name": "ui.zag",
+        "role": "dark workbench theme + minimal immediate-mode widgets over fb.zag."
+      },
+      {
+        "name": "uilayer.zag",
+        "role": "retained UI panel surfaces: cached pixels + state hashes (Section 3.12)."
+      },
+      {
+        "name": "viewport.zag",
+        "role": "the 3D viewport. Software-rasterized in Zag:"
+      },
+      {
+        "name": "voxel.zag",
+        "role": "integer lattice coordinates for the design grid."
+      },
+      {
+        "name": "workspace.zag",
+        "role": "panel rendering + per-frame orchestration."
+      },
+      {
+        "name": "workspace_menu.zag",
+        "role": "menu bar, command palette, status bar, context menu."
+      },
+      {
+        "name": "workspace_opt.zag",
+        "role": "optimizer proposal panel + builder panel + apply paths."
+      },
+      {
+        "name": "workspace_settings.zag",
+        "role": "modal dialogs, Flash FIR workspace, model browser, settings."
+      },
+      {
+        "name": "world.zag",
+        "role": "sparse chunk-based spatial index for million-scale scenes."
+      },
+      {
+        "name": "x11.zag",
+        "role": "a pure-Zag X11 client. No libc, no Xlib, no C anywhere:"
+      }
+    ],
+    "probe_manifest_sections": [
+      {
+        "heading": "Production tests \u2014 gated by `tools/verify.zag`",
+        "declared": 94,
+        "probes": [
+          "agent.zag",
+          "ast.zag",
+          "bounds_test.zag",
+          "boxselect_test.zag",
+          "builder_test.zag",
+          "camera_test.zag",
+          "components.zag",
+          "copypaste_test.zag",
+          "crash_recovery_test.zag",
+          "demo.zag",
+          "design_db_test.zag",
+          "dpi_test.zag",
+          "drc_test.zag",
+          "engine_test.zag",
+          "fb.zag",
+          "fb_bounds_test.zag",
+          "feedback_test.zag",
+          "frame_diff_test.zag",
+          "frame_overlay_test.zag",
+          "gizmo_test.zag",
+          "gpu_backend_choice_test.zag",
+          "gpu_kernel_test.zag",
+          "gpu_isa_vgpu_test.zag",
+          "gpu_isa_display_test.zag",
+          "gpu_isa_raster_test.zag",
+          "gpu_query_test.zag",
+          "gpu_promotion_test.zag",
+          "gpu_raster_shadow_test.zag",
+          "gpu_raster_pipeline_test.zag",
+          "gpu_safety_test.zag",
+          "gpu_uapi_test.zag",
+          "gpu_vgpu_test.zag",
+          "gpu_virtual_certification_test.zag",
+          "inspector_test.zag",
+          "json.zag",
+          "lifecycle_test.zag",
+          "model_schema_test.zag",
+          "limits_test.zag",
+          "list.zag",
+          "main.zag",
+          "masterplan_evidence_test.zag",
+          "opt_report_test.zag",
+          "opt_families_test.zag",
+          "opt_schedule_test.zag",
+          "opt_soak_test.zag",
+          "opt_ui_test.zag",
+          "opt_verify_test.zag",
+          "optimizer_test.zag",
+          "ortho_test.zag",
+          "outline_test.zag",
+          "palette_test.zag",
+          "parser_corpus_test.zag",
+          "persistence_test.zag",
+          "picking_test.zag",
+          "process_stack_test.zag",
+          "protocol_parser_test.zag",
+          "provenance_test.zag",
+          "provenance_units_test.zag",
+          "reference_pcu_ui_test.zag",
+          "recovery_ui_test.zag",
+          "reference_tamper_test.zag",
+          "render_golden_test.zag",
+          "render_test.zag",
+          "robustness_test.zag",
+          "routing.zag",
+          "routing_test.zag",
+          "rt.zag",
+          "scene.zag",
+          "scheduling_test.zag",
+          "security_regression_test.zag",
+          "session_conflict_test.zag",
+          "session_presentation_test.zag",
+          "shortcuts_test.zag",
+          "sim.zag",
+          "sim_semantics_test.zag",
+          "simulation_property_test.zag",
+          "soak_test.zag",
+          "stepping_test.zag",
+          "timeline_test.zag",
+          "timing_test.zag",
+          "ui.zag",
+          "ui_accessibility_test.zag",
+          "ui_agent_access_test.zag",
+          "layout_test.zag",
+          "ui_interactions_test.zag",
+          "ui_layers_test.zag",
+          "ui_perf_test.zag",
+          "ui_prefs_test.zag",
+          "ui_states_test.zag",
+          "ui_tokens_test.zag",
+          "units_test.zag",
+          "world.zag",
+          "x11.zag",
+          "x11_pixel_pack_test.zag",
+          "znc.zag"
+        ]
+      },
+      {
+        "heading": "Hardware-only \u2014 require a real (ideally non-display) GPU; excluded from the safe suite",
+        "declared": 6,
+        "probes": [
+          "gpu_compute_test.zag",
+          "gpu_fill_test.zag",
+          "gpu_parallel_test.zag",
+          "gpu_submit_test.zag",
+          "gpu_test.zag",
+          "gpu_wg_test.zag"
+        ]
+      },
+      {
+        "heading": "Dev benchmarks \u2014 timing tools, not pass/fail gates (superseded by `tools/bench.zag`)",
+        "declared": 2,
+        "probes": [
+          "perf_test.zag",
+          "scale_test.zag"
+        ]
+      },
+      {
+        "heading": "Compiler probes \u2014 exercise a `znc` language feature, not PrismStudio",
+        "declared": 2,
+        "probes": [
+          "_repro_znc1.zag",
+          "break_test.zag"
+        ]
+      },
+      {
+        "heading": "Obsolete \u2014 early debug/exploration scratch; kept for history, not run and not production",
+        "declared": 24,
+        "probes": [
+          "agent_place2.zag",
+          "agent_twoline.zag",
+          "app.zag",
+          "components_only.zag",
+          "hashmap.zag",
+          "hm_dbg.zag",
+          "io_chunks.zag",
+          "lex.zag",
+          "move_dbg.zag",
+          "opt_ui_shot.zag",
+          "probe3.zag",
+          "probe4.zag",
+          "route_dbg.zag",
+          "rsz2.zag",
+          "scene_only.zag",
+          "ternary.zag",
+          "tiles.zag",
+          "transport.zag",
+          "viewport.zag",
+          "voxel_only.zag",
+          "workspace.zag",
+          "world_only.zag",
+          "world_smoke.zag",
+          "x11_paint.zag"
+        ]
+      }
+    ],
+    "manifest_count_check": [
+      {
+        "heading": "Production tests \u2014 gated by `tools/verify.zag`",
+        "declared": 94,
+        "parsed": 95,
+        "status": "complete",
+        "probes": [
+          "agent.zag",
+          "ast.zag",
+          "bounds_test.zag",
+          "boxselect_test.zag",
+          "builder_test.zag",
+          "camera_test.zag",
+          "components.zag",
+          "copypaste_test.zag",
+          "crash_recovery_test.zag",
+          "demo.zag",
+          "design_db_test.zag",
+          "dpi_test.zag",
+          "drc_test.zag",
+          "engine_test.zag",
+          "fb.zag",
+          "fb_bounds_test.zag",
+          "feedback_test.zag",
+          "frame_diff_test.zag",
+          "frame_overlay_test.zag",
+          "gizmo_test.zag",
+          "gpu_backend_choice_test.zag",
+          "gpu_kernel_test.zag",
+          "gpu_isa_vgpu_test.zag",
+          "gpu_isa_display_test.zag",
+          "gpu_isa_raster_test.zag",
+          "gpu_query_test.zag",
+          "gpu_promotion_test.zag",
+          "gpu_raster_shadow_test.zag",
+          "gpu_raster_pipeline_test.zag",
+          "gpu_safety_test.zag",
+          "gpu_uapi_test.zag",
+          "gpu_vgpu_test.zag",
+          "gpu_virtual_certification_test.zag",
+          "inspector_test.zag",
+          "json.zag",
+          "lifecycle_test.zag",
+          "model_schema_test.zag",
+          "limits_test.zag",
+          "list.zag",
+          "main.zag",
+          "masterplan_evidence_test.zag",
+          "opt_report_test.zag",
+          "opt_families_test.zag",
+          "opt_schedule_test.zag",
+          "opt_soak_test.zag",
+          "opt_ui_test.zag",
+          "opt_verify_test.zag",
+          "optimizer_test.zag",
+          "ortho_test.zag",
+          "outline_test.zag",
+          "palette_test.zag",
+          "parser_corpus_test.zag",
+          "persistence_test.zag",
+          "picking_test.zag",
+          "process_stack_test.zag",
+          "protocol_parser_test.zag",
+          "provenance_test.zag",
+          "provenance_units_test.zag",
+          "reference_pcu_ui_test.zag",
+          "recovery_ui_test.zag",
+          "reference_tamper_test.zag",
+          "render_golden_test.zag",
+          "render_test.zag",
+          "robustness_test.zag",
+          "routing.zag",
+          "routing_test.zag",
+          "rt.zag",
+          "scene.zag",
+          "scheduling_test.zag",
+          "security_regression_test.zag",
+          "session_conflict_test.zag",
+          "session_presentation_test.zag",
+          "shortcuts_test.zag",
+          "sim.zag",
+          "sim_semantics_test.zag",
+          "simulation_property_test.zag",
+          "soak_test.zag",
+          "stepping_test.zag",
+          "timeline_test.zag",
+          "timing_test.zag",
+          "ui.zag",
+          "ui_accessibility_test.zag",
+          "ui_agent_access_test.zag",
+          "layout_test.zag",
+          "ui_interactions_test.zag",
+          "ui_layers_test.zag",
+          "ui_perf_test.zag",
+          "ui_prefs_test.zag",
+          "ui_states_test.zag",
+          "ui_tokens_test.zag",
+          "units_test.zag",
+          "world.zag",
+          "x11.zag",
+          "x11_pixel_pack_test.zag",
+          "znc.zag"
+        ]
+      },
+      {
+        "heading": "Hardware-only \u2014 require a real (ideally non-display) GPU; excluded from the safe suite",
+        "declared": 6,
+        "parsed": 6,
+        "status": "complete",
+        "probes": [
+          "gpu_compute_test.zag",
+          "gpu_fill_test.zag",
+          "gpu_parallel_test.zag",
+          "gpu_submit_test.zag",
+          "gpu_test.zag",
+          "gpu_wg_test.zag"
+        ]
+      },
+      {
+        "heading": "Dev benchmarks \u2014 timing tools, not pass/fail gates (superseded by `tools/bench.zag`)",
+        "declared": 2,
+        "parsed": 2,
+        "status": "complete",
+        "probes": [
+          "perf_test.zag",
+          "scale_test.zag"
+        ]
+      },
+      {
+        "heading": "Compiler probes \u2014 exercise a `znc` language feature, not PrismStudio",
+        "declared": 2,
+        "parsed": 2,
+        "status": "complete",
+        "probes": [
+          "_repro_znc1.zag",
+          "break_test.zag"
+        ]
+      },
+      {
+        "heading": "Obsolete \u2014 early debug/exploration scratch; kept for history, not run and not production",
+        "declared": 24,
+        "parsed": 24,
+        "status": "complete",
+        "probes": [
+          "agent_place2.zag",
+          "agent_twoline.zag",
+          "app.zag",
+          "components_only.zag",
+          "hashmap.zag",
+          "hm_dbg.zag",
+          "io_chunks.zag",
+          "lex.zag",
+          "move_dbg.zag",
+          "opt_ui_shot.zag",
+          "probe3.zag",
+          "probe4.zag",
+          "route_dbg.zag",
+          "rsz2.zag",
+          "scene_only.zag",
+          "ternary.zag",
+          "tiles.zag",
+          "transport.zag",
+          "viewport.zag",
+          "voxel_only.zag",
+          "workspace.zag",
+          "world_only.zag",
+          "world_smoke.zag",
+          "x11_paint.zag"
+        ]
+      }
+    ],
+    "mcp_protocol_tools": [
+      {
+        "name": "prismstudio_command",
+        "mutation": true
+      },
+      {
+        "name": "prismstudio_mutate",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_help",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_capabilities",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_ping",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_new",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_demo",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_list",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_list_files",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_get",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_select",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_can_place",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_undo",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_redo",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_view",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_camera",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_render_at",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_pick",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_place_here",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_place_on",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_place",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_route",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_delete",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_sim_step",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_sim_state",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_sim",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_move",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_rotate",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_disconnect",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_reroute",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_inspect",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_close",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_build",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_preview",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_simstream",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_timing",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_del",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_sel",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_save",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_open",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_render",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_export",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_diagnostics",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_details",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_audit",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_logs",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_uilog",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_trace",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_flash_import",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_flash_verify",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_ui_list",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_ui_screenshot",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_ui_activate",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_optimizer_apply",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_optimizer_accept",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_optimizer_decline",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_optimizer_ignore",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_optimizer_details",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_builder_generate",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_builder_apply",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_builder_accept",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_builder_decline",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_builder_ignore",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_builder_details",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_copy",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_paste",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_duplicate",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_group",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_ungroup",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_rename",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_toggle_visibility",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_toggle_lock",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_select_add",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_select_remove",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_select_clear",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_view_frame",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_view_toggle",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_panel",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_ui_click",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_ui_type",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_camera_orbit",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_camera_pan",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_camera_zoom",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_model_status",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_model_migrate",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_test",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_status",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_coords",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_process_stack",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_power",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_perf",
+        "mutation": false
+      },
+      {
+        "name": "prismstudio_kinds",
+        "mutation": false
+      }
+    ],
+    "command_ids": [
+      {
+        "name": "cmd_none",
+        "id": 0
+      },
+      {
+        "name": "cmd_new",
+        "id": 1
+      },
+      {
+        "name": "cmd_open",
+        "id": 2
+      },
+      {
+        "name": "cmd_save",
+        "id": 3
+      },
+      {
+        "name": "cmd_save_as",
+        "id": 4
+      },
+      {
+        "name": "cmd_quit",
+        "id": 5
+      },
+      {
+        "name": "cmd_undo",
+        "id": 10
+      },
+      {
+        "name": "cmd_redo",
+        "id": 11
+      },
+      {
+        "name": "cmd_duplicate",
+        "id": 12
+      },
+      {
+        "name": "cmd_delete",
+        "id": 13
+      },
+      {
+        "name": "cmd_deselect",
+        "id": 14
+      },
+      {
+        "name": "cmd_copy",
+        "id": 15
+      },
+      {
+        "name": "cmd_paste",
+        "id": 16
+      },
+      {
+        "name": "cmd_group",
+        "id": 17
+      },
+      {
+        "name": "cmd_ungroup",
+        "id": 18
+      },
+      {
+        "name": "cmd_rename",
+        "id": 19
+      },
+      {
+        "name": "cmd_frame_selected",
+        "id": 20
+      },
+      {
+        "name": "cmd_frame_all",
+        "id": 21
+      },
+      {
+        "name": "cmd_view_top",
+        "id": 22
+      },
+      {
+        "name": "cmd_view_front",
+        "id": 23
+      },
+      {
+        "name": "cmd_view_right",
+        "id": 24
+      },
+      {
+        "name": "cmd_view_perspective",
+        "id": 25
+      },
+      {
+        "name": "cmd_toggle_ortho",
+        "id": 26
+      },
+      {
+        "name": "cmd_cycle_ui_scale",
+        "id": 27
+      },
+      {
+        "name": "cmd_reset_view",
+        "id": 28
+      },
+      {
+        "name": "cmd_section_view",
+        "id": 29
+      },
+      {
+        "name": "cmd_shortcuts",
+        "id": 30
+      },
+      {
+        "name": "cmd_demo",
+        "id": 31
+      },
+      {
+        "name": "cmd_open_flash_reference",
+        "id": 32
+      },
+      {
+        "name": "cmd_model_provenance",
+        "id": 33
+      },
+      {
+        "name": "cmd_recover_autosave",
+        "id": 34
+      },
+      {
+        "name": "cmd_tool_select",
+        "id": 40
+      },
+      {
+        "name": "cmd_tool_route",
+        "id": 41
+      },
+      {
+        "name": "cmd_sim_play_toggle",
+        "id": 42
+      },
+      {
+        "name": "cmd_optimizer",
+        "id": 43
+      },
+      {
+        "name": "cmd_settings",
+        "id": 44
+      },
+      {
+        "name": "cmd_palette",
+        "id": 45
+      },
+      {
+        "name": "cmd_tool_measure",
+        "id": 46
+      },
+      {
+        "name": "cmd_toggle_reduced_motion",
+        "id": 47
+      },
+      {
+        "name": "cmd_toggle_object_snap",
+        "id": 48
+      },
+      {
+        "name": "cmd_flash_workspace",
+        "id": 49
+      },
+      {
+        "name": "cmd_place_base",
+        "id": 50
+      },
+      {
+        "name": "cmd_builder",
+        "id": 51
+      },
+      {
+        "name": "cmd_toggle_visibility",
+        "id": 70
+      },
+      {
+        "name": "cmd_toggle_lock",
+        "id": 71
+      },
+      {
+        "name": "cmd_palette_jump_base",
+        "id": 1000
+      }
+    ],
+    "workspace_sections": [
+      {
+        "id": "3.7",
+        "name": ". A category is a lens, not a partition"
+      },
+      {
+        "id": "3.2",
+        "name": ""
+      },
+      {
+        "id": "3.8",
+        "name": ", clears after ~3 s"
+      },
+      {
+        "id": "3.4",
+        "name": ""
+      },
+      {
+        "id": "3.9",
+        "name": "type icon, name (inline-renamable),"
+      },
+      {
+        "id": "3.6",
+        "name": "the row becomes a text field"
+      },
+      {
+        "id": "3.10",
+        "name": "the row whose beam path is selected in 3D"
+      },
+      {
+        "id": "3.11",
+        "name": ""
+      },
+      {
+        "id": "3.5",
+        "name": ""
+      },
+      {
+        "id": "3.12",
+        "name": ""
+      },
+      {
+        "id": "20.5",
+        "name": ". Kept off the interaction path: it"
+      }
+    ],
+    "hard_rules": [
+      {
+        "title": "No hardcoded physical constants"
+      },
+      {
+        "title": "Fix Zag at the compiler, never work around it in the app"
+      },
+      {
+        "title": "No committing binaries"
+      },
+      {
+        "title": "No `CAPS=all` default"
+      },
+      {
+        "title": "Math constant precision"
+      },
+      {
+        "title": "String ownership"
+      }
+    ]
+  },
+  "open_questions": [
+    "No native UI transport exists in this repo for full PrismStudio parity; this inventory proves extraction scope only.",
+    "No one-shot pixel-to-talking migration suite exists for every command/state pair yet.",
+    "G6 migration shell replacement and full automation coverage are still unimplemented in Zagkit."
+  ]
+}
