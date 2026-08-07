@@ -9,6 +9,7 @@
 | [0004](0004-platform-seams-and-backend-truth.md) | Platform seams and backend truth | Accepted |
 | [0005](0005-quality-and-release-contract.md) | Quality and release contract | Accepted |
 | [0006](0006-flex-talkback-visual-fidelity-and-prismstudio.md) | Flex, Talkback, visual fidelity, and PrismStudio | Accepted |
+| [0007](0007-visual-direction-selection.md) | Visual direction selection | Proposed |
 
 Accepted RFCs are decisions, not proof that implementation exists. Current
 runtime truth remains in [the platform capability record](../../contracts/platforms.json).
