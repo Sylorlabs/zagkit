@@ -10,19 +10,30 @@
 - Repository contracts:
   - `./tools/check-contracts.sh`
   - Evidence: [check-contracts](check-contracts-2026-08-07.log)
+  - Evidence (this session): [check-contracts-late](check-contracts-2026-08-07-late2.log)
 - CLI smoke:
   - `./tools/test-zagkit-cli.sh`
   - Evidence: [cli smoke](cli-smoke-2026-08-07.log)
+  - Evidence (this session): [cli smoke-late](cli-smoke-2026-08-07-late.log)
 - Visual-direction pilot scope:
   - `./tools/verify-visual-direction-artifacts.sh --mode pilot --exact`
   - Evidence: [pilot verification](visual-direction-pilot-2026-08-07.log)
 - Headless core:
   - `./zagkit test`
+  - Evidence (this session): [headless-contract-latest](headless-contract-latest-2026-08-07.log)
 - Visual-direction generation behavior:
   - `./tools/generate-visual-direction-pilot.sh` (324 placeholders rendered)
 - Visual-direction completeness gating:
   - `./tools/visual-direction-matrix-report.sh --require-existing` (reports 100,368 artifacts missing)
   - Evidence: [matrix completeness check](visual-direction-matrix-req-existing-2026-08-07.log)
+
+### Talkback inspection movement
+
+- `G4-TALKBACK-INSPECT` contract behavior has been expanded and verified in the Talkback contract:
+  - `discover` now includes deterministic tree evidence hash and result count.
+  - `timeline`, `capability_report`, `snapshot`, `replay`, and action commands emit deterministic evidence hashes.
+  - `replay` now records retained timeline length in `row_count`.
+  - Evidence: [headless contracts](headless-contract-latest-2026-08-07.log), [talkback-contract](talkback-contract-2026-08-07.log), [talkback source](../automation/talkback.zag), [talkback test](../tests/talkback_contract.zag)
 
 ## Milestone movement
 

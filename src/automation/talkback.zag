@@ -166,6 +166,64 @@ fn talkback_pixel_request(request_id: i64, command: TalkbackCommand, pixel_x: i6
     return request;
 }
 
+fn talkback_evidence_mix(hash: i64, value: i64) i64 {
+    return (hash * 1099511628211) ^ value;
+}
+
+fn talkback_capability_hash(capabilities: TalkbackCapabilities) i64 {
+    let hash: i64 = talkback_evidence_mix(17, capabilities.protocol_major);
+    let hash2: i64 = talkback_evidence_mix(hash, capabilities.protocol_minor);
+    let hash3: i64 = talkback_evidence_mix(hash2, capabilities.semantic_query);
+    let hash4: i64 = talkback_evidence_mix(hash3, capabilities.id_actions);
+    let hash5: i64 = talkback_evidence_mix(hash4, capabilities.pixel_fallback);
+    let hash6: i64 = talkback_evidence_mix(hash5, capabilities.key_actions);
+    let hash7: i64 = talkback_evidence_mix(hash6, capabilities.drag_actions);
+    let hash8: i64 = talkback_evidence_mix(hash7, capabilities.gesture_actions);
+    let hash9: i64 = talkback_evidence_mix(hash8, capabilities.wait_actions);
+    let hash10: i64 = talkback_evidence_mix(hash9, capabilities.assert_actions);
+    let hash11: i64 = talkback_evidence_mix(hash10, capabilities.snapshot_actions);
+    let hash12: i64 = talkback_evidence_mix(hash11, capabilities.screenshots);
+    return talkback_evidence_mix(hash12, capabilities.replay);
+}
+
+fn talkback_tree_hash(tree: SemanticsTree) i64 {
+    let hash: i64 = talkback_evidence_mix(17, tree.revision);
+    let result: i64 = talkback_evidence_mix(hash, tree.nodes.len as i64);
+    let i: i32 = 0;
+    let hash_result: i64 = result;
+    while (i < tree.nodes.len) {
+        hash_result = talkback_evidence_mix(hash_result, semantic_node_evidence_hash(tree.nodes.data[i]));
+        i = i + 1;
+    }
+    return hash_result;
+}
+
+fn talkback_event_hash(event: TalkbackEvent) i64 {
+    let hash: i64 = talkback_evidence_mix(17, event.sequence);
+    let hash2: i64 = talkback_evidence_mix(hash, event.request_id);
+    let hash3: i64 = talkback_evidence_mix(hash2, event.command as i64);
+    let hash4: i64 = talkback_evidence_mix(hash3, event.target_kind as i64);
+    let hash5: i64 = talkback_evidence_mix(hash4, event.target_id.value);
+    let hash6: i64 = talkback_evidence_mix(hash5, event.target_id.generation);
+    let hash7: i64 = talkback_evidence_mix(hash6, event.status as i64);
+    let hash8: i64 = talkback_evidence_mix(hash7, event.semantics_revision);
+    let hash9: i64 = talkback_evidence_mix(hash8, event.pixel_x);
+    let hash10: i64 = talkback_evidence_mix(hash9, event.pixel_y);
+    let hash11: i64 = talkback_evidence_mix(hash10, event.scale_numerator);
+    return talkback_evidence_mix(hash11, event.scale_denominator);
+}
+
+fn talkback_session_hash(session: *TalkbackSession) i64 {
+    let hash: i64 = talkback_evidence_mix(17, session.*.events.len as i64);
+    let result: i64 = talkback_evidence_mix(hash, session.*.next_sequence);
+    let i: i32 = 0;
+    while (i < session.*.events.len) {
+        result = talkback_evidence_mix(result, talkback_event_hash(session.*.events.data[i]));
+        i = i + 1;
+    }
+    return result;
+}
+
 fn talkback_command_has_target(command: TalkbackCommand) i32 {
     return switch (command) {
         .discover => 0,
@@ -336,8 +394,21 @@ fn talkback_dispatch(session: *TalkbackSession, tree: SemanticsTree, viewport: R
         if (request.command == TalkbackCommand.timeline) { response.result_count = session.*.events.len; }
         if (request.command == TalkbackCommand.capability_report) { response.result_count = 1; }
         if (request.command == TalkbackCommand.screenshot) { response.result_count = 0; }
-        if (request.command == TalkbackCommand.snapshot) { response.result_count = 0; }
+        if (request.command == TalkbackCommand.snapshot) { response.result_count = 1; }
         if (request.command == TalkbackCommand.replay) { response.result_count = 1; }
+        if (request.command == TalkbackCommand.discover) { response.evidence_hash = talkback_tree_hash(tree); }
+        if (request.command == TalkbackCommand.timeline) { response.evidence_hash = talkback_session_hash(session); }
+        if (request.command == TalkbackCommand.capability_report) { response.evidence_hash = talkback_capability_hash(session.*.capabilities); }
+        if (request.command == TalkbackCommand.screenshot) {
+            response.evidence_hash = 0;
+        }
+        if (request.command == TalkbackCommand.snapshot) {
+            response.evidence_hash = talkback_tree_hash(tree);
+        }
+        if (request.command == TalkbackCommand.replay) {
+            response.evidence_hash = talkback_tree_hash(tree);
+            response.row_count = session.*.events.len;
+        }
         if (request.command == TalkbackCommand.wait_for) { response.result_count = 0; }
         if (talkback_emits_action(request.command) != 0) { response.emitted_action = 1; }
         return response;
@@ -356,6 +427,7 @@ fn talkback_dispatch(session: *TalkbackSession, tree: SemanticsTree, viewport: R
         }
         let response: TalkbackResponse = talkback_record(session, tree.revision, request, TalkbackStatus.accepted);
         if (talkback_emits_action(request.command) != 0) { response.emitted_action = 1; }
+        response.evidence_hash = talkback_tree_hash(tree);
         return response;
     }
 
