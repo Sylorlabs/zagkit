@@ -29,6 +29,9 @@ Deliverables:
 - A single accepted RFC that references the comparison packet and names the
   final target.
 
+
+A machine-readable comparison manifest now lives at `docs/design/visual-direction-comparison.json` and records exact scenes, variants, states, and decision questions.
+
 ## Required decision package
 
 At least three materially different directions must be evaluated using the same
@@ -104,7 +107,8 @@ axes. All captures must be deterministic and comparable by checksum.
   state readability, error clarity, disabled-state certainty, and viewport
   density stability.
 - Output bundle: comparison packet with one row per direction per scene per variant
-  and a single final recommendation memo.
+  and a single final recommendation memo in
+  [docs/design/visual-direction-comparison-matrix.md](./visual-direction-comparison-matrix.md).
 
 ## Selection criteria
 

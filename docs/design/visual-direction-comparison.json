@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "generated_for": "0.1.0-experimental.0",
+  "state": "pending",
+  "candidate_directions": [
+    "direction-a-glass-clarity",
+    "direction-b-precision-fabric",
+    "direction-c-vector-utility"
+  ],
+  "required_scene_ids": [
+    "type-ramp",
+    "bidi-editor",
+    "adaptive-dashboard",
+    "semantic-form",
+    "layer-effects",
+    "material-fidelity",
+    "asset-fidelity",
+    "gesture-handoff",
+    "cad-viewport",
+    "prismstudio-complete-ui"
+  ],
+  "variant_matrix": {
+    "scale_factors": [1.0, 1.25, 1.5, 2.0, 3.0],
+    "themes": ["light", "dark"],
+    "contrast": ["standard", "high"],
+    "directions": ["ltr", "rtl"],
+    "text_scales": [1.0, 1.3, 2.0],
+    "motion": ["full", "reduced"],
+    "transparency": ["normal", "reduced"],
+    "locales": ["en-US", "ar-EG", "he-IL", "hi-IN", "ja-JP", "th-TH", "zh-Hant-TW"]
+  },
+  "comparison_set": {
+    "component_scenes": [
+      "Text",
+      "Button",
+      "Menu",
+      "Dialog",
+      "NavigationStack",
+      "List",
+      "Table",
+      "Tree",
+      "Grid"
+    ],
+    "prismstudio_states": [
+      "startup",
+      "viewport-chrome",
+      "properties",
+      "table-editor",
+      "menu-open",
+      "dialog-confirm",
+      "command-palette"
+    ],
+    "interaction_states": [
+      "hover",
+      "focus",
+      "active",
+      "selected",
+      "disabled",
+      "error",
+      "loading",
+      "dragging"
+    ]
+  },
+  "evidence_requirements": {
+    "visual": [
+      "crisp-type-at-all-scales",
+      "shadow-and-reflection-composition",
+      "focus-visibility-consistency",
+      "state-distinction-by-visual-cues",
+      "high-contrast-variant-pass"
+    ],
+    "localization": [
+      "arabic",
+      "hebrew",
+      "hindi",
+      "japanese",
+      "thai",
+      "traditional-chinese",
+      "emoji"
+    ],
+    "platform": [
+      "desktop-pointer",
+      "desktop-keyboard",
+      "touch-equivalent",
+      "reduced-motion-observability",
+      "reduced-transparency-observability"
+    ]
+  },
+  "candidate_risk_questions": [
+    "Information hierarchy remains clear when text scale is 2.0",
+    "Contrast floor stays adequate in high contrast mode",
+    "Focus remains obvious without shadow-only affordance",
+    "Motion can be reduced without losing state semantics",
+    "Liquid-glass remains legible over dense CAD content",
+    "RTL and LTR layouts maintain equal information density"
+  ],
+  "acceptance_output": {
+    "packet": "docs/design/visual-direction-comparison-matrix.md",
+    "required_rfc": "docs/rfcs/0007-visual-direction-selection.md",
+    "decision_gate": "accepted-rfc-and-accessibility-review"
+  }
+}
