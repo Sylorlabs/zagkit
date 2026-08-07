@@ -12,6 +12,7 @@
   - Evidence: [check-contracts](check-contracts-2026-08-07.log)
   - Evidence (this session): [check-contracts-late](check-contracts-2026-08-07-late5.log)
   - Evidence (this continuation): [check-contracts-latest2](check-contracts-2026-08-07-latest2.log), [check-contracts-final](check-contracts-2026-08-07-final.log), [check-contracts-cont2](check-contracts-2026-08-07-cont2.log)
+  - Evidence (this run): [check-contracts-now3](check-contracts-2026-08-07-now3.log)
 - CLI smoke:
   - `./tools/test-zagkit-cli.sh`
   - Evidence: [cli smoke](cli-smoke-2026-08-07.log)
