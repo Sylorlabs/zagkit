@@ -21,6 +21,10 @@ Usage:
 Current status: this command only exposes the headless reference and contract
 test surface. It does not launch a native desktop, Wayland, macOS,
 Windows, iOS, or Android shell yet.
+
+Automation naming note: native automation is called "Zagkit Talkback"
+and is distinct from Android TalkBack. This distinction is documented in
+docs/automation/talkback.md.
 EOF
 }
 
