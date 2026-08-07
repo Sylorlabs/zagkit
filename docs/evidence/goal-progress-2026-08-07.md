@@ -25,12 +25,15 @@
 - Launch path:
   - `./zagkit run --headless-only --show-ascii` and `./zagkit --help`
   - Evidence: [headless launch latest](headless-launch-2026-08-07-latest.log), [headless-launch help](headless-launch-help-2026-08-07-latest.log), [headless launch open attempt](headless-launch-open-2026-08-07-latest.log)
-  - Evidence this continuation: [headless launch now](headless-launch-2026-08-07-now.log)
+  - Evidence this continuation: [headless launch now](headless-launch-2026-08-07-now.log), [headless launch live](headless-launch-live.log), [headless launch live open](headless-launch-live-open.log), [live PNG output](../../artifacts/launch/headless-reference-live.png)
 - Headless core:
   - `./zagkit test`
   - Evidence (this session): [headless-contract-latest (new)](headless-contract-latest-2026-08-07-late6.log)
   - Evidence (this continuation): [headless test run from Zagkit CLI fresh](headless-contract-latest-2026-08-07-now.log), [headless-contract-latest (new)](headless-contract-latest-2026-08-07-late7.log), [headless-contract-latest-final](headless-contract-latest-2026-08-07-final.log), [headless-contract-latest-final2](headless-contract-latest-2026-08-07-final2.log), [headless test run from Zagkit CLI](headless-contract-latest-2026-08-07-latest2.log)
-  - Evidence (this continuation): [headless core verification cont2](headless-contract-latest-2026-08-07-cont2.log)
+  - Evidence (this continuation): [headless core verification cont2](headless-contract-latest-2026-08-07-cont2.log), [headless-contract latest live](headless-contract-latest-2026-08-07-live.log)
+- Contract check:
+  - `./tools/check-contracts.sh`
+  - Evidence (this continuation): [check-contracts latest live](check-contracts-latest2-live.log)
 - PrismStudio migration inventory:
   - `./tools/generate-prismstudio-migration-map.sh`
   - Evidence: [inventory json](../../contracts/prismstudio-migration-inventory.json), [inventory markdown](prismstudio-migration-inventory-2026-08-06.md), [migration evidence log now](prismstudio-migration-inventory-2026-08-07-now.log), [migration evidence log latest](prismstudio-migration-inventory-2026-08-07-latest.log)
