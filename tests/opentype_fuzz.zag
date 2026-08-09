@@ -1,0 +1,45 @@
+@import("../src/text/opentype.zag")
+
+fn fuzz_next(state: *i64) i64 {
+    state.* = (state.* * 48271) % 2147483647;
+    return state.*;
+}
+
+fn main() i32 {
+    let seed: i64 = 918273;
+    let iteration: i32 = 0;
+    while (iteration < 20000) {
+        let length: i32 = (fuzz_next(&seed) % 513) as i32;
+        let bytes: ArrayList[u8] = make[u8](length + 1);
+        let index: i32 = 0;
+        while (index < length) {
+            push[u8](&bytes, (fuzz_next(&seed) & 255) as u8);
+            index = index + 1;
+        }
+        let face: OpenTypeFace = opentype_parse(bytes.data[0..bytes.len]);
+        if (face.error == OpenTypeError.none) {
+            if (face.units_per_em < 16 || face.units_per_em > 16384 ||
+                face.glyph_count <= 0 ||
+                (face.cmap_format != 4 && face.cmap_format != 12) ||
+                face.cmap_offset < 0 || face.cmap_length <= 0 ||
+                face.cmap_offset + face.cmap_length > face.bytes.len) {
+                opentype_face_free(&face); free[u8](&bytes);
+                _zag_eprintln("OpenType fuzz: accepted face violated bounded invariants");
+                return 1;
+            }
+            let codepoint: i64 = fuzz_next(&seed) % 1114112;
+            let glyph: GlyphLookup = opentype_glyph_for_scalar(face, codepoint);
+            if (glyph.error == OpenTypeError.none &&
+                (glyph.glyph_id < 0 || glyph.glyph_id >= face.glyph_count)) {
+                opentype_face_free(&face); free[u8](&bytes);
+                _zag_eprintln("OpenType fuzz: glyph lookup escaped declared glyph count");
+                return 2;
+            }
+        }
+        opentype_face_free(&face);
+        free[u8](&bytes);
+        iteration = iteration + 1;
+    }
+    _zag_println("OpenType fuzz: pass=20000 fail=0");
+    return 0;
+}
