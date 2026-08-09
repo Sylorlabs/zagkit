@@ -20,7 +20,7 @@
     "rule": "Visual component production cannot begin until visual direction and accessibility review are accepted."
   },
   "components": [
-    {"id":"text","family":"content","name":"Text","milestone":2,"status":"planned","semantic_roles":["text"],"inputs":[],"adaptive":["locale","direction","text_scale"]},
+    {"id":"text","family":"content","name":"Text","milestone":2,"status":"implementing","semantic_roles":["text"],"inputs":[],"adaptive":["semantic_type_token","semantic_color_token"],"source":"src/components/text.zag","evidence":"tests/text_contract.zag","documentation":"docs/components/text.md"},
     {"id":"rich-text","family":"content","name":"RichText","milestone":2,"status":"planned","semantic_roles":["text","link"],"inputs":["pointer","keyboard","touch"],"adaptive":["locale","direction","text_scale"]},
     {"id":"image","family":"content","name":"Image","milestone":2,"status":"planned","semantic_roles":["image"],"inputs":[],"adaptive":["density","contrast"]},
     {"id":"icon","family":"content","name":"Icon","milestone":2,"status":"planned","semantic_roles":["image","none"],"inputs":[],"adaptive":["density","contrast","direction"]},

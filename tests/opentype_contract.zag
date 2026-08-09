@@ -19,8 +19,10 @@ fn parse_contract(state: *TestState) void {
     expect(state, face.error == OpenTypeError.none,
         "bounded SFNT directory and required tables parse");
     expect(state, face.units_per_em == 1000 && face.glyph_count == 10 &&
-        face.cmap_format == 4 && face.horizontal_metric_count == 10,
-        "font metrics and selected cmap format remain explicit");
+        face.ascender == 800 && face.descender == 0 - 200 &&
+        face.line_gap == 200 && face.cmap_format == 4 &&
+        face.horizontal_metric_count == 10,
+        "horizontal and vertical font metrics and selected cmap remain explicit");
     let mapped: GlyphLookup = opentype_glyph_for_scalar(face, 65);
     let missing: GlyphLookup = opentype_glyph_for_scalar(face, 66);
     expect(state, mapped.error == OpenTypeError.none && mapped.glyph_id == 3,
@@ -108,6 +110,15 @@ fn malformed_contract(state: *TestState) void {
         bad_bounds.error_offset == 20,
         "table offsets cannot escape owned font bytes");
     opentype_face_free(&bad_bounds); free[u8](&bad_bounds_bytes);
+
+    let bad_vertical_bytes: ArrayList[u8] = fixture_font();
+    fixture_u16(&bad_vertical_bytes, 244, 65336);
+    fixture_u16(&bad_vertical_bytes, 246, 800);
+    let bad_vertical: OpenTypeFace = opentype_parse(
+        bad_vertical_bytes.data[0..bad_vertical_bytes.len]);
+    expect(state, bad_vertical.error == OpenTypeError.invalid_metrics,
+        "inverted hhea ascender and descender metrics fail closed");
+    opentype_face_free(&bad_vertical); free[u8](&bad_vertical_bytes);
 
     let duplicate_bytes: ArrayList[u8] = fixture_font();
     fixture_tag(&duplicate_bytes, 28, "cmap");

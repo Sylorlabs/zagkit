@@ -1,0 +1,451 @@
+@import("../src/components/text.zag")
+@import("../src/render/cpu_raster.zag")
+@import("../src/automation/talkback.zag")
+@import("support/opentype_fixture.zag")
+
+struct TestState { passed: i32, failed: i32 }
+
+fn expect(state: *TestState, condition: i32, name: []u8) void {
+    if (condition != 0) {
+        state.*.passed = state.*.passed + 1;
+        _zag_print("ok  "); _zag_println(name);
+    } else {
+        state.*.failed = state.*.failed + 1;
+        _zag_print("FAIL "); _zag_println(name);
+    }
+}
+
+fn text_test_slice_equal(actual: []u8, expected: []u8) i32 {
+    if (actual.len != expected.len) { return 0; }
+    let i: i32 = 0;
+    while (i < actual.len) {
+        if (actual[i] != expected[i]) { return 0; }
+        i = i + 1;
+    }
+    return 1;
+}
+
+fn text_test_paint_equal(actual: Paint, expected: Paint) i32 {
+    return (actual.red == expected.red && actual.green == expected.green &&
+        actual.blue == expected.blue && actual.alpha == expected.alpha &&
+        actual.stroke_width == expected.stroke_width) as i32;
+}
+
+fn text_test_column_has_alpha(surface: CpuSurface, x: i32) i32 {
+    let y: i32 = 0;
+    while (y < surface.height) {
+        let alpha_index: i32 = (y * surface.width + x) * 4 + 3;
+        if (surface.pixels.data[alpha_index] != 0) { return 1; }
+        y = y + 1;
+    }
+    return 0;
+}
+
+fn text_test_background(display: *DisplayList, id: i64) void {
+    let background: DisplayOp = display_op(DisplayOpKind.fill_rect, node_key(id));
+    background.bounds = rect(0, 0, 64 * unit_scale(), 32 * unit_scale());
+    background.paint = semantic_color_paint(SemanticColorToken.canvas);
+    _ = display_list_push(display, background);
+}
+
+fn metrics_and_resource_contract(state: *TestState, face: OpenTypeFace) void {
+    let bounds: Rect = rect(2 * unit_scale(), unit_scale(),
+        30 * unit_scale(), 20 * unit_scale());
+    let spec: TextSpec = text_spec(node_key_scoped(100, 4),
+        semantic_root_key(), bounds, "AAA", SemanticTypeToken.caption,
+        SemanticColorToken.text_primary);
+    let artifact: TextArtifact = text_build(face, spec);
+    let expected_size: i64 = semantic_type_size(SemanticTypeToken.caption);
+    let expected_ascender: i64 = ((face.ascender as i64) * expected_size) /
+        (face.units_per_em as i64);
+    let expected_descender: i64 = ((face.descender as i64) * expected_size) /
+        (face.units_per_em as i64);
+    let expected_gap: i64 = ((face.line_gap as i64) * expected_size) /
+        (face.units_per_em as i64);
+    let expected_height: i64 = expected_ascender - expected_descender +
+        expected_gap;
+    let expected_baseline: i64 = bounds.y +
+        (bounds.height - expected_height) / 2 + expected_gap / 2 +
+        expected_ascender;
+    let expected_advance: i64 = (1590 * expected_size) / 1000;
+    expect(state, artifact.error == TextError.none &&
+        artifact.canvas.key.value == 100 && artifact.canvas.key.generation == 4 &&
+        artifact.bounds.x == bounds.x && artifact.bounds.width == bounds.width,
+        "Text retains one stable scoped NodeKey and the caller's exact bounds");
+    expect(state, artifact.font_size == expected_size &&
+        artifact.ascender == expected_ascender &&
+        artifact.descender == expected_descender &&
+        artifact.line_gap == expected_gap &&
+        artifact.line_height == expected_height &&
+        artifact.baseline == expected_baseline,
+        "baseline and line box derive deterministically from OpenType hhea metrics");
+    expect(state, artifact.advance == expected_advance &&
+        artifact.scalar_count == 3 && artifact.glyph_count == 3 &&
+        artifact.path_count == 1 && artifact.path_command_count == 12 &&
+        artifact.clipped == 0,
+        "artifact evidence exposes advance scalar glyph path and clipping truth");
+    expect(state, text_test_slice_equal(artifact.type_token_id, "type.caption") != 0 &&
+        text_test_slice_equal(artifact.color_token_id, "color.text.primary") != 0 &&
+        artifact.type_token == SemanticTypeToken.caption &&
+        artifact.color_token == SemanticColorToken.text_primary,
+        "semantic type and color token IDs remain explicit provenance");
+    expect(state, artifact.canvas.has_clip == 1 &&
+        artifact.canvas.clip.x == bounds.x && artifact.canvas.clip.y == bounds.y &&
+        artifact.canvas.clip.width == bounds.width &&
+        artifact.canvas.clip.height == bounds.height,
+        "the immutable Canvas records the exact Text clip bounds");
+    expect(state, artifact.canvas.display.resources.resources.len == 1 &&
+        artifact.canvas.display.ops.len == 1 &&
+        artifact.canvas.display.ops.data[0].kind == DisplayOpKind.draw_path &&
+        artifact.canvas.display.resources.resources.data[0].kind ==
+            RenderResourceKind.path &&
+        artifact.canvas.display.ops.data[0].resource_id == artifact.resource_id &&
+        text_test_paint_equal(artifact.canvas.display.ops.data[0].paint,
+            semantic_color_paint(SemanticColorToken.text_primary)) != 0,
+        "one combined owned path resource renders with the resolved color token");
+    let decoded: PathDecodeResult = path_decode(
+        artifact.canvas.display.resources.resources.data[0].payload.data[
+            0..artifact.canvas.display.resources.resources.data[0].payload.len]);
+    expect(state, decoded.error == PathError.none &&
+        decoded.path.commands.len == artifact.path_command_count &&
+        decoded.path.sealed == 1,
+        "the combined glyph-run path payload is canonical and immutable");
+    path_free(&decoded.path);
+    expect(state, artifact.evidence_hash != 0 && text_artifact_valid(&artifact) != 0,
+        "sealed Text content has a deterministic self-verifying evidence hash");
+    text_free(&artifact);
+}
+
+fn validation_contract(state: *TestState, face: OpenTypeFace) void {
+    let empty_spec: TextSpec = text_spec(node_key(110), semantic_root_key(),
+        rect(0, 0, 20 * unit_scale(), 20 * unit_scale()), "",
+        SemanticTypeToken.body, SemanticColorToken.text_primary);
+    let empty: TextArtifact = text_build(face, empty_spec);
+    expect(state, empty.error == TextError.invalid_text && empty.evidence_hash == 0,
+        "empty text fails before a render resource is created");
+    text_free(&empty);
+
+    let malformed_spec: TextSpec = text_spec(node_key(111), semantic_root_key(),
+        rect(0, 0, 20 * unit_scale(), 20 * unit_scale()), "\xC0\xAF",
+        SemanticTypeToken.body, SemanticColorToken.text_primary);
+    let malformed: TextArtifact = text_build(face, malformed_spec);
+    expect(state, malformed.error == TextError.invalid_text &&
+        malformed.canvas.display.resources.resources.len == 0,
+        "malformed UTF-8 fails strictly and cannot become replacement glyphs");
+    text_free(&malformed);
+
+    let missing_spec: TextSpec = text_spec(node_key(112), semantic_root_key(),
+        rect(0, 0, 20 * unit_scale(), 20 * unit_scale()), "B",
+        SemanticTypeToken.body, SemanticColorToken.text_primary);
+    let missing: TextArtifact = text_build(face, missing_spec);
+    expect(state, missing.error == TextError.glyph_run_error &&
+        missing.glyph_error == GlyphRunError.missing_glyph &&
+        missing.canvas.display.resources.resources.len == 0,
+        "missing font coverage fails closed without a fabricated path");
+    text_free(&missing);
+
+    let invalid_spec: TextSpec = text_spec(node_key(0), semantic_root_key(),
+        rect(0, 0, 0, 20 * unit_scale()), "A",
+        SemanticTypeToken.body, SemanticColorToken.text_primary);
+    let invalid: TextArtifact = text_build(face, invalid_spec);
+    expect(state, invalid.error == TextError.invalid_spec &&
+        invalid.evidence_hash == 0,
+        "invalid identity or non-positive exact bounds fail before composition");
+    text_free(&invalid);
+}
+
+fn alignment_and_overflow_contract(state: *TestState,
+    face: OpenTypeFace) void {
+    let bounds: Rect = rect(5 * unit_scale(), 3 * unit_scale(),
+        40 * unit_scale(), 24 * unit_scale());
+    let start_spec: TextSpec = text_spec(node_key(120), semantic_root_key(),
+        bounds, "AAA", SemanticTypeToken.caption,
+        SemanticColorToken.text_secondary);
+    let center_spec: TextSpec = start_spec;
+    center_spec.id = node_key(121); center_spec.alignment = TextAlignment.center;
+    let end_spec: TextSpec = start_spec;
+    end_spec.id = node_key(122); end_spec.alignment = TextAlignment.end;
+    let start: TextArtifact = text_build(face, start_spec);
+    let center: TextArtifact = text_build(face, center_spec);
+    let end: TextArtifact = text_build(face, end_spec);
+    expect(state, start.error == TextError.none && center.error == TextError.none &&
+        end.error == TextError.none && start.origin_x == bounds.x &&
+        center.origin_x == bounds.x + (bounds.width - center.advance) / 2 &&
+        end.origin_x == bounds.x + bounds.width - end.advance,
+        "start center and end alignment use the same exact measured advance");
+    expect(state, start.advance == center.advance && center.advance == end.advance &&
+        start.baseline == center.baseline && center.baseline == end.baseline,
+        "alignment changes placement without changing metrics or baseline");
+
+    let title_spec: TextSpec = text_spec(node_key(123), semantic_root_key(),
+        rect(0, 0, 80 * unit_scale(), 48 * unit_scale()), "A",
+        SemanticTypeToken.title, SemanticColorToken.text_primary);
+    let title: TextArtifact = text_build(face, title_spec);
+    expect(state, title.error == TextError.none &&
+        title.font_size == semantic_type_size(SemanticTypeToken.title) &&
+        title.font_size > start.font_size && title.line_height > start.line_height &&
+        text_test_slice_equal(title.type_token_id, "type.title") != 0,
+        "semantic type hierarchy controls font size and vertical metrics");
+
+    let reject_spec: TextSpec = text_spec(node_key(124), semantic_root_key(),
+        rect(0, 0, 10 * unit_scale(), 20 * unit_scale()), "AAA",
+        SemanticTypeToken.caption, SemanticColorToken.text_primary);
+    let rejected: TextArtifact = text_build(face, reject_spec);
+    expect(state, rejected.error == TextError.overflow &&
+        rejected.canvas.display.resources.resources.len == 0,
+        "reject overflow returns an explicit error before resource publication");
+    let clip_spec: TextSpec = reject_spec;
+    clip_spec.id = node_key(125); clip_spec.overflow = TextOverflowPolicy.clip;
+    let clipped: TextArtifact = text_build(face, clip_spec);
+    expect(state, clipped.error == TextError.none && clipped.clipped == 1 &&
+        clipped.canvas.clip.x == clip_spec.bounds.x &&
+        clipped.canvas.clip.width == clip_spec.bounds.width,
+        "clip overflow succeeds while retaining explicit clipped truth and exact clip");
+    let clip_display: DisplayList = display_list_make();
+    let clip_semantics: SemanticsTree = semantics_tree_make();
+    let clip_contribution: TextContributionResult = text_contribute(
+        &clipped, &clip_display, &clip_semantics);
+    _ = display_list_seal(&clip_display);
+    let clip_raster: CpuRasterResult = cpu_rasterize(clip_display, 24, 20);
+    expect(state, clip_contribution.error == TextContributionError.none &&
+        clip_raster.error == CpuRasterError.none &&
+        clip_raster.pixels_touched > 0 &&
+        text_test_column_has_alpha(clip_raster.surface, 13) == 0,
+        "CPU output cannot escape the exact clip when overflow is accepted");
+
+    cpu_raster_free(&clip_raster); semantics_tree_free(&clip_semantics);
+    display_list_free(&clip_display);
+    text_free(&clipped); text_free(&rejected); text_free(&title);
+    text_free(&end); text_free(&center); text_free(&start);
+}
+
+fn contribution_and_talkback_contract(state: *TestState,
+    face: OpenTypeFace) void {
+    let bounds: Rect = rect(2 * unit_scale(), 2 * unit_scale(),
+        30 * unit_scale(), 20 * unit_scale());
+    let spec: TextSpec = text_spec(node_key_scoped(200, 7), node_key(199),
+        bounds, "AAA", SemanticTypeToken.caption,
+        SemanticColorToken.accent);
+    let first: TextArtifact = text_build(face, spec);
+    let second: TextArtifact = text_build(face, spec);
+    expect(state, first.error == TextError.none && second.error == TextError.none &&
+        first.evidence_hash == second.evidence_hash &&
+        first.canvas.content_hash == second.canvas.content_hash,
+        "identical Text input produces identical immutable artifact identity");
+
+    let first_display: DisplayList = display_list_make();
+    let first_semantics: SemanticsTree = semantics_tree_make();
+    let parent: SemanticsSpec = semantics_spec(node_key(199),
+        semantic_root_key(), SemanticRole.group, "Typography region");
+    parent.has_bounds = 1;
+    parent.bounds = rect(0, 0, 64 * unit_scale(), 32 * unit_scale());
+    _ = semantics_add(&first_semantics, parent);
+    let contributed: TextContributionResult = text_contribute(
+        &first, &first_display, &first_semantics);
+    let semantic_index: i32 = semantics_find_index(first_semantics, spec.id);
+    expect(state, contributed.error == TextContributionError.none &&
+        contributed.display_operations_added == 5 &&
+        contributed.display_resources_added == 1 &&
+        contributed.semantic_nodes_added == 1 && semantic_index >= 0,
+        "Text atomically contributes one clipped Canvas envelope and optional semantics");
+    let semantic: SemanticsNode = first_semantics.nodes.data[semantic_index];
+    expect(state, semantic.role == SemanticRole.text &&
+        node_key_equal(semantic.id, spec.id) != 0 &&
+        node_key_equal(semantic.parent, spec.semantic_parent) != 0 &&
+        semantic_text_equal(semantic.name, "AAA") != 0 &&
+        semantic.text_length == 3 && semantic.has_bounds == 1 &&
+        semantic.bounds.x == bounds.x && semantic.bounds.y == bounds.y &&
+        semantic.bounds.width == bounds.width &&
+        semantic.bounds.height == bounds.height,
+        "owned text semantics preserve stable ID strict text length and exact bounds");
+    expect(state, first_display.ops.data[0].kind == DisplayOpKind.save &&
+        first_display.ops.data[2].kind == DisplayOpKind.clip_rect &&
+        first_display.ops.data[2].bounds.x == bounds.x &&
+        first_display.ops.data[2].bounds.width == bounds.width &&
+        first_display.ops.data[3].kind == DisplayOpKind.draw_path &&
+        first_display.ops.data[4].kind == DisplayOpKind.restore,
+        "caller display receives exact save transform clip path restore order");
+
+    let session: TalkbackSession = talkback_session_make(talkback_capabilities());
+    let query: TalkbackResponse = talkback_dispatch(&session, first_semantics,
+        rect(0, 0, 64 * unit_scale(), 32 * unit_scale()),
+        talkback_request(1, TalkbackCommand.query, spec.id,
+            first_semantics.revision));
+    expect(state, query.status == TalkbackStatus.accepted &&
+        node_key_equal(query.target_id, spec.id) != 0 &&
+        query.resolved_role == SemanticRole.text && query.has_bounds == 1 &&
+        query.bounds.x == bounds.x && query.bounds.width == bounds.width,
+        "Zagkit Talkback resolves the same stable Text semantic ID and bounds");
+    talkback_session_free(&session);
+
+    let second_display: DisplayList = display_list_make();
+    let second_semantics: SemanticsTree = semantics_tree_make();
+    _ = semantics_add(&second_semantics, parent);
+    let second_contribution: TextContributionResult = text_contribute(
+        &second, &second_display, &second_semantics);
+    _ = display_list_seal(&first_display);
+    _ = display_list_seal(&second_display);
+    let first_raster: CpuRasterResult = cpu_rasterize(first_display, 64, 32);
+    let second_raster: CpuRasterResult = cpu_rasterize(second_display, 64, 32);
+    expect(state, second_contribution.error == TextContributionError.none &&
+        first_raster.error == CpuRasterError.none &&
+        second_raster.error == CpuRasterError.none &&
+        first_raster.pixels_touched > 0 &&
+        cpu_surface_hash(first_raster.surface) ==
+            cpu_surface_hash(second_raster.surface),
+        "two equivalent Text contributions produce deterministic nonempty CPU pixels");
+
+    cpu_raster_free(&second_raster); cpu_raster_free(&first_raster);
+    semantics_tree_free(&second_semantics); display_list_free(&second_display);
+    semantics_tree_free(&first_semantics); display_list_free(&first_display);
+    text_free(&second); text_free(&first);
+}
+
+fn parent_owned_contract(state: *TestState, face: OpenTypeFace) void {
+    let spec: TextSpec = text_spec(node_key(300), node_key(299),
+        rect(0, 0, 30 * unit_scale(), 20 * unit_scale()), "AAA",
+        SemanticTypeToken.label, SemanticColorToken.chart_axis);
+    spec.semantics_mode = TextSemanticsMode.parent_owned;
+    let artifact: TextArtifact = text_build(face, spec);
+    let display: DisplayList = display_list_make();
+    let semantics: SemanticsTree = semantics_tree_make();
+    let parent: SemanticsSpec = semantics_spec(node_key(299),
+        semantic_root_key(), SemanticRole.group, "Chart");
+    _ = semantics_add(&semantics, parent);
+    let existing: SemanticsSpec = semantics_spec(spec.id, node_key(299),
+        SemanticRole.text, "AAA");
+    existing.has_bounds = 1; existing.bounds = spec.bounds;
+    _ = semantics_add(&semantics, existing);
+    let semantic_count: i32 = semantics.nodes.len;
+    let result: TextContributionResult = text_contribute(
+        &artifact, &display, &semantics);
+    expect(state, result.error == TextContributionError.none &&
+        result.semantic_nodes_added == 0 && semantics.nodes.len == semantic_count &&
+        display.ops.len == 5 && display.resources.resources.len == 1,
+        "parent-owned mode renders an existing chart text ID without duplicating semantics");
+    display_list_free(&display); semantics_tree_free(&semantics);
+    text_free(&artifact);
+}
+
+fn atomic_failure_contract(state: *TestState, face: OpenTypeFace) void {
+    let spec: TextSpec = text_spec(node_key(400), node_key(399),
+        rect(0, 0, 30 * unit_scale(), 20 * unit_scale()), "AAA",
+        SemanticTypeToken.caption, SemanticColorToken.text_disabled);
+    spec.disabled = 1;
+    let artifact: TextArtifact = text_build(face, spec);
+
+    let duplicate_display: DisplayList = display_list_make();
+    text_test_background(&duplicate_display, 900);
+    let duplicate_semantics: SemanticsTree = semantics_tree_make();
+    let parent: SemanticsSpec = semantics_spec(node_key(399),
+        semantic_root_key(), SemanticRole.group, "Disabled region");
+    _ = semantics_add(&duplicate_semantics, parent);
+    let duplicate: SemanticsSpec = semantics_spec(spec.id, node_key(399),
+        SemanticRole.text, "Existing disabled text");
+    duplicate.disabled = 1; duplicate.has_bounds = 1;
+    duplicate.bounds = spec.bounds;
+    _ = semantics_add(&duplicate_semantics, duplicate);
+    let duplicate_ops: i32 = duplicate_display.ops.len;
+    let duplicate_resources: i32 = duplicate_display.resources.resources.len;
+    let duplicate_hash: i64 = duplicate_display.content_hash;
+    let duplicate_nodes: i32 = duplicate_semantics.nodes.len;
+    let duplicate_revision: i64 = duplicate_semantics.revision;
+    let duplicate_result: TextContributionResult = text_contribute(
+        &artifact, &duplicate_display, &duplicate_semantics);
+    expect(state,
+        duplicate_result.error == TextContributionError.duplicate_semantic_id &&
+        duplicate_display.ops.len == duplicate_ops &&
+        duplicate_display.resources.resources.len == duplicate_resources &&
+        duplicate_display.content_hash == duplicate_hash &&
+        duplicate_semantics.nodes.len == duplicate_nodes &&
+        duplicate_semantics.revision == duplicate_revision,
+        "disabled duplicate semantic IDs fail atomically before display mutation");
+    semantics_tree_free(&duplicate_semantics);
+    display_list_free(&duplicate_display);
+
+    let missing_display: DisplayList = display_list_make();
+    text_test_background(&missing_display, 901);
+    let missing_semantics: SemanticsTree = semantics_tree_make();
+    let missing_ops: i32 = missing_display.ops.len;
+    let missing_hash: i64 = missing_display.content_hash;
+    let missing_result: TextContributionResult = text_contribute(
+        &artifact, &missing_display, &missing_semantics);
+    expect(state,
+        missing_result.error == TextContributionError.missing_semantic_parent &&
+        missing_display.ops.len == missing_ops &&
+        missing_display.resources.resources.len == 0 &&
+        missing_display.content_hash == missing_hash &&
+        missing_semantics.nodes.len == 0 && missing_semantics.revision == 0,
+        "disabled missing-parent semantics also fail with every destination unchanged");
+    semantics_tree_free(&missing_semantics); display_list_free(&missing_display);
+
+    let collision_display: DisplayList = display_list_make();
+    let owned_resource: RenderResource =
+        artifact.canvas.display.resources.resources.data[0];
+    let collision_spec: RenderResourceSpec = render_resource_spec(
+        owned_resource.id, owned_resource.kind,
+        owned_resource.payload.data[0..owned_resource.payload.len],
+        owned_resource.format_tag);
+    _ = display_list_add_resource(&collision_display, collision_spec);
+    let collision_semantics: SemanticsTree = semantics_tree_make();
+    _ = semantics_add(&collision_semantics, parent);
+    let collision_hash: i64 = collision_display.content_hash;
+    let collision_nodes: i32 = collision_semantics.nodes.len;
+    let collision_result: TextContributionResult = text_contribute(
+        &artifact, &collision_display, &collision_semantics);
+    expect(state, collision_result.error ==
+            TextContributionError.invalid_destination &&
+        collision_result.canvas_error == CanvasError.resource_collision &&
+        collision_display.content_hash == collision_hash &&
+        collision_display.resources.resources.len == 1 &&
+        collision_semantics.nodes.len == collision_nodes,
+        "path resource collisions fail before either caller-owned tree changes");
+    semantics_tree_free(&collision_semantics);
+    display_list_free(&collision_display);
+    text_free(&artifact);
+}
+
+fn cleanup_contract(state: *TestState, face: OpenTypeFace) void {
+    let completed: i32 = 0;
+    let i: i32 = 0;
+    while (i < 64) {
+        let spec: TextSpec = text_spec(node_key_scoped(
+            500 + i as i64, i as i64),
+            semantic_root_key(),
+            rect(0, 0, 30 * unit_scale(), 20 * unit_scale()), "AAA",
+            SemanticTypeToken.caption, SemanticColorToken.text_primary);
+        let artifact: TextArtifact = text_build(face, spec);
+        if (artifact.error == TextError.none && artifact.evidence_hash != 0) {
+            completed = completed + 1;
+        }
+        text_free(&artifact);
+        if (artifact.canvas.released == 0 || artifact.evidence_hash != 0) {
+            completed = 0 - 1000;
+        }
+        i = i + 1;
+    }
+    expect(state, completed == 64,
+        "repeated Text build and cleanup releases every owned Canvas artifact");
+}
+
+fn main() i32 {
+    let state: TestState = TestState{ .passed = 0, .failed = 0 };
+    let bytes: ArrayList[u8] = fixture_font();
+    let face: OpenTypeFace = opentype_parse(bytes.data[0..bytes.len]);
+    expect(&state, face.error == OpenTypeError.none && face.ascender == 800 &&
+        face.descender == 0 - 200 && face.line_gap == 200,
+        "synthetic first-party OpenType fixture exposes vertical metrics");
+    metrics_and_resource_contract(&state, face);
+    validation_contract(&state, face);
+    alignment_and_overflow_contract(&state, face);
+    contribution_and_talkback_contract(&state, face);
+    parent_owned_contract(&state, face);
+    atomic_failure_contract(&state, face);
+    cleanup_contract(&state, face);
+    opentype_face_free(&face); free[u8](&bytes);
+    _zag_print("Text contract: pass="); _zag_print_i64(state.passed as i64);
+    _zag_print(" fail="); _zag_print_i64(state.failed as i64);
+    _zag_println("");
+    if (state.failed == 0) { return 0; }
+    return 1;
+}

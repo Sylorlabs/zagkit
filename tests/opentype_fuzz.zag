@@ -44,6 +44,8 @@ fn main() i32 {
         let face: OpenTypeFace = opentype_parse(bytes.data[0..bytes.len]);
         if (face.error == OpenTypeError.none) {
             if (face.units_per_em < 16 || face.units_per_em > 16384 ||
+                face.ascender <= face.descender ||
+                face.ascender - face.descender + face.line_gap <= 0 ||
                 face.glyph_count <= 0 ||
                 (face.cmap_format != 4 && face.cmap_format != 12) ||
                 face.cmap_offset < 0 || face.cmap_length <= 0 ||

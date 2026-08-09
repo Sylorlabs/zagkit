@@ -1,7 +1,9 @@
 # Text engine
 
-Status: **early headless foundation**. Text input and visible glyph rendering
-remain unavailable in the platform capability matrix.
+Status: **early headless foundation with an implementing Text component**.
+Bounded nominal-LTR glyph paths now render through the headless CPU oracle.
+General product typography, text input, and native platform integration remain
+unavailable in the platform capability matrix.
 
 Zagkit owns the complete text pipeline. System font files and published
 Unicode/OpenType data are inputs; FreeType, HarfBuzz, Skia, browser text, and
@@ -15,7 +17,8 @@ native widget text engines are not runtime dependencies.
   and values above `U+10FFFF` fail at an explicit byte offset.
 - `src/text/opentype.zag` copies and owns bounded SFNT/OpenType bytes, validates
   the table directory and required `cmap`, `head`, `maxp`, `hhea`, and `hmtx`
-  tables, and exposes `unitsPerEm`, glyph-count, and horizontal-advance truth.
+  tables, and exposes `unitsPerEm`, glyph-count, horizontal advances, ascender,
+  descender, and line-gap truth.
 - TrueType `loca`, simple `glyf` contours, and recursively bounded composite
   components decode into exact
   font-unit points with explicit on-curve flags and contour ends. Empty glyphs
@@ -35,6 +38,12 @@ native widget text engines are not runtime dependencies.
   drift-free fixed-point origins, and the positioned contours assemble into
   one immutable path executable by the CPU oracle. Missing coverage returns a
   fallback request instead of a fabricated glyph.
+- `src/components/text.zag` composes that nominal run into one sealed Canvas
+  path resource with exact bounds and clipping, semantic type and color token
+  provenance, OpenType-derived baseline metrics, start/center/end placement,
+  explicit reject-or-clip overflow, and owned or parent-owned semantics. Its
+  parent-owned mode renders every PerformanceChart text slot without creating
+  duplicate chart semantics. See the [bounded Text contract](../components/text.md).
 - The CPU path oracle indexes active edges per subpixel scanline, preserving
   exact eight-by-eight coverage while avoiding all-edges-per-pixel sentence
   work. It preflights the actual bounded scanline work before touching pixels.
@@ -44,10 +53,10 @@ native widget text engines are not runtime dependencies.
   metrics, unsupported mappings, invalid codepoints, and glyph IDs outside the
   declared font.
 
-## Required before text is visible
+## Required before general typography is available
 
-1. Parse vertical metrics, CFF/CFF2 outlines, variation axes, color-glyph
-   tables, and font metadata.
+1. Parse CFF/CFF2 outlines, variation axes, color-glyph tables, and font
+   metadata beyond the current required metric subset.
 2. Implement normalization, grapheme/word/sentence segmentation, script runs,
    bidi resolution, line breaking, fallback, and locale-aware shaping. The
    nominal LTR stage is not a substitute for any of these operations.
@@ -55,11 +64,13 @@ native widget text engines are not runtime dependencies.
    glyph-run serialization.
 4. Promote shaped glyph runs to a canonical render resource and define the
    subpixel antialiasing and color-space policy used by the CPU oracle.
-5. Connect glyph runs to intrinsic measurement, selection, editing, semantics,
-   IME composition, accessibility text navigation, Talkback, and replay.
+5. Connect shaped runs to intrinsic measurement, selection, editing, IME
+   composition, accessibility text navigation, and replay. The bounded Text
+   slice proves only basic whole-node semantics and in-process Talkback query.
 6. Prove representative Latin, Arabic, Hebrew, Indic, CJK, emoji, combining,
    malformed-font, RTL, large-text, and fallback suites before changing the
    platform `text_input` capability from unavailable.
 
-Placeholder bars in the Linux preview are not typography evidence and must be
-removed once the owned glyph path is available.
+Placeholder bars in the Linux preview are not typography evidence. Replacing
+them requires explicit host composition of this Text component; their presence
+does not count as a text backend or platform-typography result.

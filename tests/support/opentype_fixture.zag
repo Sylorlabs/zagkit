@@ -38,6 +38,8 @@ fn fixture_font() ArrayList[u8] {
     fixture_u16(&bytes, 168, 0); fixture_u16(&bytes, 170, 0);
     fixture_u16(&bytes, 194, 1000); fixture_u16(&bytes, 226, 0);
     fixture_u32(&bytes, 232, 65536); fixture_u16(&bytes, 236, 10);
+    fixture_u16(&bytes, 244, 800); fixture_u16(&bytes, 246, 65336);
+    fixture_u16(&bytes, 248, 200);
     fixture_u16(&bytes, 274, 10);
     let metric: i32 = 0;
     while (metric < 10) {

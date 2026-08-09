@@ -30,6 +30,9 @@ enum OpenTypeError {
 struct OpenTypeFace {
     bytes: ArrayList[u8],
     units_per_em: i32,
+    ascender: i32,
+    descender: i32,
+    line_gap: i32,
     glyph_count: i32,
     cmap_offset: i32,
     cmap_length: i32,
@@ -93,6 +96,9 @@ fn opentype_face_empty() OpenTypeFace {
     return OpenTypeFace{
         .bytes = make[u8](1),
         .units_per_em = 0,
+        .ascender = 0,
+        .descender = 0,
+        .line_gap = 0,
         .glyph_count = 0,
         .cmap_offset = 0,
         .cmap_length = 0,
@@ -235,8 +241,14 @@ fn opentype_parse(data: []u8) OpenTypeFace {
         opentype_fail(&face, OpenTypeError.invalid_metrics, 12); return face;
     }
     face.units_per_em = opentype_u16(bytes, head_offset + 18);
+    face.ascender = opentype_i16(bytes, hhea_offset + 4);
+    face.descender = opentype_i16(bytes, hhea_offset + 6);
+    face.line_gap = opentype_i16(bytes, hhea_offset + 8);
     face.glyph_count = opentype_u16(bytes, maxp_offset + 4);
-    if (face.units_per_em < 16 || face.units_per_em > 16384 || face.glyph_count <= 0) {
+    let line_units: i32 = face.ascender - face.descender + face.line_gap;
+    if (face.units_per_em < 16 || face.units_per_em > 16384 ||
+        face.glyph_count <= 0 || face.ascender <= face.descender ||
+        line_units <= 0) {
         opentype_fail(&face, OpenTypeError.invalid_metrics, head_offset + 18);
         return face;
     }
