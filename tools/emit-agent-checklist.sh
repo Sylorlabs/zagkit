@@ -95,6 +95,7 @@ goal_to_fallback_reason = {
     "G3-MOTION": "advanced motion contract beyond replay is not yet implemented",
     "G3-REDUCED-MOTION": "reduced-motion replacement matrix and assertions are not yet implemented",
     "G3-ASSET-PIPELINE": "asset lifecycle, missing asset behavior, and cleanup contracts are not yet implemented",
+    "G5-SHOWCASE-CONFORMANCE": "the experimental preview does not yet pass token provenance, semantic symbol/color, elevation, interaction-state, typography-ramp, chart, segmented-control, and navigation-role proof",
     "G4-INPUT": "input routing across pointer/keyboard/touch/pen/gamepad host seams is not yet implemented",
     "G4-GESTURES": "gesture arbitration and handoff contracts are not yet implemented",
     "G4-CLI": "CLI host workflow is currently headless-only and lacks promoted-target clean-workflow verification",
@@ -126,6 +127,7 @@ goal_to_fallback_reason = {
     "G7-PERFORMANCE": "depends on 120Hz/idle/stall/recovery evidence on reference hardware",
     "G7-PACKAGING": "depends on install/update/uninstall coverage on all supported platforms",
     "G7-ONE-POINT-ZERO": "depends on every remaining milestone and unexpired waivers",
+    "G1-SOURCE-FIRST": "ongoing invariant: fix reusable compiler, runtime, ABI, package, concurrency, tooling, and language-ergonomics causes in canonical Zag with an upstream regression before resuming a consumer",
 }
 
 
@@ -196,7 +198,8 @@ lines.append("")
 lines.append("- Advance upstream prerequisites in `/home/micah/Desktop/Sylorlabs/zag` until no required G1 entries are `missing`/`partial`.")
 lines.append("- Complete RFC 0007 full-direction acceptance after full visual matrix evidence is generated.")
 lines.append("- Implement Linux shell/AT-SPI and capability-backed backends only after capability blockers are reduced.")
-lines.append("- Resume PrismStudio migration once repository write access is available and inventory-driven UI replacement is planned.")
+lines.append("- Remove PrismStudio consumer workarounds only after their reusable causes have upstream Zag regressions and fixed compiler revisions.")
+lines.append("- Continue the inventory-driven PrismStudio overhaul in the canonical repository, with native tests and screenshot evidence for every promoted surface.")
 
 content = "\n".join(lines) + "\n"
 

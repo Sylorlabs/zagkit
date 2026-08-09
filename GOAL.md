@@ -42,7 +42,7 @@ more precision is needed and preserve its original ID as the parent.
 - [ ] `G1-CONCURRENCY` Complete main-loop and worker primitives with a documented memory model. — Exit: wakeup, cancellation, affinity, race, shutdown, and platform suites pass
 - [ ] `G1-PACKAGES` Complete deterministic package resolution. — Exit: locks, checksums, offline, path, conflict, cache, and reproducibility suites pass
 - [ ] `G1-RELOAD` Complete incremental compilation and safe reload hooks. — Exit: invalidation, state preservation, rollback, file-race, and crash-recovery suites pass
-- [ ] `G1-SOURCE-FIRST` Keep reusable failures out of downstream workarounds and fallback languages. — Exit: every downstream Zag defect links to an upstream Zag regression and exact fixed revision
+- [ ] `G1-SOURCE-FIRST` Treat every reusable compiler, runtime, ABI, package, concurrency, tooling, or language-ergonomics problem exposed by Zagkit or PrismStudio as an upstream Zag side quest; do not preserve consumer workarounds merely because another language normally needs them. Work only in canonical `/home/micah/Desktop/Sylorlabs/zag`, add native regressions there, and resume the consumer at the exact fixed revision. — Exit: every downstream Zag defect or avoidable workaround links to an upstream Zag regression and exact fixed revision
 
 ## 2. Declarative and headless core
 
@@ -99,6 +99,7 @@ more precision is needed and preserve its original ID as the parent.
 - [ ] `G5-LINUX-GPU` Implement one explicit public Linux GPU transport. — Exit: opt-in physical-device execution, loss recovery, CPU comparison, and cleanup pass
 - [ ] `G5-LINUX-POLISH` Make Linux the first no-rough-edges reference experience. — Exit: no known severity-one or severity-two visual, input, text, accessibility, recovery, or packaging defects remain
 - [ ] `G5-LINUX-FIDELITY` Eliminate density-dependent and pixelated UI output. — Exit: screenshot comparisons pass at 1.0, 1.25, 1.5, 2.0, and 3.0 scales with crisp type, SVG, PNG, curves, glass, and shadows
+- [ ] `G5-SHOWCASE-CONFORMANCE` Make the Linux showcase prove a coherent reusable system rather than a one-off dashboard. — Exit: [showcase conformance](docs/design/showcase-conformance.md) passes token provenance, semantic icon/color mapping, three elevation tiers, full canonical interaction states, type ramp, unambiguous navigation/status roles, real segmented-control behavior, and accessible chart anatomy with native screenshots and semantic evidence
 - [ ] `G5-LINUX-PACKAGE` Package, install, launch, update, and uninstall Linux artifacts. — Exit: Ubuntu LTS and Fedora x86-64 and ARM64 release matrices pass where target support is declared
 
 ## 6. Complete PrismStudio overhaul

@@ -1,0 +1,232 @@
+@import("../render/display_list.zag")
+@import("../layout/adaptive.zag")
+
+// These semantic tokens define the experimental showcase palette. They prove
+// token routing while RFC 0007 remains pending; they are not a selected 1.0
+// visual direction.
+enum SemanticColorToken {
+    canvas,
+    surface_base,
+    surface_panel,
+    surface_raised,
+    surface_inset,
+    surface_interactive,
+    surface_selected,
+    border_subtle,
+    border_emphasis,
+    text_primary,
+    text_secondary,
+    text_disabled,
+    accent,
+    accent_emphasis,
+    focus,
+    status_healthy,
+    status_experimental,
+    category_semantics,
+    category_motion,
+    category_input,
+    category_renderer,
+    chart_grid,
+    chart_axis,
+    chart_series_primary,
+    chart_series_secondary,
+    chart_series_tertiary,
+    shadow,
+    edge_highlight,
+    ambient_cool,
+    ambient_warm,
+}
+
+struct ResolvedColorToken {
+    id: []u8,
+    paint: Paint,
+}
+
+fn semantic_color_token_count() i32 { return 30; }
+
+fn semantic_color(token: SemanticColorToken) ResolvedColorToken {
+    return switch (token) {
+        .canvas => ResolvedColorToken{ .id = "color.canvas",
+            .paint = paint_rgba16(2200, 3100, 6500, 65535) },
+        .surface_base => ResolvedColorToken{ .id = "color.surface.base",
+            .paint = paint_rgba16(7200, 10500, 19000, 50000) },
+        .surface_panel => ResolvedColorToken{ .id = "color.surface.panel",
+            .paint = paint_rgba16(7000, 12000, 22500, 56000) },
+        .surface_raised => ResolvedColorToken{ .id = "color.surface.raised",
+            .paint = paint_rgba16(9000, 15500, 27500, 60000) },
+        .surface_inset => ResolvedColorToken{ .id = "color.surface.inset",
+            .paint = paint_rgba16(4500, 7600, 14500, 56000) },
+        .surface_interactive => ResolvedColorToken{ .id = "color.surface.interactive",
+            .paint = paint_rgba16(9000, 18000, 34000, 56000) },
+        .surface_selected => ResolvedColorToken{ .id = "color.surface.selected",
+            .paint = paint_rgba16(12500, 36000, 59000, 56000) },
+        .border_subtle => ResolvedColorToken{ .id = "color.border.subtle",
+            .paint = paint_rgba16(14000, 22000, 36000, 18000) },
+        .border_emphasis => ResolvedColorToken{ .id = "color.border.emphasis",
+            .paint = paint_rgba16(32000, 47000, 65535, 21000) },
+        .text_primary => ResolvedColorToken{ .id = "color.text.primary",
+            .paint = paint_rgba16(57000, 61000, 65535, 65535) },
+        .text_secondary => ResolvedColorToken{ .id = "color.text.secondary",
+            .paint = paint_rgba16(35000, 43000, 56000, 60000) },
+        .text_disabled => ResolvedColorToken{ .id = "color.text.disabled",
+            .paint = paint_rgba16(28000, 34000, 43000, 43000) },
+        .accent => ResolvedColorToken{ .id = "color.accent",
+            .paint = paint_rgba16(17000, 48500, 65535, 62000) },
+        .accent_emphasis => ResolvedColorToken{ .id = "color.accent.emphasis",
+            .paint = paint_rgba16(12500, 38500, 61000, 65535) },
+        .focus => ResolvedColorToken{ .id = "color.focus",
+            .paint = paint_rgba16(26000, 60000, 65535, 65535) },
+        .status_healthy => ResolvedColorToken{ .id = "color.status.healthy",
+            .paint = paint_rgba16(18000, 56000, 42000, 65535) },
+        .status_experimental => ResolvedColorToken{ .id = "color.status.experimental",
+            .paint = paint_rgba16(65535, 43000, 17000, 65535) },
+        .category_semantics => ResolvedColorToken{ .id = "color.category.semantics",
+            .paint = paint_rgba16(15000, 48000, 65535, 65535) },
+        .category_motion => ResolvedColorToken{ .id = "color.category.motion",
+            .paint = paint_rgba16(30000, 43000, 65535, 65535) },
+        .category_input => ResolvedColorToken{ .id = "color.category.input",
+            .paint = paint_rgba16(39000, 50000, 65535, 65535) },
+        .category_renderer => ResolvedColorToken{ .id = "color.category.renderer",
+            .paint = paint_rgba16(44000, 39000, 65535, 65535) },
+        .chart_grid => ResolvedColorToken{ .id = "color.chart.grid",
+            .paint = paint_rgba16(14000, 22000, 36000, 13000) },
+        .chart_axis => ResolvedColorToken{ .id = "color.chart.axis",
+            .paint = paint_rgba16(30000, 38000, 50000, 42000) },
+        .chart_series_primary => ResolvedColorToken{ .id = "color.chart.series.primary",
+            .paint = paint_rgba16(12000, 47000, 65535, 56000) },
+        .chart_series_secondary => ResolvedColorToken{ .id = "color.chart.series.secondary",
+            .paint = paint_rgba16(41000, 36000, 65535, 59000) },
+        .chart_series_tertiary => ResolvedColorToken{ .id = "color.chart.series.tertiary",
+            .paint = paint_rgba16(65535, 43000, 17000, 59000) },
+        .shadow => ResolvedColorToken{ .id = "color.shadow",
+            .paint = paint_rgba16(0, 0, 0, 12000) },
+        .edge_highlight => ResolvedColorToken{ .id = "color.edge.highlight",
+            .paint = paint_rgba16(42000, 56000, 65535, 19000) },
+        .ambient_cool => ResolvedColorToken{ .id = "color.ambient.cool",
+            .paint = paint_rgba16(13000, 39000, 65535, 8000) },
+        .ambient_warm => ResolvedColorToken{ .id = "color.ambient.warm",
+            .paint = paint_rgba16(58000, 18000, 47000, 7000) },
+    };
+}
+
+fn semantic_color_paint(token: SemanticColorToken) Paint {
+    return semantic_color(token).paint;
+}
+
+fn semantic_color_with_alpha(token: SemanticColorToken, alpha: i64) Paint {
+    let paint: Paint = semantic_color_paint(token);
+    paint.alpha = display_color_channel(alpha);
+    return paint;
+}
+
+enum SemanticTypeToken { display, title, heading, body, label, caption, code }
+
+fn semantic_type_token_count() i32 { return 7; }
+
+fn semantic_type_name(token: SemanticTypeToken) []u8 {
+    return switch (token) {
+        .display => "type.display", .title => "type.title",
+        .heading => "type.heading", .body => "type.body",
+        .label => "type.label", .caption => "type.caption",
+        .code => "type.code",
+    };
+}
+
+fn semantic_type_size(token: SemanticTypeToken) i64 {
+    return switch (token) {
+        .display => 32 * unit_scale(), .title => 24 * unit_scale(),
+        .heading => 20 * unit_scale(), .body => 15 * unit_scale(),
+        .label => 14 * unit_scale(), .caption => 12 * unit_scale(),
+        .code => 13 * unit_scale(),
+    };
+}
+
+enum SemanticRadiusToken { control, card, panel, pill }
+
+fn semantic_radius_name(token: SemanticRadiusToken) []u8 {
+    return switch (token) {
+        .control => "radius.control", .card => "radius.card",
+        .panel => "radius.panel", .pill => "radius.pill",
+    };
+}
+
+fn semantic_radius(token: SemanticRadiusToken) i64 {
+    return switch (token) {
+        .control => 12 * unit_scale(), .card => 18 * unit_scale(),
+        .panel => 24 * unit_scale(), .pill => 999 * unit_scale(),
+    };
+}
+
+enum SemanticElevationToken { base, panel, raised, overlay }
+
+struct ResolvedElevationToken {
+    id: []u8,
+    shadow_offset_y: i64,
+    shadow_spread: i64,
+    shadow_alpha: i64,
+    border_alpha: i64,
+}
+
+fn semantic_elevation(token: SemanticElevationToken) ResolvedElevationToken {
+    return switch (token) {
+        .base => ResolvedElevationToken{ .id = "elevation.base",
+            .shadow_offset_y = 0, .shadow_spread = 0,
+            .shadow_alpha = 0, .border_alpha = 9000 },
+        .panel => ResolvedElevationToken{ .id = "elevation.panel",
+            .shadow_offset_y = 4 * unit_scale(), .shadow_spread = 3 * unit_scale(),
+            .shadow_alpha = 9000, .border_alpha = 13000 },
+        .raised => ResolvedElevationToken{ .id = "elevation.raised",
+            .shadow_offset_y = 7 * unit_scale(), .shadow_spread = 5 * unit_scale(),
+            .shadow_alpha = 13000, .border_alpha = 18000 },
+        .overlay => ResolvedElevationToken{ .id = "elevation.overlay",
+            .shadow_offset_y = 12 * unit_scale(), .shadow_spread = 8 * unit_scale(),
+            .shadow_alpha = 18000, .border_alpha = 23000 },
+    };
+}
+
+enum ShowcaseCategory { frame_pacing, semantics, motion, input, renderer }
+
+fn showcase_category_at(index: i32) ShowcaseCategory {
+    if (index == 1) { return ShowcaseCategory.semantics; }
+    if (index == 2) { return ShowcaseCategory.motion; }
+    if (index == 3) { return ShowcaseCategory.input; }
+    if (index == 4) { return ShowcaseCategory.renderer; }
+    return ShowcaseCategory.frame_pacing;
+}
+
+fn showcase_category_name(category: ShowcaseCategory) []u8 {
+    return switch (category) {
+        .frame_pacing => "Frame pacing", .semantics => "Semantics",
+        .motion => "Motion", .input => "Input", .renderer => "Renderer",
+    };
+}
+
+fn showcase_category_description(category: ShowcaseCategory) []u8 {
+    return switch (category) {
+        .frame_pacing => "Frame deadline and idle health",
+        .semantics => "Semantic tree and automation health",
+        .motion => "Animation scheduler health",
+        .input => "Input router and focus health",
+        .renderer => "CPU renderer and backend health",
+    };
+}
+
+fn showcase_category_value(category: ShowcaseCategory) []u8 {
+    return switch (category) {
+        .frame_pacing => "Experimental · gate pending",
+        .semantics => "38 nodes · stable IDs",
+        .motion => "Clock contract · live pending",
+        .input => "Pointer · keyboard pending",
+        .renderer => "CPU oracle · X11 fallback",
+    };
+}
+
+fn showcase_category_color(category: ShowcaseCategory) SemanticColorToken {
+    return switch (category) {
+        .frame_pacing => SemanticColorToken.status_experimental,
+        .semantics => SemanticColorToken.category_semantics,
+        .motion => SemanticColorToken.category_motion,
+        .input => SemanticColorToken.category_input,
+        .renderer => SemanticColorToken.category_renderer,
+    };
+}

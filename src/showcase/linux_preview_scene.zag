@@ -1,5 +1,6 @@
 @import("../render/cpu_raster.zag")
 @import("../text/glyph_run.zag")
+@import("../design/tokens.zag")
 
 fn preview_fx(value: i64) i64 { return value * unit_scale(); }
 
@@ -16,6 +17,43 @@ fn preview_scale(value: i64, width: i32, height: i32) i64 {
     let y: i64 = preview_y(value, height);
     if (x < y) { return x; }
     return y;
+}
+
+fn preview_type(token: SemanticTypeToken, width: i32, height: i32) i64 {
+    return preview_scale(semantic_type_size(token) / unit_scale(), width, height);
+}
+
+fn preview_radius(token: SemanticRadiusToken, width: i32, height: i32) i64 {
+    return preview_scale(semantic_radius(token) / unit_scale(), width, height);
+}
+
+fn preview_background_band_paint(band: i32) Paint {
+    // The banding is a deterministic CPU fallback for a future gradient op.
+    // Its endpoints are local effect variants of the semantic canvas token.
+    let canvas: Paint = semantic_color_paint(SemanticColorToken.canvas);
+    return paint_rgba16(canvas.red + 200 + (band as i64) * 45,
+        canvas.green + 400 + (band as i64) * 70,
+        canvas.blue + 1100 + (band as i64) * 125, 65535);
+}
+
+fn preview_navigation_name(index: i32) []u8 {
+    if (index == 1) { return "Components"; }
+    if (index == 2) { return "Motion"; }
+    if (index == 3) { return "Typography"; }
+    if (index == 4) { return "Talkback"; }
+    if (index == 5) { return "Settings"; }
+    return "Overview";
+}
+
+fn preview_chip_name(index: i32) []u8 {
+    if (index == 1) { return "Layout"; }
+    if (index == 2) { return "Motion"; }
+    if (index == 3) { return "Render"; }
+    return "State";
+}
+
+fn preview_category(index: i32) ShowcaseCategory {
+    return showcase_category_at(index);
 }
 
 fn preview_push_rect(list: *DisplayList, id: i64, bounds: Rect,
@@ -104,24 +142,28 @@ fn preview_circle(list: *DisplayList, id: i64, center_x: i64,
 
 fn preview_glass_panel(list: *DisplayList, id: i64, x: i64, y: i64,
     width: i64, height: i64, radius: i64) void {
-    let spread: i64 = 5 * unit_scale();
-    _ = preview_round_rect(list, id, x - spread, y + spread,
+    let elevation: ResolvedElevationToken = semantic_elevation(
+        SemanticElevationToken.panel);
+    let spread: i64 = elevation.shadow_spread;
+    _ = preview_round_rect(list, id, x - spread, y + elevation.shadow_offset_y,
         width + spread * 2, height + spread * 2, radius + spread,
-        paint_rgba16(0, 0, 0, 9000));
+        semantic_color_with_alpha(SemanticColorToken.shadow,
+            elevation.shadow_alpha));
     _ = preview_round_rect(list, id + 1, x, y, width, height, radius,
-        paint_rgba16(7200, 10500, 19000, 50000));
+        semantic_color_paint(SemanticColorToken.surface_base));
     _ = preview_round_rect(list, id + 2, x + unit_scale(), y + unit_scale(),
         width - 2 * unit_scale(), 2 * unit_scale(), radius,
-        paint_rgba16(42000, 56000, 65535, 17000));
+        semantic_color_with_alpha(SemanticColorToken.edge_highlight,
+            elevation.border_alpha));
 }
 
 fn linux_preview_scene_internal(width: i32, height: i32,
-    face: OpenTypeFace, has_font: i32) DisplayList {
+    face: OpenTypeFace, has_font: i32, selected_navigation: i32) DisplayList {
     let list: DisplayList = display_list_make();
     let full: Rect = rect(0, 0, (width as i64) * unit_scale(),
         (height as i64) * unit_scale());
     _ = preview_push_rect(&list, 1, full,
-        paint_rgba16(2200, 3100, 6500, 65535));
+        semantic_color_paint(SemanticColorToken.canvas));
 
     // A deterministic deep-space gradient made of retained bands. It is not a
     // shader approximation, so the CPU oracle remains the exact visual truth.
@@ -129,13 +171,10 @@ fn linux_preview_scene_internal(width: i32, height: i32,
     while (band < 48) {
         let y0: i64 = ((height as i64) * (band as i64)) / 48;
         let y1: i64 = ((height as i64) * ((band + 1) as i64)) / 48;
-        let red: i64 = 2400 + (band as i64) * 45;
-        let green: i64 = 3500 + (band as i64) * 70;
-        let blue: i64 = 7600 + (band as i64) * 125;
         _ = preview_push_rect(&list, 100 + band as i64,
             rect(0, y0 * unit_scale(), (width as i64) * unit_scale(),
                 (y1 - y0 + 1) * unit_scale()),
-            paint_rgba16(red, green, blue, 65535));
+            preview_background_band_paint(band));
         band = band + 1;
     }
 
@@ -144,7 +183,7 @@ fn linux_preview_scene_internal(width: i32, height: i32,
         let radius: i64 = preview_x(210 - (glow_step as i64) * 17, width);
         _ = preview_circle(&list, 300 + glow_step as i64,
             preview_x(850, width), preview_y(122, height), radius,
-            paint_rgba16(13000, 39000, 65535,
+            semantic_color_with_alpha(SemanticColorToken.ambient_cool,
                 1700 + (glow_step as i64) * 900));
         glow_step = glow_step + 1;
     }
@@ -153,61 +192,68 @@ fn linux_preview_scene_internal(width: i32, height: i32,
         let radius: i64 = preview_x(160 - (warm_step as i64) * 18, width);
         _ = preview_circle(&list, 330 + warm_step as i64,
             preview_x(1035, width), preview_y(650, height), radius,
-            paint_rgba16(58000, 18000, 47000,
+            semantic_color_with_alpha(SemanticColorToken.ambient_warm,
                 1200 + (warm_step as i64) * 850));
         warm_step = warm_step + 1;
     }
 
     preview_glass_panel(&list, 400,
         preview_x(24, width), preview_y(20, height),
-        preview_x(1072, width), preview_y(64, height), preview_x(18, width));
+        preview_x(1072, width), preview_y(64, height),
+        preview_radius(SemanticRadiusToken.card, width, height));
     preview_glass_panel(&list, 410,
         preview_x(24, width), preview_y(104, height),
-        preview_x(212, width), preview_y(592, height), preview_x(24, width));
+        preview_x(212, width), preview_y(592, height),
+        preview_radius(SemanticRadiusToken.panel, width, height));
     preview_glass_panel(&list, 420,
         preview_x(256, width), preview_y(104, height),
-        preview_x(548, width), preview_y(592, height), preview_x(28, width));
+        preview_x(548, width), preview_y(592, height),
+        preview_radius(SemanticRadiusToken.panel, width, height));
     preview_glass_panel(&list, 430,
         preview_x(824, width), preview_y(104, height),
-        preview_x(272, width), preview_y(592, height), preview_x(24, width));
+        preview_x(272, width), preview_y(592, height),
+        preview_radius(SemanticRadiusToken.panel, width, height));
 
     // Brand mark and quiet title rhythm.
     _ = preview_circle(&list, 500, preview_x(58, width), preview_y(52, height),
-        preview_x(15, width), paint_rgba16(18000, 52000, 65535, 65535));
+        preview_x(15, width), semantic_color_paint(SemanticColorToken.accent));
     _ = preview_circle(&list, 501, preview_x(62, width), preview_y(48, height),
-        preview_x(7, width), paint_rgba16(52000, 63000, 65535, 56000));
+        preview_x(7, width), semantic_color_with_alpha(
+            SemanticColorToken.edge_highlight, 56000));
     if (has_font == 0) {
         _ = preview_round_rect(&list, 502, preview_x(88, width), preview_y(39, height),
             preview_x(128, width), preview_y(12, height), preview_x(6, width),
-            paint_rgba16(52000, 58000, 65000, 60000));
+            semantic_color_paint(SemanticColorToken.text_primary));
         _ = preview_round_rect(&list, 503, preview_x(88, width), preview_y(58, height),
             preview_x(76, width), preview_y(7, height), preview_x(4, width),
-            paint_rgba16(25000, 34000, 50000, 50000));
+            semantic_color_paint(SemanticColorToken.text_secondary));
     }
     _ = preview_round_rect(&list, 504, preview_x(935, width), preview_y(36, height),
         preview_x(132, width), preview_y(32, height), preview_x(16, width),
-        paint_rgba16(12500, 38500, 61000, 58000));
+        semantic_color_paint(SemanticColorToken.accent_emphasis));
 
     // Left navigation: stable spacing, selected state, and aligned glyph marks.
     let nav: i32 = 0;
     while (nav < 6) {
         let ny: i64 = preview_y(142 + (nav as i64) * 70, height);
-        if (nav == 1) {
+        if (nav == selected_navigation) {
             _ = preview_round_rect(&list, 600 + nav as i64,
                 preview_x(42, width), ny - preview_y(13, height),
                 preview_x(176, width), preview_y(48, height), preview_x(15, width),
-                paint_rgba16(12500, 36000, 59000, 50000));
+                semantic_color_paint(SemanticColorToken.surface_selected));
         }
+        let nav_mark_alpha: i64 = 42000;
+        if (nav == selected_navigation) { nav_mark_alpha = 65535; }
         _ = preview_round_rect(&list, 620 + nav as i64,
             preview_x(58, width), ny, preview_x(20, width), preview_y(20, height),
-            preview_x(7, width), paint_rgba16(
-                18000 + (nav as i64) * 1800,
-                35000 + (nav as i64) * 1900, 56000, 52000));
+            preview_x(7, width), semantic_color_with_alpha(
+                SemanticColorToken.accent, nav_mark_alpha));
         if (has_font == 0) {
             _ = preview_round_rect(&list, 640 + nav as i64,
                 preview_x(94, width), ny + preview_y(4, height),
                 preview_x(86 + ((nav % 3) as i64) * 18, width), preview_y(10, height),
-                preview_x(5, width), paint_rgba16(33000, 41000, 53500, 48000));
+                preview_x(5, width), semantic_color_paint(
+                    SemanticColorToken.text_secondary));
         }
         nav = nav + 1;
     }
@@ -215,28 +261,28 @@ fn linux_preview_scene_internal(width: i32, height: i32,
     // Main product card with a continuous path visualization.
     _ = preview_round_rect(&list, 700, preview_x(284, width), preview_y(132, height),
         preview_x(492, width), preview_y(72, height), preview_x(20, width),
-        paint_rgba16(9000, 15500, 27500, 52000));
+        semantic_color_paint(SemanticColorToken.surface_raised));
     if (has_font == 0) {
         _ = preview_round_rect(&list, 701, preview_x(310, width), preview_y(151, height),
             preview_x(184, width), preview_y(14, height), preview_x(7, width),
-            paint_rgba16(52000, 57500, 64500, 60000));
+            semantic_color_paint(SemanticColorToken.text_primary));
         _ = preview_round_rect(&list, 702, preview_x(310, width), preview_y(175, height),
             preview_x(116, width), preview_y(8, height), preview_x(4, width),
-            paint_rgba16(24500, 33000, 47500, 50000));
+            semantic_color_paint(SemanticColorToken.text_secondary));
     }
     _ = preview_round_rect(&list, 703, preview_x(650, width), preview_y(148, height),
         preview_x(98, width), preview_y(34, height), preview_x(17, width),
-        paint_rgba16(17000, 48500, 65535, 58000));
+        semantic_color_paint(SemanticColorToken.accent));
 
     _ = preview_round_rect(&list, 710, preview_x(284, width), preview_y(224, height),
         preview_x(492, width), preview_y(282, height), preview_x(22, width),
-        paint_rgba16(4500, 7600, 14500, 48000));
+        semantic_color_paint(SemanticColorToken.surface_inset));
     let grid_line: i32 = 0;
     while (grid_line < 8) {
         _ = preview_push_rect(&list, 720 + grid_line as i64,
             rect(preview_x(310 + (grid_line as i64) * 60, width), preview_y(246, height),
                 preview_x(1, width), preview_y(236, height)),
-            paint_rgba16(14000, 22000, 36000, 13000));
+            semantic_color_paint(SemanticColorToken.chart_grid));
         grid_line = grid_line + 1;
     }
     let horizontal: i32 = 0;
@@ -244,28 +290,65 @@ fn linux_preview_scene_internal(width: i32, height: i32,
         _ = preview_push_rect(&list, 740 + horizontal as i64,
             rect(preview_x(308, width), preview_y(258 + (horizontal as i64) * 48, height),
                 preview_x(442, width), preview_y(1, height)),
-            paint_rgba16(14000, 22000, 36000, 13000));
+            semantic_color_paint(SemanticColorToken.chart_grid));
         horizontal = horizontal + 1;
     }
+    // Explicit axes and a 16.7 ms frame-deadline reference distinguish this
+    // chart component from a decorative dot grid.
+    _ = preview_push_rect(&list, 750,
+        rect(preview_x(308, width), preview_y(246, height), preview_x(2, width),
+            preview_y(238, height)),
+        semantic_color_paint(SemanticColorToken.chart_axis));
+    _ = preview_push_rect(&list, 751,
+        rect(preview_x(308, width), preview_y(482, height), preview_x(442, width),
+            preview_y(2, height)),
+        semantic_color_paint(SemanticColorToken.chart_axis));
+    _ = preview_push_rect(&list, 752,
+        rect(preview_x(308, width), preview_y(354, height), preview_x(442, width),
+            preview_y(1, height)),
+        semantic_color_with_alpha(SemanticColorToken.border_emphasis, 30000));
     let curve_point: i32 = 0;
-    while (curve_point < 25) {
+    while (curve_point < 24) {
         let px: i64 = 320 + (curve_point as i64) * 17;
         let phase: i64 = curve_point % 8;
         let py: i64 = 390 - phase * 12 + ((curve_point / 8) as i64) * 15;
+        let series_color: SemanticColorToken = SemanticColorToken.chart_series_primary;
+        if (curve_point >= 8) {
+            series_color = SemanticColorToken.chart_series_secondary;
+        }
+        if (curve_point >= 16) {
+            series_color = SemanticColorToken.chart_series_tertiary;
+        }
         _ = preview_circle(&list, 760 + curve_point as i64,
             preview_x(px, width), preview_y(py, height), preview_x(5, width),
-            paint_rgba16(12000, 47000, 65535, 47000));
+            semantic_color_paint(series_color));
         curve_point = curve_point + 1;
     }
+    _ = preview_circle(&list, 790, preview_x(580, width), preview_y(252, height),
+        preview_x(4, width), semantic_color_paint(
+            SemanticColorToken.chart_series_primary));
+    _ = preview_circle(&list, 791, preview_x(644, width), preview_y(252, height),
+        preview_x(4, width), semantic_color_paint(
+            SemanticColorToken.chart_series_secondary));
+    _ = preview_circle(&list, 792, preview_x(702, width), preview_y(252, height),
+        preview_x(4, width), semantic_color_paint(
+            SemanticColorToken.chart_series_tertiary));
 
     // Bottom action strip and right-side activity cards.
     let chip: i32 = 0;
     while (chip < 4) {
+        let chip_paint: Paint = semantic_color_paint(
+            SemanticColorToken.surface_interactive);
+        if (chip == 0) {
+            chip_paint = semantic_color_paint(SemanticColorToken.surface_selected);
+        } else if (chip == 3) {
+            chip_paint = semantic_color_with_alpha(
+                SemanticColorToken.surface_interactive, 32000);
+        }
         _ = preview_round_rect(&list, 800 + chip as i64,
             preview_x(284 + (chip as i64) * 124, width), preview_y(530, height),
             preview_x(108, width), preview_y(42, height), preview_x(16, width),
-            paint_rgba16(9000 + (chip as i64) * 2200,
-                18000 + (chip as i64) * 2500, 34000 + (chip as i64) * 3200, 50000));
+            chip_paint);
         chip = chip + 1;
     }
     let activity: i32 = 0;
@@ -274,20 +357,20 @@ fn linux_preview_scene_internal(width: i32, height: i32,
         _ = preview_round_rect(&list, 840 + activity as i64,
             preview_x(848, width), preview_y(ay, height),
             preview_x(224, width), preview_y(74, height), preview_x(18, width),
-            paint_rgba16(7000, 12000, 22500, 47000));
+            semantic_color_paint(SemanticColorToken.surface_panel));
+        let category: ShowcaseCategory = preview_category(activity);
         _ = preview_circle(&list, 860 + activity as i64,
             preview_x(876, width), preview_y(ay + 27, height), preview_x(11, width),
-            paint_rgba16(15000 + (activity as i64) * 6000,
-                51000 - (activity as i64) * 3500, 62000, 56000));
+            semantic_color_paint(showcase_category_color(category)));
         if (has_font == 0) {
             _ = preview_round_rect(&list, 880 + activity as i64,
                 preview_x(900, width), preview_y(ay + 17, height),
                 preview_x(126, width), preview_y(10, height), preview_x(5, width),
-                paint_rgba16(41000, 48500, 59000, 50000));
+                semantic_color_paint(SemanticColorToken.text_primary));
             _ = preview_round_rect(&list, 900 + activity as i64,
                 preview_x(900, width), preview_y(ay + 38, height),
                 preview_x(88, width), preview_y(7, height), preview_x(4, width),
-                paint_rgba16(22000, 30000, 44000, 43000));
+                semantic_color_paint(SemanticColorToken.text_secondary));
         }
         activity = activity + 1;
     }
@@ -295,59 +378,80 @@ fn linux_preview_scene_internal(width: i32, height: i32,
     _ = preview_push_stroke(&list, 950,
         rect(preview_x(24, width), preview_y(20, height),
             preview_x(1072, width), preview_y(64, height)),
-        paint_rgba16(32000, 47000, 65535, 15000), unit_scale());
+        semantic_color_paint(SemanticColorToken.border_emphasis), unit_scale());
     if (has_font != 0) {
-        let title_size: i64 = preview_scale(22, width, height);
-        let body_size: i64 = preview_scale(15, width, height);
-        let quiet: Paint = paint_rgba16(35000, 43000, 56000, 60000);
-        let bright: Paint = paint_rgba16(57000, 61000, 65535, 65535);
+        let title_size: i64 = preview_type(SemanticTypeToken.title, width, height);
+        let body_size: i64 = preview_type(SemanticTypeToken.body, width, height);
+        let quiet: Paint = semantic_color_paint(SemanticColorToken.text_secondary);
+        let bright: Paint = semantic_color_paint(SemanticColorToken.text_primary);
         _ = preview_add_text(&list, face, 10000, "Zagkit Studio", title_size,
             preview_x(88, width), preview_y(61, height), bright);
         _ = preview_add_text(&list, face, 10100, "Preview", body_size,
             preview_x(968, width), preview_y(58, height), bright);
-        _ = preview_add_text(&list, face, 10200, "Overview", body_size,
-            preview_x(94, width), preview_y(158, height), quiet);
-        _ = preview_add_text(&list, face, 10300, "Components", body_size,
-            preview_x(94, width), preview_y(228, height), bright);
-        _ = preview_add_text(&list, face, 10400, "Motion", body_size,
-            preview_x(94, width), preview_y(298, height), quiet);
-        _ = preview_add_text(&list, face, 10500, "Typography", body_size,
-            preview_x(94, width), preview_y(368, height), quiet);
-        _ = preview_add_text(&list, face, 10600, "Talkback", body_size,
-            preview_x(94, width), preview_y(438, height), quiet);
-        _ = preview_add_text(&list, face, 10700, "Settings", body_size,
-            preview_x(94, width), preview_y(508, height), quiet);
-        _ = preview_add_text(&list, face, 10800, "Typography pipeline",
-            preview_scale(20, width, height), preview_x(310, width),
+        let nav_text: i32 = 0;
+        while (nav_text < 6) {
+            let nav_paint: Paint = quiet;
+            if (nav_text == selected_navigation) { nav_paint = bright; }
+            _ = preview_add_text(&list, face, 10200 + (nav_text as i64) * 100,
+                preview_navigation_name(nav_text), body_size,
+                preview_x(94, width), preview_y(158 + (nav_text as i64) * 70, height),
+                nav_paint);
+            nav_text = nav_text + 1;
+        }
+        _ = preview_add_text(&list, face, 10800, "Renderer performance",
+            preview_type(SemanticTypeToken.heading, width, height), preview_x(310, width),
             preview_y(170, height), bright);
-        _ = preview_add_text(&list, face, 10900, "Owned contours. Deterministic CPU.",
-            preview_scale(13, width, height), preview_x(310, width),
+        _ = preview_add_text(&list, face, 10900, "CPU oracle. Cold, warm, and resize samples.",
+            preview_type(SemanticTypeToken.code, width, height), preview_x(310, width),
             preview_y(190, height), quiet);
         _ = preview_add_text(&list, face, 11000, "Inspect",
-            preview_scale(14, width, height), preview_x(670, width),
+            preview_type(SemanticTypeToken.label, width, height), preview_x(670, width),
             preview_y(171, height), bright);
-        _ = preview_add_text(&list, face, 11100, "State",
-            preview_scale(14, width, height), preview_x(318, width),
-            preview_y(557, height), bright);
-        _ = preview_add_text(&list, face, 11200, "Layout",
-            preview_scale(14, width, height), preview_x(437, width),
-            preview_y(557, height), bright);
-        _ = preview_add_text(&list, face, 11300, "Motion",
-            preview_scale(14, width, height), preview_x(559, width),
-            preview_y(557, height), bright);
-        _ = preview_add_text(&list, face, 11400, "Render",
-            preview_scale(14, width, height), preview_x(682, width),
-            preview_y(557, height), bright);
-        _ = preview_add_text(&list, face, 11500, "Frame pacing",
-            body_size, preview_x(900, width), preview_y(169, height), bright);
-        _ = preview_add_text(&list, face, 11600, "Semantics",
-            body_size, preview_x(900, width), preview_y(265, height), bright);
-        _ = preview_add_text(&list, face, 11700, "Motion",
-            body_size, preview_x(900, width), preview_y(361, height), bright);
-        _ = preview_add_text(&list, face, 11800, "Input",
-            body_size, preview_x(900, width), preview_y(457, height), bright);
-        _ = preview_add_text(&list, face, 11900, "Renderer",
-            body_size, preview_x(900, width), preview_y(553, height), bright);
+        let caption_size: i64 = preview_type(SemanticTypeToken.caption, width, height);
+        _ = preview_add_text(&list, face, 12000, "24 ms", caption_size,
+            preview_x(268, width), preview_y(262, height), quiet);
+        _ = preview_add_text(&list, face, 12100, "16.7", caption_size,
+            preview_x(270, width), preview_y(359, height), quiet);
+        _ = preview_add_text(&list, face, 12200, "0 ms", caption_size,
+            preview_x(274, width), preview_y(484, height), quiet);
+        _ = preview_add_text(&list, face, 12300, "sample", caption_size,
+            preview_x(704, width), preview_y(500, height), quiet);
+        _ = preview_add_text(&list, face, 12400, "cold", caption_size,
+            preview_x(588, width), preview_y(256, height), quiet);
+        _ = preview_add_text(&list, face, 12500, "warm", caption_size,
+            preview_x(652, width), preview_y(256, height), quiet);
+        _ = preview_add_text(&list, face, 12600, "resize", caption_size,
+            preview_x(710, width), preview_y(256, height), quiet);
+        let chip_text: i32 = 0;
+        while (chip_text < 4) {
+            let chip_text_paint: Paint = quiet;
+            if (chip_text == 0) { chip_text_paint = bright; }
+            else if (chip_text == 3) {
+                chip_text_paint = semantic_color_paint(
+                    SemanticColorToken.text_disabled);
+            }
+            _ = preview_add_text(&list, face, 11100 + (chip_text as i64) * 100,
+                preview_chip_name(chip_text),
+                preview_type(SemanticTypeToken.label, width, height),
+                preview_x(318 + (chip_text as i64) * 124, width),
+                preview_y(557, height), chip_text_paint);
+            chip_text = chip_text + 1;
+        }
+        let activity_text: i32 = 0;
+        _ = preview_add_text(&list, face, 11450, "SYSTEM STATUS",
+            caption_size, preview_x(848, width), preview_y(126, height), quiet);
+        while (activity_text < 5) {
+            let category: ShowcaseCategory = preview_category(activity_text);
+            _ = preview_add_text(&list, face, 11500 + (activity_text as i64) * 100,
+                showcase_category_name(category), body_size,
+                preview_x(900, width),
+                preview_y(169 + (activity_text as i64) * 96, height), bright);
+            _ = preview_add_text(&list, face, 13000 + (activity_text as i64) * 100,
+                showcase_category_value(category), caption_size,
+                preview_x(900, width),
+                preview_y(190 + (activity_text as i64) * 96, height), quiet);
+            activity_text = activity_text + 1;
+        }
     }
     _ = display_list_seal(&list);
     return list;
@@ -355,12 +459,17 @@ fn linux_preview_scene_internal(width: i32, height: i32,
 
 fn linux_preview_scene(width: i32, height: i32) DisplayList {
     let empty: OpenTypeFace = opentype_face_empty();
-    let list: DisplayList = linux_preview_scene_internal(width, height, empty, 0);
+    let list: DisplayList = linux_preview_scene_internal(width, height, empty, 0, 1);
     opentype_face_free(&empty);
     return list;
 }
 
 fn linux_preview_scene_with_font(width: i32, height: i32,
     face: OpenTypeFace) DisplayList {
-    return linux_preview_scene_internal(width, height, face, 1);
+    return linux_preview_scene_internal(width, height, face, 1, 1);
+}
+
+fn linux_preview_scene_with_font_state(width: i32, height: i32,
+    face: OpenTypeFace, selected_navigation: i32) DisplayList {
+    return linux_preview_scene_internal(width, height, face, 1, selected_navigation);
 }
