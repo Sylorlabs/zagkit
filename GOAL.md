@@ -37,6 +37,8 @@ more precision is needed and preserve its original ID as the parent.
 - [ ] `G1-JNI` Implement typed JNI ABI seams. — Exit: calls, references, exceptions, threads, callbacks, and cleanup pass on Android
 - [ ] `G1-CALLBACKS` Complete general foreign callback ABI support. — Exit: register, stack, lifetime, reentrancy, and negative suites pass per target
 - [ ] `G1-AGGREGATES` Complete foreign aggregate argument and return support. — Exit: structs, unions, vectors, floats, alignment, and register-class suites pass per target
+- [ ] `G1-FFI-LIFETIMES` Implement exact per-parameter foreign lifetime contracts in Zag without treating nonretaining inputs as borrowed returns. — Exit: multi-pointer immutable/mutable input, consume, computed/null input, return-escape, formatter, manifest, and native C ABI suites pass with legacy contracts remaining compatible
+- [ ] `G1-RUNTIME-RESOURCES` Implement move-capable runtime resource aggregates, exact owned-field cleanup, and explicit foreign acquire/consume transfer in Zag. — Exit: construct, partial initialization, move-return, deinit, field release, null/error cleanup, double-use, copy, leak, and foreign-handle suites pass before the Linux shell stores owned buffers or handles in returned aggregates
 - [ ] `G1-RESOURCES` Implement deterministic compiler-owned resource embedding. — Exit: binary, empty, relative, malformed, cache-identity, reproducibility, and target suites pass
 - [ ] `G1-DYNAMIC-LOAD` Complete typed cross-platform dynamic loading. — Exit: lookup, version failure, ownership, unload, callback, and aggregate suites pass
 - [ ] `G1-CONCURRENCY` Complete main-loop and worker primitives with a documented memory model. — Exit: wakeup, cancellation, affinity, race, shutdown, and platform suites pass
