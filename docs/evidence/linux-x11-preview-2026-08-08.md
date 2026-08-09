@@ -28,6 +28,13 @@ argument seven and later. The fix lives in Zag's native lowering: preserve the
 exact expression-stack pointer, align before System V argument placement, and
 restore it after the call. Focused nine-argument field-assignment and deep X11
 aggregate-return fixtures both exited `42` with the fixed compiler stage.
+The source repair is committed directly in the canonical Zag checkout as
+`590501f` (`Fix nested System V calls and memory-class aggregates`). On
+2026-08-09 Zag then reached the bounded byte-identical self-hosting fixpoint,
+installed `./znc` with SHA-256
+`f52b0167d7d0644531e76e5eebb6560a61b2a5a06d3b7a82211e5617d2924090`,
+and that installed compiler passed all 36 dynamic ABI checks plus this native
+X11 create/present/capture/cleanup gate.
 
 ## Honest limits
 
