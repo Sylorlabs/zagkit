@@ -1,0 +1,54 @@
+// One source of truth for the experimental Linux showcase routes. A route is
+// enabled only after its visible content, semantics, actions, and Talkback
+// identity are composed into the native surface.
+
+fn linux_preview_navigation_count() i32 { return 6; }
+
+fn linux_preview_initial_navigation() i32 { return 0; }
+
+fn linux_preview_navigation_name(index: i32) []u8 {
+    if (index == 1) { return "Components"; }
+    if (index == 2) { return "Motion"; }
+    if (index == 3) { return "Typography"; }
+    if (index == 4) { return "Talkback"; }
+    if (index == 5) { return "Settings"; }
+    return "Overview";
+}
+
+fn linux_preview_navigation_enabled(index: i32) i32 {
+    // The overview is currently the only route fully composed into the native
+    // shell. Components becomes available when the real Button gallery is
+    // embedded; a highlight-only destination is deliberately unavailable.
+    return (index == 0) as i32;
+}
+
+fn linux_preview_navigation_value(index: i32) []u8 {
+    if (linux_preview_navigation_enabled(index) != 0) { return "Available"; }
+    return "Planned; native composition unavailable";
+}
+
+fn linux_preview_navigation_normalize(index: i32) i32 {
+    if (index >= 0 && index < linux_preview_navigation_count() &&
+        linux_preview_navigation_enabled(index) != 0) { return index; }
+    return linux_preview_initial_navigation();
+}
+
+fn linux_preview_main_heading(index: i32) []u8 {
+    let selected: i32 = linux_preview_navigation_normalize(index);
+    if (selected == 1) { return "Button states"; }
+    if (selected == 2) { return "Motion continuity"; }
+    if (selected == 3) { return "Typography system"; }
+    if (selected == 4) { return "Talkback inspector"; }
+    if (selected == 5) { return "Showcase settings"; }
+    return "Renderer performance";
+}
+
+fn linux_preview_main_description(index: i32) []u8 {
+    let selected: i32 = linux_preview_navigation_normalize(index);
+    if (selected == 1) { return "Canonical Button variants and interaction states"; }
+    if (selected == 2) { return "Interruptible motion and reduced-motion evidence"; }
+    if (selected == 3) { return "Type roles, shaping, fallback, and large-text evidence"; }
+    if (selected == 4) { return "Stable-ID semantics and agent automation evidence"; }
+    if (selected == 5) { return "Theme, contrast, density, and effects controls"; }
+    return "Deterministic CPU frame-time chart and pipeline controls";
+}
