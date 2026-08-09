@@ -60,6 +60,11 @@ but it must be labeled experimental and cannot promote the visual system.
   focused states, arrow-key behavior, disabled behavior, and tab semantics.
 - Navigation exposes one canonical active location. Contextual inspectors and
   system status are labeled and styled as their actual roles.
+- Every enabled navigation item activates its named destination: the selected
+  label, main landmark, visible heading, semantics, actions, and Talkback tree
+  must describe the same content. An item whose destination is not implemented
+  remains visibly and semantically disabled; changing only its highlight is a
+  failing no-op, not navigation evidence.
 
 ## Evidence matrix
 
