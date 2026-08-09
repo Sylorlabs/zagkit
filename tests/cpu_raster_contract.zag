@@ -345,6 +345,29 @@ fn path_work_limit_contract(state: *TestState) void {
     path_free(&path);
 }
 
+fn path_scanline_work_contract(state: *TestState) void {
+    let path: PathData = path_make(PathFillRule.non_zero);
+    let row: i32 = 0;
+    while (row < 100) {
+        let top: i64 = (row as i64) * unit_scale();
+        let bottom: i64 = ((row + 1) as i64) * unit_scale();
+        _ = path_move_to(&path, path_point(0, top));
+        _ = path_line_to(&path, path_point(100 * unit_scale(), top));
+        _ = path_line_to(&path, path_point(100 * unit_scale(), bottom));
+        _ = path_line_to(&path, path_point(0, bottom));
+        _ = path_close(&path);
+        row = row + 1;
+    }
+    _ = path_seal(&path);
+    let list: DisplayList = path_scene(path,
+        paint_rgba16(65535, 65535, 65535, 65535));
+    let result: CpuRasterResult = cpu_rasterize(list, 100, 100);
+    expect(state, result.error == CpuRasterError.none &&
+        result.pixels_touched == 10000,
+        "scanline-active edge accounting renders large sparse contour sets within budget");
+    cpu_raster_free(&result); display_list_free(&list); path_free(&path);
+}
+
 fn path_clip_transform_contract(state: *TestState) void {
     let path: PathData = square_path(PathFillRule.non_zero, 0);
     let payload: PathEncodeResult = path_encode(path);
@@ -423,6 +446,7 @@ fn main() i32 {
     stroke_rect_contract(&state);
     image_contract(&state);
     path_fill_contract(&state);
+    path_scanline_work_contract(&state);
     path_work_limit_contract(&state);
     path_clip_transform_contract(&state);
     failure_contract(&state);

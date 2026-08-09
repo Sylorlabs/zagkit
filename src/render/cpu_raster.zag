@@ -319,6 +319,11 @@ fn cpu_path_contains(edges: ArrayList[CpuPathEdge], fill_rule: PathFillRule,
     return (winding != 0) as i32;
 }
 
+fn cpu_path_edge_active(edge: CpuPathEdge, y: i64) i32 {
+    return ((edge.start.y <= y && edge.end.y > y) ||
+        (edge.end.y <= y && edge.start.y > y)) as i32;
+}
+
 fn cpu_fill_path(surface: *CpuSurface, path: PathData, transform: Transform,
     clip: Rect, paint: Paint) CpuRasterResult {
     let built: CpuPathBuildResult = cpu_path_build(path, transform);
@@ -343,25 +348,74 @@ fn cpu_fill_path(surface: *CpuSurface, path: PathData, transform: Transform,
     let first_y: i32 = (bounds.y / unit_scale()) as i32;
     let last_x: i32 = ((bounds.x + bounds.width + unit_scale() - 1) / unit_scale()) as i32;
     let last_y: i32 = ((bounds.y + bounds.height + unit_scale() - 1) / unit_scale()) as i32;
-    let pixel_count: i64 = ((last_x - first_x) as i64) * ((last_y - first_y) as i64);
+    let pixel_width: i32 = last_x - first_x;
+    let pixel_height: i32 = last_y - first_y;
+    let pixel_count: i64 = (pixel_width as i64) * (pixel_height as i64);
     let samples: i64 = (cpu_path_sample_axis() as i64) * (cpu_path_sample_axis() as i64);
-    if (built.edges.len > 0 && (pixel_count <= 0 ||
-        pixel_count > cpu_path_work_limit() / samples / (built.edges.len as i64))) {
+    if (pixel_count <= 0) {
         free[CpuPathEdge](&built.edges);
         return cpu_result(surface.*, CpuRasterError.work_limit, 0 - 1, 0, 0);
     }
 
+    // Charge only edges that can cross each sample row. The previous
+    // all-edges-per-pixel estimate rejected ordinary glyphs and mirrored an
+    // avoidable brute-force loop rather than the geometry's real work.
+    let work: i64 = 0;
+    let work_y: i32 = first_y;
+    while (work_y < last_y) {
+        let work_sample_y: i32 = 0;
+        while (work_sample_y < cpu_path_sample_axis()) {
+            let point_y: i64 = (work_y as i64) * unit_scale() +
+                ((work_sample_y as i64) * unit_scale() + unit_scale() / 2) /
+                (cpu_path_sample_axis() as i64);
+            let active_count: i64 = 0;
+            let edge_index: i32 = 0;
+            while (edge_index < built.edges.len) {
+                if (cpu_path_edge_active(built.edges.data[edge_index], point_y) != 0) {
+                    active_count = active_count + 1;
+                }
+                edge_index = edge_index + 1;
+            }
+            work = work + built.edges.len +
+                active_count * (pixel_width as i64) * cpu_path_sample_axis();
+            if (work > cpu_path_work_limit()) {
+                free[CpuPathEdge](&built.edges);
+                return cpu_result(surface.*, CpuRasterError.work_limit, 0 - 1, 0, 0);
+            }
+            work_sample_y = work_sample_y + 1;
+        }
+        work_y = work_y + 1;
+    }
+
     let touched: i64 = 0;
+    let active_edges: ArrayList[CpuPathEdge] = make[CpuPathEdge](built.edges.len + 1);
+    let row_coverage: ArrayList[i32] = make[i32](pixel_width + 1);
+    let coverage_index: i32 = 0;
+    while (coverage_index < pixel_width) {
+        push[i32](&row_coverage, 0); coverage_index = coverage_index + 1;
+    }
     let y: i32 = first_y;
     while (y < last_y) {
-        let x: i32 = first_x;
-        while (x < last_x) {
-            let inside: i64 = 0;
-            let sample_y: i32 = 0;
-            while (sample_y < cpu_path_sample_axis()) {
-                let point_y: i64 = (y as i64) * unit_scale() +
-                    ((sample_y as i64) * unit_scale() + unit_scale() / 2) /
-                    (cpu_path_sample_axis() as i64);
+        coverage_index = 0;
+        while (coverage_index < pixel_width) {
+            row_coverage.data[coverage_index] = 0; coverage_index = coverage_index + 1;
+        }
+        let sample_y: i32 = 0;
+        while (sample_y < cpu_path_sample_axis()) {
+            let point_y: i64 = (y as i64) * unit_scale() +
+                ((sample_y as i64) * unit_scale() + unit_scale() / 2) /
+                (cpu_path_sample_axis() as i64);
+            active_edges.len = 0;
+            let edge_index: i32 = 0;
+            while (edge_index < built.edges.len) {
+                let edge: CpuPathEdge = built.edges.data[edge_index];
+                if (cpu_path_edge_active(edge, point_y) != 0) {
+                    push[CpuPathEdge](&active_edges, edge);
+                }
+                edge_index = edge_index + 1;
+            }
+            let x: i32 = first_x;
+            while (x < last_x) {
                 let sample_x: i32 = 0;
                 while (sample_x < cpu_path_sample_axis()) {
                     let point_x: i64 = (x as i64) * unit_scale() +
@@ -369,13 +423,19 @@ fn cpu_fill_path(surface: *CpuSurface, path: PathData, transform: Transform,
                         (cpu_path_sample_axis() as i64);
                     if (point_x >= clip.x && point_x < clip.x + clip.width &&
                         point_y >= clip.y && point_y < clip.y + clip.height &&
-                        cpu_path_contains(built.edges, path.fill_rule, point_x, point_y) != 0) {
-                        inside = inside + 1;
+                        cpu_path_contains(active_edges, path.fill_rule, point_x, point_y) != 0) {
+                        row_coverage.data[x - first_x] =
+                            row_coverage.data[x - first_x] + 1;
                     }
                     sample_x = sample_x + 1;
                 }
-                sample_y = sample_y + 1;
+                x = x + 1;
             }
+            sample_y = sample_y + 1;
+        }
+        let x: i32 = first_x;
+        while (x < last_x) {
+            let inside: i64 = row_coverage.data[x - first_x] as i64;
             if (inside > 0) {
                 cpu_blend_pixel(surface, x, y, paint, (inside * 4096) / samples);
                 touched = touched + 1;
@@ -384,6 +444,8 @@ fn cpu_fill_path(surface: *CpuSurface, path: PathData, transform: Transform,
         }
         y = y + 1;
     }
+    free[CpuPathEdge](&active_edges);
+    free[i32](&row_coverage);
     free[CpuPathEdge](&built.edges);
     return cpu_result(surface.*, CpuRasterError.none, 0 - 1, 0, touched);
 }

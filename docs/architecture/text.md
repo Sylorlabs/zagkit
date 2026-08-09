@@ -35,6 +35,9 @@ native widget text engines are not runtime dependencies.
   drift-free fixed-point origins, and the positioned contours assemble into
   one immutable path executable by the CPU oracle. Missing coverage returns a
   fallback request instead of a fabricated glyph.
+- The CPU path oracle indexes active edges per subpixel scanline, preserving
+  exact eight-by-eight coverage while avoiding all-edges-per-pixel sentence
+  work. It preflights the actual bounded scanline work before touching pixels.
 - Unicode-to-glyph lookup supports bounded `cmap` format 4 and format 12
   subtables. A missing mapping returns glyph zero; it does not invent fallback.
 - The parser rejects table escapes, duplicate required tables, malformed
