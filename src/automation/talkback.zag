@@ -440,8 +440,11 @@ fn talkback_dispatch(session: *TalkbackSession, tree: SemanticsTree, viewport: R
         return talkback_record(session, tree.revision, request, TalkbackStatus.target_not_found);
     }
     let required_action: i64 = talkback_required_action(request.command);
-    if (tree.nodes.data[node_index].disabled != 0 ||
-        (required_action != 0 && (tree.nodes.data[node_index].action_mask & required_action) == 0)) {
+    // Disabled nodes remain discoverable and queryable. Only commands that
+    // require an action fail closed when that action is unavailable.
+    if (required_action != 0 &&
+        (tree.nodes.data[node_index].disabled != 0 ||
+         (tree.nodes.data[node_index].action_mask & required_action) == 0)) {
         return talkback_record(session, tree.revision, request, TalkbackStatus.action_unavailable);
     }
     let response: TalkbackResponse = talkback_record(session, tree.revision, request, TalkbackStatus.accepted);

@@ -125,6 +125,25 @@ fn pixel_fallback_contract(state: *TestState) void {
     semantics_tree_free(&tree);
 }
 
+fn disabled_query_contract(state: *TestState) void {
+    let tree: SemanticsTree = make_tree();
+    let button_index: i32 = semantics_find_index(tree, node_key(2));
+    tree.nodes.data[button_index].disabled = 1;
+    let session: TalkbackSession = talkback_session_make(talkback_capabilities());
+    let viewport: Rect = rect(0, 0, 800 * unit_scale(), 600 * unit_scale());
+    let query: TalkbackResponse = talkback_dispatch(&session, tree, viewport,
+        talkback_request(40, TalkbackCommand.query, node_key(2), tree.revision));
+    let click: TalkbackResponse = talkback_dispatch(&session, tree, viewport,
+        talkback_request(41, TalkbackCommand.click, node_key(2), tree.revision));
+    expect(state, query.status == TalkbackStatus.accepted &&
+        (query.state_flags & 1) != 0 && query.emitted_action == 0,
+        "disabled targets remain discoverable through read-only ID queries");
+    expect(state, click.status == TalkbackStatus.action_unavailable,
+        "disabled targets reject action commands while remaining queryable");
+    talkback_session_free(&session);
+    semantics_tree_free(&tree);
+}
+
 fn capability_contract(state: *TestState) void {
     let tree: SemanticsTree = make_tree();
     let capabilities: TalkbackCapabilities = talkback_capabilities();
@@ -148,6 +167,7 @@ fn capability_contract(state: *TestState) void {
 fn main() i32 {
     let state: TestState = TestState{ .passed = 0, .failed = 0 };
     id_target_contract(&state);
+    disabled_query_contract(&state);
     pixel_fallback_contract(&state);
     capability_contract(&state);
     let passed_text: []u8 = _zag_i64_to_str(state.passed as i64);
