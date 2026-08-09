@@ -1,0 +1,1051 @@
+@import("std:list")
+@import("canvas.zag")
+@import("../design/tokens.zag")
+@import("../layout/flex.zag")
+@import("../layout/adaptive.zag")
+
+// Experimental bounded line/scatter chart for frame-performance evidence.
+// This is one accessible component contract, not a general chart suite.
+
+enum PerformanceChartError {
+    none,
+    invalid_spec,
+    invalid_series,
+    invalid_point,
+    flex_error,
+    canvas_error,
+    path_error,
+    semantics_error,
+    hit_error,
+}
+
+struct PerformanceChartPoint {
+    x: i64,
+    y: i64,
+    x_value: []u8,
+    y_value: []u8,
+}
+
+struct PerformanceChartSeries {
+    id: NodeKey,
+    name: []u8,
+    description: []u8,
+    points: ArrayList[PerformanceChartPoint],
+    color_token: SemanticColorToken,
+    selected: i32,
+    focused: i32,
+    disabled: i32,
+}
+
+struct PerformanceChartSpec {
+    id: NodeKey,
+    bounds: Rect,
+    title: []u8,
+    description: []u8,
+    x_axis_name: []u8,
+    x_axis_unit: []u8,
+    y_axis_name: []u8,
+    y_axis_unit: []u8,
+    x_min: i64,
+    x_max: i64,
+    y_min: i64,
+    y_max: i64,
+    x_tick_count: i32,
+    y_tick_count: i32,
+    baseline_value: i64,
+    baseline_name: []u8,
+    deadline_value: i64,
+    deadline_name: []u8,
+    x_tick_labels: ArrayList[[]u8],
+    y_tick_labels: ArrayList[[]u8],
+    series: ArrayList[PerformanceChartSeries],
+}
+
+enum PerformanceChartTextSlotKind {
+    title,
+    x_axis_name,
+    x_axis_unit,
+    y_axis_name,
+    y_axis_unit,
+    x_tick,
+    y_tick,
+    legend_name,
+    baseline,
+    deadline,
+}
+
+struct PerformanceChartTextSlot {
+    id: NodeKey,
+    kind: PerformanceChartTextSlotKind,
+    text: ArrayList[u8],
+    bounds: Rect,
+    type_token: SemanticTypeToken,
+    color_token: SemanticColorToken,
+}
+
+struct PerformanceChartMetrics {
+    outer_padding: i64,
+    title_height: i64,
+    legend_gap: i64,
+    legend_height: i64,
+    axis_label_extent: i64,
+    plot_bounds: Rect,
+    title_bounds: Rect,
+    legend_bounds: Rect,
+    x_axis_label_bounds: Rect,
+    y_axis_label_bounds: Rect,
+}
+
+struct PerformanceChartLegendArtifact {
+    id: NodeKey,
+    bounds: Rect,
+    selected: i32,
+    focused: i32,
+    disabled: i32,
+    color_token: SemanticColorToken,
+}
+
+struct PerformanceChartArtifact {
+    canvas: Canvas,
+    semantics: SemanticsTree,
+    hits: HitTree,
+    legend: ArrayList[PerformanceChartLegendArtifact],
+    text_slots: ArrayList[PerformanceChartTextSlot],
+    metrics: PerformanceChartMetrics,
+    error: PerformanceChartError,
+    canvas_error: CanvasError,
+    path_error: PathError,
+    semantics_error: SemanticsError,
+    hit_error: HitTreeError,
+    table_rows: i64,
+    table_columns: i64,
+    evidence_hash: i64,
+}
+
+fn performance_chart_point(x: i64, y: i64,
+    x_value: []u8, y_value: []u8) PerformanceChartPoint {
+    return PerformanceChartPoint{
+        .x = x, .y = y, .x_value = x_value, .y_value = y_value,
+    };
+}
+
+fn performance_chart_series(id: NodeKey, name: []u8,
+    points: ArrayList[PerformanceChartPoint],
+    color_token: SemanticColorToken) PerformanceChartSeries {
+    return PerformanceChartSeries{
+        .id = id, .name = name, .description = "", .points = points,
+        .color_token = color_token, .selected = 0, .focused = 0, .disabled = 0,
+    };
+}
+
+fn performance_chart_spec(id: NodeKey, bounds: Rect,
+    series: ArrayList[PerformanceChartSeries],
+    x_tick_labels: ArrayList[[]u8],
+    y_tick_labels: ArrayList[[]u8]) PerformanceChartSpec {
+    return PerformanceChartSpec{
+        .id = id, .bounds = bounds,
+        .title = "Frame pacing", .description = "Experimental performance chart",
+        .x_axis_name = "Elapsed time", .x_axis_unit = "seconds",
+        .y_axis_name = "Frame time", .y_axis_unit = "milliseconds",
+        .x_min = 0, .x_max = 1, .y_min = 0, .y_max = 1,
+        .x_tick_count = 5, .y_tick_count = 5,
+        .baseline_value = 0, .baseline_name = "Target baseline",
+        .deadline_value = 1, .deadline_name = "Display deadline",
+        .x_tick_labels = x_tick_labels,
+        .y_tick_labels = y_tick_labels,
+        .series = series,
+    };
+}
+
+fn performance_chart_title_id(id: NodeKey) NodeKey {
+    return semantic_generated_key(id, SemanticRole.text, 1);
+}
+
+fn performance_chart_x_axis_id(id: NodeKey) NodeKey {
+    return semantic_generated_key(id, SemanticRole.text, 2);
+}
+
+fn performance_chart_y_axis_id(id: NodeKey) NodeKey {
+    return semantic_generated_key(id, SemanticRole.text, 3);
+}
+
+fn performance_chart_baseline_id(id: NodeKey) NodeKey {
+    return semantic_generated_key(id, SemanticRole.text, 4);
+}
+
+fn performance_chart_deadline_id(id: NodeKey) NodeKey {
+    return semantic_generated_key(id, SemanticRole.text, 5);
+}
+
+fn performance_chart_legend_id(id: NodeKey) NodeKey {
+    return semantic_generated_key(id, SemanticRole.group, 6);
+}
+
+fn performance_chart_table_id(id: NodeKey) NodeKey {
+    return semantic_generated_key(id, SemanticRole.table, 7);
+}
+
+fn performance_chart_x_axis_unit_id(id: NodeKey) NodeKey {
+    return semantic_generated_key(id, SemanticRole.text, 8);
+}
+
+fn performance_chart_y_axis_unit_id(id: NodeKey) NodeKey {
+    return semantic_generated_key(id, SemanticRole.text, 9);
+}
+
+fn performance_chart_x_tick_id(id: NodeKey, index: i32) NodeKey {
+    return semantic_generated_key(id, SemanticRole.text, 100 + index as i64);
+}
+
+fn performance_chart_y_tick_id(id: NodeKey, index: i32) NodeKey {
+    return semantic_generated_key(id, SemanticRole.text, 200 + index as i64);
+}
+
+fn performance_chart_table_row_id(id: NodeKey, row: i64) NodeKey {
+    return semantic_generated_key(performance_chart_table_id(id),
+        SemanticRole.row, 100 + row);
+}
+
+fn performance_chart_table_cell_id(id: NodeKey,
+    row: i64, column: i64) NodeKey {
+    return semantic_generated_key(performance_chart_table_row_id(id, row),
+        SemanticRole.cell, 1000 + column);
+}
+
+fn performance_chart_color_valid(token: SemanticColorToken) i32 {
+    return (token == SemanticColorToken.chart_series_primary ||
+        token == SemanticColorToken.chart_series_secondary ||
+        token == SemanticColorToken.chart_series_tertiary) as i32;
+}
+
+fn performance_chart_text_valid(text: []u8) i32 {
+    return (text.len > 0 && text.len <= 4096 &&
+        semantic_text_input_valid(text) != 0) as i32;
+}
+
+fn performance_chart_metrics(bounds: Rect) PerformanceChartMetrics {
+    let density: FlexDensity = FlexDensity.standard;
+    let outer: i64 = flex_spacing(FlexSpacingToken.xlarge, density);
+    let title_height: i64 = flex_spacing(FlexSpacingToken.xxlarge, density);
+    let legend_gap: i64 = flex_spacing(FlexSpacingToken.small, density);
+    let legend_height: i64 = flex_spacing(FlexSpacingToken.xxlarge, density) +
+        flex_spacing(FlexSpacingToken.small, density);
+    let axis_extent: i64 = flex_spacing(FlexSpacingToken.xxlarge, density) +
+        flex_spacing(FlexSpacingToken.xlarge, density);
+    let plot_left: i64 = bounds.x + outer + axis_extent;
+    let plot_top: i64 = bounds.y + outer + title_height + legend_height + legend_gap;
+    let plot_right: i64 = bounds.x + bounds.width - outer;
+    let plot_bottom: i64 = bounds.y + bounds.height - outer - axis_extent;
+    return PerformanceChartMetrics{
+        .outer_padding = outer,
+        .title_height = title_height,
+        .legend_gap = legend_gap,
+        .legend_height = legend_height,
+        .axis_label_extent = axis_extent,
+        .plot_bounds = rect(plot_left, plot_top,
+            plot_right - plot_left, plot_bottom - plot_top),
+        .title_bounds = rect(bounds.x + outer, bounds.y + outer,
+            bounds.width - outer * 2, title_height),
+        .legend_bounds = rect(plot_left,
+            bounds.y + outer + title_height,
+            plot_right - plot_left, legend_height),
+        .x_axis_label_bounds = rect(plot_left, plot_bottom,
+            plot_right - plot_left, axis_extent),
+        .y_axis_label_bounds = rect(bounds.x + outer, plot_top,
+            axis_extent, plot_bottom - plot_top),
+    };
+}
+
+fn performance_chart_spec_valid(spec: PerformanceChartSpec) PerformanceChartError {
+    let scale: i64 = unit_scale();
+    if (spec.id.value <= 0 || spec.bounds.x < 0 || spec.bounds.y < 0 ||
+        spec.bounds.width < 640 * scale || spec.bounds.height < 420 * scale ||
+        spec.bounds.x + spec.bounds.width > unbounded_extent() ||
+        spec.bounds.y + spec.bounds.height > unbounded_extent() ||
+        performance_chart_text_valid(spec.title) == 0 ||
+        performance_chart_text_valid(spec.description) == 0 ||
+        performance_chart_text_valid(spec.x_axis_name) == 0 ||
+        performance_chart_text_valid(spec.x_axis_unit) == 0 ||
+        performance_chart_text_valid(spec.y_axis_name) == 0 ||
+        performance_chart_text_valid(spec.y_axis_unit) == 0 ||
+        performance_chart_text_valid(spec.baseline_name) == 0 ||
+        performance_chart_text_valid(spec.deadline_name) == 0 ||
+        spec.x_min < -1000000 || spec.x_max > 1000000 ||
+        spec.y_min < -1000000 || spec.y_max > 1000000 ||
+        spec.x_min >= spec.x_max || spec.y_min >= spec.y_max ||
+        spec.x_tick_count < 2 || spec.x_tick_count > 12 ||
+        spec.y_tick_count < 2 || spec.y_tick_count > 12 ||
+        spec.x_tick_labels.len != spec.x_tick_count ||
+        spec.y_tick_labels.len != spec.y_tick_count ||
+        spec.baseline_value < spec.y_min || spec.baseline_value > spec.y_max ||
+        spec.deadline_value < spec.y_min || spec.deadline_value > spec.y_max ||
+        spec.series.len <= 0 || spec.series.len > 8) {
+        return PerformanceChartError.invalid_spec;
+    }
+    let tick_index: i32 = 0;
+    while (tick_index < spec.x_tick_labels.len) {
+        if (performance_chart_text_valid(spec.x_tick_labels.data[tick_index]) == 0) {
+            return PerformanceChartError.invalid_spec;
+        }
+        tick_index = tick_index + 1;
+    }
+    tick_index = 0;
+    while (tick_index < spec.y_tick_labels.len) {
+        if (performance_chart_text_valid(spec.y_tick_labels.data[tick_index]) == 0) {
+            return PerformanceChartError.invalid_spec;
+        }
+        tick_index = tick_index + 1;
+    }
+    let point_count: i32 = spec.series.data[0].points.len;
+    if (point_count < 2 || point_count > 64) {
+        return PerformanceChartError.invalid_series;
+    }
+    let selected_count: i32 = 0;
+    let focused_count: i32 = 0;
+    let i: i32 = 0;
+    while (i < spec.series.len) {
+        let series: PerformanceChartSeries = spec.series.data[i];
+        if (series.id.value <= 0 || node_key_equal(series.id, spec.id) != 0 ||
+            performance_chart_text_valid(series.name) == 0 ||
+            (series.description.len > 0 &&
+             performance_chart_text_valid(series.description) == 0) ||
+            series.points.len != point_count ||
+            performance_chart_color_valid(series.color_token) == 0 ||
+            (series.selected != 0 && series.selected != 1) ||
+            (series.focused != 0 && series.focused != 1) ||
+            (series.disabled != 0 && series.disabled != 1) ||
+            (series.focused != 0 && series.disabled != 0)) {
+            return PerformanceChartError.invalid_series;
+        }
+        if (series.selected != 0) { selected_count = selected_count + 1; }
+        if (series.focused != 0) { focused_count = focused_count + 1; }
+        let duplicate: i32 = i + 1;
+        while (duplicate < spec.series.len) {
+            if (node_key_equal(series.id, spec.series.data[duplicate].id) != 0) {
+                return PerformanceChartError.invalid_series;
+            }
+            duplicate = duplicate + 1;
+        }
+        let point_index: i32 = 0;
+        while (point_index < series.points.len) {
+            let point: PerformanceChartPoint = series.points.data[point_index];
+            if (point.x < spec.x_min || point.x > spec.x_max ||
+                point.y < spec.y_min || point.y > spec.y_max ||
+                performance_chart_text_valid(point.x_value) == 0 ||
+                performance_chart_text_valid(point.y_value) == 0 ||
+                (point_index > 0 && point.x <=
+                    series.points.data[point_index - 1].x) ||
+                (i > 0 && point.x != spec.series.data[0].points.data[point_index].x)) {
+                return PerformanceChartError.invalid_point;
+            }
+            point_index = point_index + 1;
+        }
+        i = i + 1;
+    }
+    if (selected_count > 1 || focused_count > 1) {
+        return PerformanceChartError.invalid_series;
+    }
+    let metrics: PerformanceChartMetrics = performance_chart_metrics(spec.bounds);
+    if (metrics.plot_bounds.width <= 0 || metrics.plot_bounds.height <= 0) {
+        return PerformanceChartError.invalid_spec;
+    }
+    return PerformanceChartError.none;
+}
+
+fn performance_chart_empty(spec: PerformanceChartSpec) PerformanceChartArtifact {
+    let canvas_specification: CanvasSpec = canvas_spec(spec.id, spec.bounds,
+        CanvasSemanticsPolicy.named_group, spec.title);
+    canvas_specification.description = spec.description;
+    canvas_specification.hit_testable = 1;
+    let limits: CanvasLimits = canvas_limits_default();
+    limits.max_operations = 4096;
+    limits.max_resources = 16;
+    limits.max_total_resource_bytes = 1048576;
+    limits.max_resource_bytes = 262144;
+    limits.max_destination_operations = 8192;
+    return PerformanceChartArtifact{
+        .canvas = canvas_make(canvas_specification, limits),
+        .semantics = semantics_tree_make(),
+        .hits = hit_tree_make(),
+        .legend = make[PerformanceChartLegendArtifact](spec.series.len),
+        .text_slots = make[PerformanceChartTextSlot](32),
+        .metrics = performance_chart_metrics(spec.bounds),
+        .error = PerformanceChartError.none,
+        .canvas_error = CanvasError.none,
+        .path_error = PathError.none,
+        .semantics_error = SemanticsError.none,
+        .hit_error = HitTreeError.none,
+        .table_rows = 0,
+        .table_columns = 0,
+        .evidence_hash = 0,
+    };
+}
+
+fn performance_chart_free(artifact: *PerformanceChartArtifact) void {
+    let text_index: i32 = 0;
+    while (text_index < artifact.*.text_slots.len) {
+        free[u8](&artifact.*.text_slots.data[text_index].text);
+        text_index = text_index + 1;
+    }
+    free[PerformanceChartTextSlot](&artifact.*.text_slots);
+    free[PerformanceChartLegendArtifact](&artifact.*.legend);
+    hit_tree_free(&artifact.*.hits);
+    semantics_tree_free(&artifact.*.semantics);
+    _ = canvas_free(&artifact.*.canvas);
+}
+
+fn performance_chart_copy_text(text: []u8) ArrayList[u8] {
+    let owned: ArrayList[u8] = make[u8](text.len);
+    let i: i32 = 0;
+    while (i < text.len) {
+        push[u8](&owned, text[i]); i = i + 1;
+    }
+    return owned;
+}
+
+fn performance_chart_add_text_slot(artifact: *PerformanceChartArtifact,
+    id: NodeKey, kind: PerformanceChartTextSlotKind, text: []u8,
+    bounds: Rect, type_token: SemanticTypeToken,
+    color_token: SemanticColorToken) void {
+    push[PerformanceChartTextSlot](&artifact.*.text_slots,
+        PerformanceChartTextSlot{
+            .id = id, .kind = kind,
+            .text = performance_chart_copy_text(text),
+            .bounds = bounds, .type_token = type_token,
+            .color_token = color_token,
+        });
+}
+
+fn performance_chart_fail_canvas(artifact: *PerformanceChartArtifact,
+    error: CanvasError) i32 {
+    artifact.*.error = PerformanceChartError.canvas_error;
+    artifact.*.canvas_error = error;
+    return 0;
+}
+
+fn performance_chart_push_rect(artifact: *PerformanceChartArtifact,
+    bounds: Rect, paint: Paint) i32 {
+    let op: DisplayOp = canvas_op(artifact.*.canvas, DisplayOpKind.fill_rect);
+    op.bounds = bounds; op.paint = paint;
+    let error: CanvasError = canvas_push(&artifact.*.canvas, op);
+    if (error != CanvasError.none) {
+        return performance_chart_fail_canvas(artifact, error);
+    }
+    return 1;
+}
+
+fn performance_chart_push_round(artifact: *PerformanceChartArtifact,
+    bounds: Rect, radius: i64, paint: Paint) i32 {
+    let op: DisplayOp = canvas_op(artifact.*.canvas,
+        DisplayOpKind.fill_rounded_rect);
+    op.bounds = bounds; op.parameter = radius; op.paint = paint;
+    let error: CanvasError = canvas_push(&artifact.*.canvas, op);
+    if (error != CanvasError.none) {
+        return performance_chart_fail_canvas(artifact, error);
+    }
+    return 1;
+}
+
+fn performance_chart_map_x(spec: PerformanceChartSpec,
+    metrics: PerformanceChartMetrics, value: i64) i64 {
+    return metrics.plot_bounds.x +
+        ((value - spec.x_min) * metrics.plot_bounds.width) /
+        (spec.x_max - spec.x_min);
+}
+
+fn performance_chart_map_y(spec: PerformanceChartSpec,
+    metrics: PerformanceChartMetrics, value: i64) i64 {
+    return metrics.plot_bounds.y + metrics.plot_bounds.height -
+        ((value - spec.y_min) * metrics.plot_bounds.height) /
+        (spec.y_max - spec.y_min);
+}
+
+fn performance_chart_background(artifact: *PerformanceChartArtifact,
+    spec: PerformanceChartSpec) i32 {
+    let scale: i64 = unit_scale();
+    let elevation: ResolvedElevationToken =
+        semantic_elevation(SemanticElevationToken.raised);
+    let spread: i64 = elevation.shadow_spread;
+    if (performance_chart_push_round(artifact,
+        rect(spec.bounds.x - spread,
+            spec.bounds.y + elevation.shadow_offset_y - spread,
+            spec.bounds.width + spread * 2,
+            spec.bounds.height + spread * 2),
+        semantic_radius(SemanticRadiusToken.panel) + spread,
+        semantic_color_with_alpha(SemanticColorToken.shadow,
+            elevation.shadow_alpha)) == 0) { return 0; }
+    if (performance_chart_push_round(artifact, spec.bounds,
+        semantic_radius(SemanticRadiusToken.panel),
+        semantic_color_paint(SemanticColorToken.border_emphasis)) == 0) { return 0; }
+    if (performance_chart_push_round(artifact,
+        rect(spec.bounds.x + scale, spec.bounds.y + scale,
+            spec.bounds.width - scale * 2, spec.bounds.height - scale * 2),
+        semantic_radius(SemanticRadiusToken.panel) - scale,
+        semantic_color_paint(SemanticColorToken.surface_raised)) == 0) { return 0; }
+    return performance_chart_push_round(artifact, artifact.*.metrics.plot_bounds,
+        semantic_radius(SemanticRadiusToken.card),
+        semantic_color_paint(SemanticColorToken.surface_inset));
+}
+
+fn performance_chart_grid(artifact: *PerformanceChartArtifact,
+    spec: PerformanceChartSpec) i32 {
+    let scale: i64 = unit_scale();
+    let plot: Rect = artifact.*.metrics.plot_bounds;
+    let i: i32 = 0;
+    while (i < spec.x_tick_count) {
+        let x: i64 = plot.x +
+            (plot.width * (i as i64)) / ((spec.x_tick_count - 1) as i64);
+        if (performance_chart_push_rect(artifact,
+            rect(x, plot.y, scale, plot.height),
+            semantic_color_paint(SemanticColorToken.chart_grid)) == 0) { return 0; }
+        if (performance_chart_push_rect(artifact,
+            rect(x - scale, plot.y + plot.height, scale * 2, 6 * scale),
+            semantic_color_paint(SemanticColorToken.chart_axis)) == 0) { return 0; }
+        i = i + 1;
+    }
+    i = 0;
+    while (i < spec.y_tick_count) {
+        let y: i64 = plot.y +
+            (plot.height * (i as i64)) / ((spec.y_tick_count - 1) as i64);
+        if (performance_chart_push_rect(artifact,
+            rect(plot.x, y, plot.width, scale),
+            semantic_color_paint(SemanticColorToken.chart_grid)) == 0) { return 0; }
+        if (performance_chart_push_rect(artifact,
+            rect(plot.x - 6 * scale, y - scale, 6 * scale, scale * 2),
+            semantic_color_paint(SemanticColorToken.chart_axis)) == 0) { return 0; }
+        i = i + 1;
+    }
+    if (performance_chart_push_rect(artifact,
+        rect(plot.x, plot.y + plot.height - 2 * scale,
+            plot.width, 2 * scale),
+        semantic_color_paint(SemanticColorToken.chart_axis)) == 0) { return 0; }
+    if (performance_chart_push_rect(artifact,
+        rect(plot.x, plot.y, 2 * scale, plot.height),
+        semantic_color_paint(SemanticColorToken.chart_axis)) == 0) { return 0; }
+    let baseline_y: i64 = performance_chart_map_y(
+        spec, artifact.*.metrics, spec.baseline_value);
+    if (performance_chart_push_rect(artifact,
+        rect(plot.x, baseline_y, plot.width, scale),
+        semantic_color_with_alpha(SemanticColorToken.chart_axis, 52000)) == 0) {
+        return 0;
+    }
+    let deadline_y: i64 = performance_chart_map_y(
+        spec, artifact.*.metrics, spec.deadline_value);
+    return performance_chart_push_rect(artifact,
+        rect(plot.x, deadline_y - scale, plot.width, 2 * scale),
+        semantic_color_paint(SemanticColorToken.status_error));
+}
+
+fn performance_chart_line_path(artifact: *PerformanceChartArtifact,
+    spec: PerformanceChartSpec, series: PerformanceChartSeries,
+    index: i32) i32 {
+    let scale: i64 = unit_scale();
+    let half: i64 = scale;
+    if (series.selected != 0) { half = 2 * scale; }
+    let path: PathData = path_make(PathFillRule.non_zero);
+    let i: i32 = 1;
+    while (i < series.points.len) {
+        let first: PerformanceChartPoint = series.points.data[i - 1];
+        let second: PerformanceChartPoint = series.points.data[i];
+        let x1: i64 = performance_chart_map_x(spec, artifact.*.metrics, first.x);
+        let y1: i64 = performance_chart_map_y(spec, artifact.*.metrics, first.y);
+        let x2: i64 = performance_chart_map_x(spec, artifact.*.metrics, second.x);
+        let y2: i64 = performance_chart_map_y(spec, artifact.*.metrics, second.y);
+        if (path_move_to(&path, path_point(x1, y1 - half)) != PathError.none ||
+            path_line_to(&path, path_point(x2, y2 - half)) != PathError.none ||
+            path_line_to(&path, path_point(x2, y2 + half)) != PathError.none ||
+            path_line_to(&path, path_point(x1, y1 + half)) != PathError.none ||
+            path_close(&path) != PathError.none) {
+            artifact.*.error = PerformanceChartError.path_error;
+            artifact.*.path_error = path.last_error;
+            path_free(&path); return 0;
+        }
+        i = i + 1;
+    }
+    let sealed: PathError = path_seal(&path);
+    if (sealed != PathError.none) {
+        artifact.*.error = PerformanceChartError.path_error;
+        artifact.*.path_error = sealed; path_free(&path); return 0;
+    }
+    let encoded: PathEncodeResult = path_encode(path);
+    if (encoded.error != PathError.none) {
+        artifact.*.error = PerformanceChartError.path_error;
+        artifact.*.path_error = encoded.error;
+        path_encode_free(&encoded); path_free(&path); return 0;
+    }
+    let resource: CanvasResourceSpec = canvas_resource_spec(100 + index as i64,
+        RenderResourceKind.path, encoded.bytes.data[0..encoded.bytes.len],
+        path_resource_format_tag());
+    let resource_error: CanvasError = canvas_add_resource(&artifact.*.canvas, resource);
+    if (resource_error != CanvasError.none) {
+        path_encode_free(&encoded); path_free(&path);
+        return performance_chart_fail_canvas(artifact, resource_error);
+    }
+    let draw: DisplayOp = canvas_resource_op(artifact.*.canvas,
+        DisplayOpKind.draw_path, 100 + index as i64);
+    let alpha: i64 = 56000;
+    if (series.selected != 0) { alpha = 65535; }
+    if (series.disabled != 0) { alpha = 18000; }
+    draw.paint = semantic_color_with_alpha(series.color_token, alpha);
+    let draw_error: CanvasError = canvas_push(&artifact.*.canvas, draw);
+    path_encode_free(&encoded); path_free(&path);
+    if (draw_error != CanvasError.none) {
+        return performance_chart_fail_canvas(artifact, draw_error);
+    }
+    return 1;
+}
+
+fn performance_chart_series_marks(artifact: *PerformanceChartArtifact,
+    spec: PerformanceChartSpec, series: PerformanceChartSeries,
+    index: i32) i32 {
+    if (performance_chart_line_path(artifact, spec, series, index) == 0) {
+        return 0;
+    }
+    let radius: i64 = 4 * unit_scale();
+    if (series.selected != 0) { radius = 6 * unit_scale(); }
+    let alpha: i64 = 62000;
+    if (series.disabled != 0) { alpha = 22000; }
+    let i: i32 = 0;
+    while (i < series.points.len) {
+        let point: PerformanceChartPoint = series.points.data[i];
+        let x: i64 = performance_chart_map_x(spec, artifact.*.metrics, point.x);
+        let y: i64 = performance_chart_map_y(spec, artifact.*.metrics, point.y);
+        if (performance_chart_push_round(artifact,
+            rect(x - radius, y - radius, radius * 2, radius * 2), radius,
+            semantic_color_with_alpha(series.color_token, alpha)) == 0) { return 0; }
+        i = i + 1;
+    }
+    return 1;
+}
+
+fn performance_chart_semantic_text(artifact: *PerformanceChartArtifact,
+    id: NodeKey, name: []u8, value: []u8, bounds: Rect) i32 {
+    let semantic: SemanticsSpec = semantics_spec(id, artifact.*.canvas.key,
+        SemanticRole.text, name);
+    semantic.value = value; semantic.has_bounds = 1; semantic.bounds = bounds;
+    let error: SemanticsError = semantics_add(&artifact.*.semantics, semantic);
+    if (error != SemanticsError.none) {
+        artifact.*.error = PerformanceChartError.semantics_error;
+        artifact.*.semantics_error = error; return 0;
+    }
+    return 1;
+}
+
+fn performance_chart_add_static_semantics(artifact: *PerformanceChartArtifact,
+    spec: PerformanceChartSpec) i32 {
+    let scale: i64 = unit_scale();
+    let caption_height: i64 = semantic_type_size(SemanticTypeToken.caption) +
+        flex_spacing(FlexSpacingToken.tiny, FlexDensity.standard);
+    let axis_half: i64 = artifact.*.metrics.axis_label_extent / 2;
+    if (performance_chart_semantic_text(artifact,
+        performance_chart_title_id(spec.id), spec.title, spec.description,
+        artifact.*.metrics.title_bounds) == 0) { return 0; }
+    performance_chart_add_text_slot(artifact,
+        performance_chart_title_id(spec.id), PerformanceChartTextSlotKind.title,
+        spec.title, artifact.*.metrics.title_bounds,
+        SemanticTypeToken.title, SemanticColorToken.text_primary);
+    let x_name_bounds: Rect = rect(
+        artifact.*.metrics.x_axis_label_bounds.x,
+        artifact.*.metrics.x_axis_label_bounds.y,
+        artifact.*.metrics.x_axis_label_bounds.width, axis_half);
+    let x_unit_bounds: Rect = rect(x_name_bounds.x,
+        x_name_bounds.y + axis_half, x_name_bounds.width,
+        artifact.*.metrics.x_axis_label_bounds.height - axis_half);
+    if (performance_chart_semantic_text(artifact,
+        performance_chart_x_axis_id(spec.id), spec.x_axis_name, spec.x_axis_unit,
+        x_name_bounds) == 0) { return 0; }
+    performance_chart_add_text_slot(artifact,
+        performance_chart_x_axis_id(spec.id),
+        PerformanceChartTextSlotKind.x_axis_name, spec.x_axis_name,
+        x_name_bounds, SemanticTypeToken.label, SemanticColorToken.text_primary);
+    if (performance_chart_semantic_text(artifact,
+        performance_chart_x_axis_unit_id(spec.id), spec.x_axis_unit,
+        "Horizontal axis unit", x_unit_bounds) == 0) { return 0; }
+    performance_chart_add_text_slot(artifact,
+        performance_chart_x_axis_unit_id(spec.id),
+        PerformanceChartTextSlotKind.x_axis_unit, spec.x_axis_unit,
+        x_unit_bounds, SemanticTypeToken.caption, SemanticColorToken.text_secondary);
+    let y_label_top: i64 = artifact.*.metrics.y_axis_label_bounds.y +
+        artifact.*.metrics.y_axis_label_bounds.height / 2 - axis_half;
+    let y_name_bounds: Rect = rect(
+        artifact.*.metrics.y_axis_label_bounds.x, y_label_top,
+        artifact.*.metrics.y_axis_label_bounds.width, axis_half);
+    let y_unit_bounds: Rect = rect(y_name_bounds.x,
+        y_name_bounds.y + axis_half, y_name_bounds.width, axis_half);
+    if (performance_chart_semantic_text(artifact,
+        performance_chart_y_axis_id(spec.id), spec.y_axis_name, spec.y_axis_unit,
+        y_name_bounds) == 0) { return 0; }
+    performance_chart_add_text_slot(artifact,
+        performance_chart_y_axis_id(spec.id),
+        PerformanceChartTextSlotKind.y_axis_name, spec.y_axis_name,
+        y_name_bounds, SemanticTypeToken.label, SemanticColorToken.text_primary);
+    if (performance_chart_semantic_text(artifact,
+        performance_chart_y_axis_unit_id(spec.id), spec.y_axis_unit,
+        "Vertical axis unit", y_unit_bounds) == 0) { return 0; }
+    performance_chart_add_text_slot(artifact,
+        performance_chart_y_axis_unit_id(spec.id),
+        PerformanceChartTextSlotKind.y_axis_unit, spec.y_axis_unit,
+        y_unit_bounds, SemanticTypeToken.caption, SemanticColorToken.text_secondary);
+
+    let tick_index: i32 = 0;
+    while (tick_index < spec.x_tick_count) {
+        let x: i64 = artifact.*.metrics.plot_bounds.x +
+            (artifact.*.metrics.plot_bounds.width * (tick_index as i64)) /
+            ((spec.x_tick_count - 1) as i64);
+        let tick_width: i64 = 72 * scale;
+        let bounds: Rect = rect(x - tick_width / 2,
+            artifact.*.metrics.plot_bounds.y + artifact.*.metrics.plot_bounds.height +
+                flex_spacing(FlexSpacingToken.small, FlexDensity.standard),
+            tick_width, caption_height);
+        let id: NodeKey = performance_chart_x_tick_id(spec.id, tick_index);
+        if (performance_chart_semantic_text(artifact, id,
+            spec.x_tick_labels.data[tick_index], spec.x_axis_unit, bounds) == 0) {
+            return 0;
+        }
+        performance_chart_add_text_slot(artifact, id,
+            PerformanceChartTextSlotKind.x_tick,
+            spec.x_tick_labels.data[tick_index], bounds,
+            SemanticTypeToken.caption, SemanticColorToken.text_secondary);
+        tick_index = tick_index + 1;
+    }
+    tick_index = 0;
+    while (tick_index < spec.y_tick_count) {
+        let y: i64 = artifact.*.metrics.plot_bounds.y +
+            (artifact.*.metrics.plot_bounds.height * (tick_index as i64)) /
+            ((spec.y_tick_count - 1) as i64);
+        let bounds: Rect = rect(
+            artifact.*.metrics.y_axis_label_bounds.x,
+            y - caption_height / 2,
+            artifact.*.metrics.y_axis_label_bounds.width -
+                flex_spacing(FlexSpacingToken.small, FlexDensity.standard),
+            caption_height);
+        let id: NodeKey = performance_chart_y_tick_id(spec.id, tick_index);
+        if (performance_chart_semantic_text(artifact, id,
+            spec.y_tick_labels.data[tick_index], spec.y_axis_unit, bounds) == 0) {
+            return 0;
+        }
+        performance_chart_add_text_slot(artifact, id,
+            PerformanceChartTextSlotKind.y_tick,
+            spec.y_tick_labels.data[tick_index], bounds,
+            SemanticTypeToken.caption, SemanticColorToken.text_secondary);
+        tick_index = tick_index + 1;
+    }
+    let baseline_y: i64 = performance_chart_map_y(
+        spec, artifact.*.metrics, spec.baseline_value);
+    let reference_width: i64 = 220 * scale;
+    let baseline_label_y: i64 = baseline_y - caption_height;
+    if (baseline_label_y < artifact.*.metrics.plot_bounds.y) {
+        baseline_label_y = baseline_y + 2 * scale;
+    }
+    let baseline_bounds: Rect = rect(
+        artifact.*.metrics.plot_bounds.x +
+            flex_spacing(FlexSpacingToken.small, FlexDensity.standard),
+        baseline_label_y, reference_width, caption_height);
+    if (performance_chart_semantic_text(artifact,
+        performance_chart_baseline_id(spec.id), spec.baseline_name,
+        spec.y_axis_unit, baseline_bounds) == 0) { return 0; }
+    performance_chart_add_text_slot(artifact,
+        performance_chart_baseline_id(spec.id),
+        PerformanceChartTextSlotKind.baseline, spec.baseline_name,
+        baseline_bounds, SemanticTypeToken.caption, SemanticColorToken.text_secondary);
+    let deadline_y: i64 = performance_chart_map_y(
+        spec, artifact.*.metrics, spec.deadline_value);
+    let deadline_label_y: i64 = deadline_y - caption_height;
+    if (deadline_label_y < artifact.*.metrics.plot_bounds.y) {
+        deadline_label_y = deadline_y + 2 * scale;
+    }
+    let deadline_bounds: Rect = rect(
+        artifact.*.metrics.plot_bounds.x + artifact.*.metrics.plot_bounds.width -
+            reference_width - flex_spacing(FlexSpacingToken.small,
+                FlexDensity.standard),
+        deadline_label_y, reference_width, caption_height);
+    if (performance_chart_semantic_text(artifact,
+        performance_chart_deadline_id(spec.id), spec.deadline_name,
+        spec.y_axis_unit, deadline_bounds) == 0) { return 0; }
+    performance_chart_add_text_slot(artifact,
+        performance_chart_deadline_id(spec.id),
+        PerformanceChartTextSlotKind.deadline, spec.deadline_name,
+        deadline_bounds, SemanticTypeToken.caption, SemanticColorToken.status_error);
+    return 1;
+}
+
+fn performance_chart_legend(artifact: *PerformanceChartArtifact,
+    spec: PerformanceChartSpec, visual_phase: i32) i32 {
+    if (visual_phase == 0) {
+        let legend_group: SemanticsSpec = semantics_spec(
+            performance_chart_legend_id(spec.id), artifact.*.canvas.key,
+            SemanticRole.group, "Series legend");
+        legend_group.description = "Select the series emphasized in the chart";
+        legend_group.has_bounds = 1;
+        legend_group.bounds = artifact.*.metrics.legend_bounds;
+        let semantic_error: SemanticsError = semantics_add(
+            &artifact.*.semantics, legend_group);
+        if (semantic_error != SemanticsError.none) {
+            artifact.*.error = PerformanceChartError.semantics_error;
+            artifact.*.semantics_error = semantic_error; return 0;
+        }
+    }
+
+    let items: ArrayList[FlexItem] = make[FlexItem](spec.series.len);
+    let i: i32 = 0;
+    while (i < spec.series.len) {
+        let item: FlexItem = flex_item(100 + i as i64,
+            160 * unit_scale(), artifact.*.metrics.legend_height);
+        item.grow = 1; item.shrink = 1;
+        item.min_main = 96 * unit_scale(); item.max_main = 260 * unit_scale();
+        push[FlexItem](&items, item);
+        i = i + 1;
+    }
+    let style: FlexStyle = flex_style(FlexAxis.row,
+        flex_spacing(FlexSpacingToken.small, FlexDensity.standard), insets_all(0));
+    let constraints: Constraints = tight_constraints(
+        artifact.*.metrics.legend_bounds.width,
+        artifact.*.metrics.legend_bounds.height);
+    let layout: FlexResult = flex_layout(items, constraints, style);
+    free[FlexItem](&items);
+    if (layout.error != FlexError.none || layout.placements.len != spec.series.len) {
+        flex_free(&layout); artifact.*.error = PerformanceChartError.flex_error;
+        return 0;
+    }
+    i = 0;
+    while (i < spec.series.len) {
+        let series: PerformanceChartSeries = spec.series.data[i];
+        let local: Rect = layout.placements.data[i].frame;
+        let bounds: Rect = rect(
+            artifact.*.metrics.legend_bounds.x + local.x,
+            artifact.*.metrics.legend_bounds.y + local.y,
+            local.width, local.height);
+        let radius: i64 = semantic_radius(SemanticRadiusToken.control);
+        if (visual_phase != 0 && series.focused != 0 && series.disabled == 0) {
+            if (performance_chart_push_round(artifact,
+                rect(bounds.x - 2 * unit_scale(), bounds.y - 2 * unit_scale(),
+                    bounds.width + 4 * unit_scale(), bounds.height + 4 * unit_scale()),
+                radius + 2 * unit_scale(),
+                semantic_color_with_alpha(SemanticColorToken.focus, 42000)) == 0) {
+                flex_free(&layout); return 0;
+            }
+        }
+        let fill: SemanticColorToken = SemanticColorToken.surface_interactive;
+        if (series.selected != 0) { fill = SemanticColorToken.surface_selected; }
+        if (series.disabled != 0) { fill = SemanticColorToken.surface_base; }
+        if (visual_phase != 0 && performance_chart_push_round(artifact,
+            bounds, radius, semantic_color_paint(fill)) == 0) {
+            flex_free(&layout); return 0;
+        }
+        let swatch: i64 = flex_spacing(FlexSpacingToken.medium,
+            FlexDensity.standard);
+        let swatch_alpha: i64 = 65535;
+        if (series.disabled != 0) { swatch_alpha = 22000; }
+        if (visual_phase != 0 && performance_chart_push_round(artifact,
+            rect(bounds.x + flex_spacing(FlexSpacingToken.small,
+                    FlexDensity.standard),
+                bounds.y + (bounds.height - swatch) / 2, swatch, swatch),
+            swatch / 2, semantic_color_with_alpha(series.color_token,
+                swatch_alpha)) == 0) {
+            flex_free(&layout); return 0;
+        }
+
+        if (visual_phase == 0) {
+            let hit: HitNode = hit_node(series.id, artifact.*.canvas.key, bounds);
+            hit.has_clip = 1; hit.clip = bounds;
+            hit.z_order = 20 + i as i64;
+            hit.enabled = (series.disabled == 0) as i32;
+            hit.focusable = (series.disabled == 0) as i32;
+            let hit_error: HitTreeError = hit_tree_add(&artifact.*.hits, hit);
+            if (hit_error != HitTreeError.none) {
+                flex_free(&layout); artifact.*.error = PerformanceChartError.hit_error;
+                artifact.*.hit_error = hit_error; return 0;
+            }
+            let semantic: SemanticsSpec = semantics_spec(series.id,
+                performance_chart_legend_id(spec.id), SemanticRole.button, series.name);
+            semantic.description = series.description;
+            semantic.value = "Available";
+            if (series.disabled != 0) { semantic.value = "Unavailable"; }
+            else if (series.selected != 0) { semantic.value = "Selected"; }
+            semantic.disabled = series.disabled;
+            semantic.selected = series.selected;
+            semantic.has_bounds = 1; semantic.bounds = bounds;
+            if (series.disabled == 0) {
+                semantic.focus_order = 1 + i as i64;
+                semantic.action_mask = semantic_actions_add(
+                    semantic_actions(SemanticAction.activate), SemanticAction.focus);
+            }
+            let series_semantic_error: SemanticsError = semantics_add(
+                &artifact.*.semantics, semantic);
+            if (series_semantic_error != SemanticsError.none) {
+                flex_free(&layout); artifact.*.error = PerformanceChartError.semantics_error;
+                artifact.*.semantics_error = series_semantic_error; return 0;
+            }
+            let text_left: i64 = bounds.x +
+                flex_spacing(FlexSpacingToken.small, FlexDensity.standard) +
+                swatch + flex_spacing(FlexSpacingToken.small,
+                    FlexDensity.standard);
+            let text_bounds: Rect = rect(text_left, bounds.y,
+                bounds.x + bounds.width - text_left, bounds.height);
+            let text_color: SemanticColorToken = SemanticColorToken.text_primary;
+            if (series.disabled != 0) {
+                text_color = SemanticColorToken.text_disabled;
+            }
+            performance_chart_add_text_slot(artifact, series.id,
+                PerformanceChartTextSlotKind.legend_name, series.name,
+                text_bounds, SemanticTypeToken.label, text_color);
+            push[PerformanceChartLegendArtifact](&artifact.*.legend,
+                PerformanceChartLegendArtifact{
+                    .id = series.id, .bounds = bounds,
+                    .selected = series.selected, .focused = series.focused,
+                    .disabled = series.disabled, .color_token = series.color_token,
+                });
+        }
+        i = i + 1;
+    }
+    flex_free(&layout);
+    return 1;
+}
+
+fn performance_chart_table_cell(artifact: *PerformanceChartArtifact,
+    spec: PerformanceChartSpec, row_id: NodeKey, row: i64, column: i64,
+    name: []u8, value: []u8) i32 {
+    let cell: SemanticsSpec = semantics_spec(
+        performance_chart_table_cell_id(spec.id, row, column),
+        row_id, SemanticRole.cell, name);
+    cell.value = value; cell.row_index = row; cell.row_span = 1;
+    cell.column_index = column; cell.column_span = 1;
+    let error: SemanticsError = semantics_add(&artifact.*.semantics, cell);
+    if (error != SemanticsError.none) {
+        artifact.*.error = PerformanceChartError.semantics_error;
+        artifact.*.semantics_error = error; return 0;
+    }
+    return 1;
+}
+
+fn performance_chart_table(artifact: *PerformanceChartArtifact,
+    spec: PerformanceChartSpec) i32 {
+    let rows: i64 = spec.series.data[0].points.len as i64 + 1;
+    let columns: i64 = spec.series.len as i64 + 1;
+    let table: SemanticsSpec = semantics_spec(performance_chart_table_id(spec.id),
+        artifact.*.canvas.key, SemanticRole.table, "Frame pacing data");
+    table.description = "Data equivalent of the plotted series";
+    table.row_count = rows; table.column_count = columns;
+    let table_error: SemanticsError = semantics_add(&artifact.*.semantics, table);
+    if (table_error != SemanticsError.none) {
+        artifact.*.error = PerformanceChartError.semantics_error;
+        artifact.*.semantics_error = table_error; return 0;
+    }
+    let row: i64 = 0;
+    while (row < rows) {
+        let row_id: NodeKey = performance_chart_table_row_id(spec.id, row);
+        let row_name: []u8 = "Performance sample";
+        if (row == 0) { row_name = "Column headers"; }
+        let row_spec: SemanticsSpec = semantics_spec(row_id,
+            performance_chart_table_id(spec.id), SemanticRole.row, row_name);
+        row_spec.row_index = row; row_spec.row_span = 1;
+        let row_error: SemanticsError = semantics_add(&artifact.*.semantics, row_spec);
+        if (row_error != SemanticsError.none) {
+            artifact.*.error = PerformanceChartError.semantics_error;
+            artifact.*.semantics_error = row_error; return 0;
+        }
+        if (row == 0) {
+            if (performance_chart_table_cell(artifact, spec, row_id, row, 0,
+                spec.x_axis_name, spec.x_axis_unit) == 0) { return 0; }
+            let column: i32 = 0;
+            while (column < spec.series.len) {
+                if (performance_chart_table_cell(artifact, spec, row_id, row,
+                    1 + column as i64, spec.series.data[column].name,
+                    spec.y_axis_unit) == 0) { return 0; }
+                column = column + 1;
+            }
+        } else {
+            let point_index: i32 = (row - 1) as i32;
+            let first: PerformanceChartPoint =
+                spec.series.data[0].points.data[point_index];
+            if (performance_chart_table_cell(artifact, spec, row_id, row, 0,
+                spec.x_axis_name, first.x_value) == 0) { return 0; }
+            let column: i32 = 0;
+            while (column < spec.series.len) {
+                let point: PerformanceChartPoint =
+                    spec.series.data[column].points.data[point_index];
+                if (performance_chart_table_cell(artifact, spec, row_id, row,
+                    1 + column as i64, spec.series.data[column].name,
+                    point.y_value) == 0) { return 0; }
+                column = column + 1;
+            }
+        }
+        row = row + 1;
+    }
+    artifact.*.table_rows = rows; artifact.*.table_columns = columns;
+    return 1;
+}
+
+fn performance_chart_hash(artifact: PerformanceChartArtifact) i64 {
+    let hash: i64 = canvas_mix(17, artifact.canvas.content_hash);
+    hash = canvas_mix(hash, artifact.canvas.display.content_hash);
+    hash = canvas_mix(hash, artifact.hits.revision);
+    hash = canvas_mix(hash, artifact.semantics.revision);
+    hash = canvas_mix(hash, artifact.table_rows);
+    hash = canvas_mix(hash, artifact.table_columns);
+    let i: i32 = 0;
+    while (i < artifact.semantics.nodes.len) {
+        hash = canvas_mix(hash,
+            semantic_node_evidence_hash(artifact.semantics.nodes.data[i]));
+        i = i + 1;
+    }
+    i = 0;
+    while (i < artifact.text_slots.len) {
+        let slot: PerformanceChartTextSlot = artifact.text_slots.data[i];
+        hash = canvas_mix(hash, slot.id.value);
+        hash = canvas_mix(hash, slot.id.generation);
+        hash = canvas_mix(hash, slot.kind as i64);
+        hash = canvas_text_hash(hash, slot.text);
+        hash = canvas_mix(hash, slot.bounds.x);
+        hash = canvas_mix(hash, slot.bounds.y);
+        hash = canvas_mix(hash, slot.bounds.width);
+        hash = canvas_mix(hash, slot.bounds.height);
+        hash = canvas_mix(hash, slot.type_token as i64);
+        hash = canvas_mix(hash, slot.color_token as i64);
+        i = i + 1;
+    }
+    return hash;
+}
+
+fn performance_chart_build(spec: PerformanceChartSpec) PerformanceChartArtifact {
+    let artifact: PerformanceChartArtifact = performance_chart_empty(spec);
+    let validation: PerformanceChartError = performance_chart_spec_valid(spec);
+    if (validation != PerformanceChartError.none) {
+        artifact.error = validation; return artifact;
+    }
+    if (artifact.canvas.last_error != CanvasError.none) {
+        artifact.error = PerformanceChartError.canvas_error;
+        artifact.canvas_error = artifact.canvas.last_error; return artifact;
+    }
+    if (performance_chart_background(&artifact, spec) == 0 ||
+        performance_chart_grid(&artifact, spec) == 0) { return artifact; }
+    let i: i32 = 0;
+    while (i < spec.series.len) {
+        if (performance_chart_series_marks(&artifact,
+            spec, spec.series.data[i], i) == 0) { return artifact; }
+        i = i + 1;
+    }
+    if (performance_chart_legend(&artifact, spec, 1) == 0) { return artifact; }
+    let sealed: CanvasError = canvas_seal(&artifact.canvas);
+    if (sealed != CanvasError.none) {
+        artifact.error = PerformanceChartError.canvas_error;
+        artifact.canvas_error = sealed; return artifact;
+    }
+    let canvas_semantics: CanvasError = canvas_contribute_semantics(
+        &artifact.canvas, &artifact.semantics);
+    if (canvas_semantics != CanvasError.none) {
+        artifact.error = PerformanceChartError.canvas_error;
+        artifact.canvas_error = canvas_semantics; return artifact;
+    }
+    let canvas_hit: CanvasError = canvas_contribute_hit(
+        &artifact.canvas, &artifact.hits);
+    if (canvas_hit != CanvasError.none) {
+        artifact.error = PerformanceChartError.canvas_error;
+        artifact.canvas_error = canvas_hit; return artifact;
+    }
+    if (performance_chart_add_static_semantics(&artifact, spec) == 0 ||
+        performance_chart_legend(&artifact, spec, 0) == 0 ||
+        performance_chart_table(&artifact, spec) == 0) { return artifact; }
+    artifact.evidence_hash = performance_chart_hash(artifact);
+    return artifact;
+}

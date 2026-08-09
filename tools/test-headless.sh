@@ -51,6 +51,8 @@ fi
 "$tmp/button-gallery-contract" "$gallery_font"
 "$znc" tests/canvas_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/canvas-contract"
 "$tmp/canvas-contract"
+"$znc" tests/performance_chart_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/performance-chart-contract"
+"$tmp/performance-chart-contract"
 "$znc" tests/measure_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/measure-contract"
 "$tmp/measure-contract"
 "$znc" tests/overlay_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/overlay-contract"
@@ -109,4 +111,4 @@ printf 'Linux preview CPU snapshot contract: pass=2 fail=0\n'
 "$znc" tests/motion_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/motion-contract"
 "$tmp/motion-contract"
 
-printf 'headless test: PASS (backend truth, state, reconciliation, intrinsic measurement, constraints, Flex, shared Button state/render/hit/semantics/Talkback plus its executable conformance gallery, retained Canvas immediate drawing, Grid, Overlay, scroll, virtual list, Table, Tree, recycling, Unicode grapheme segmentation, positioned glyph-run transport, collection semantics, Talkback, native-preview semantics, owned render resources, canonical paths and images, bounded PNG decode, display lists, analytic rounded geometry, CPU shape and image raster, deterministic PNG snapshots, input, replay, and motion)\n'
+printf 'headless test: PASS (backend truth, state, reconciliation, intrinsic measurement, constraints, Flex, shared Button state/render/hit/semantics/Talkback plus its executable conformance gallery, retained Canvas immediate drawing, bounded accessible performance-chart anatomy, Grid, Overlay, scroll, virtual list, Table, Tree, recycling, Unicode grapheme segmentation, positioned glyph-run transport, collection semantics, Talkback, native-preview semantics, owned render resources, canonical paths and images, bounded PNG decode, display lists, analytic rounded geometry, CPU shape and image raster, deterministic PNG snapshots, input, replay, and motion)\n'
