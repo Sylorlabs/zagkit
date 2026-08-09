@@ -16,11 +16,15 @@ native widget text engines are not runtime dependencies.
 - `src/text/opentype.zag` copies and owns bounded SFNT/OpenType bytes, validates
   the table directory and required `cmap`, `head`, `maxp`, `hhea`, and `hmtx`
   tables, and exposes `unitsPerEm`, glyph-count, and horizontal-advance truth.
-- TrueType `loca` and simple `glyf` contours decode into bounded, exact
+- TrueType `loca`, simple `glyf` contours, and recursively bounded composite
+  components decode into exact
   font-unit points with explicit on-curve flags and contour ends. Empty glyphs
   are valid; malformed locations, flags, coordinates, and bounds fail closed.
-- Composite TrueType glyphs and CFF/CFF2 outlines remain explicitly
-  unsupported rather than being flattened incorrectly.
+- Composite translation, point attachment, uniform/axis/two-by-two F2Dot14
+  transforms, and optional instruction bounds are interpreted without executing
+  font bytecode. Cycles, excessive depth, and excessive component work fail.
+- CFF/CFF2 outlines remain explicitly unsupported rather than being flattened
+  incorrectly.
 - `src/text/glyph_path.zag` converts simple TrueType contours into immutable
   quadratic Zagkit paths at an exact fixed-point font size and baseline,
   including implied midpoints between consecutive off-curve points.
@@ -34,8 +38,8 @@ native widget text engines are not runtime dependencies.
 
 ## Required before text is visible
 
-1. Parse vertical metrics, composite TrueType outlines, CFF/CFF2, variation
-   axes, color-glyph tables, and font metadata.
+1. Parse vertical metrics, CFF/CFF2 outlines, variation axes, color-glyph
+   tables, and font metadata.
 2. Implement normalization, grapheme/word/sentence segmentation, script runs,
    bidi resolution, line breaking, fallback, and locale-aware shaping.
 3. Implement OpenType GSUB/GPOS and variation application with deterministic

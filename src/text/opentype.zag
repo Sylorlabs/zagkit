@@ -464,16 +464,31 @@ fn opentype_glyph_data_offset(face: OpenTypeFace, glyph_id: i32) i64 {
     return opentype_u32(bytes, face.loca_offset + glyph_id * 4);
 }
 
+fn opentype_i8(value: u8) i32 {
+    let result: i32 = value as i32;
+    if (result >= 128) { return result - 256; }
+    return result;
+}
+
+fn opentype_f2dot14_round(value: i64) i32 {
+    if (value >= 0) { return ((value + 8192) / 16384) as i32; }
+    return ((value - 8192) / 16384) as i32;
+}
+
 // Decode one TrueType simple glyph into exact font-unit contour points. Curves
 // remain quadratic at this layer: consecutive off-curve points imply the
 // standard midpoint when the renderer converts the contour into a Path.
-fn opentype_glyph_outline(face: OpenTypeFace, glyph_id: i32) GlyphOutline {
+fn opentype_glyph_outline_depth(face: OpenTypeFace, glyph_id: i32,
+    depth: i32) GlyphOutline {
     let outline: GlyphOutline = opentype_outline_empty();
     if (face.error != OpenTypeError.none) {
         opentype_outline_fail(&outline, face.error); return outline;
     }
     if (glyph_id < 0 || glyph_id >= face.glyph_count) {
         opentype_outline_fail(&outline, OpenTypeError.invalid_glyph); return outline;
+    }
+    if (depth > 16) {
+        opentype_outline_fail(&outline, OpenTypeError.invalid_outline); return outline;
     }
     if (face.loca_length == 0 || face.glyf_length == 0) {
         opentype_outline_fail(&outline, OpenTypeError.unsupported_outline); return outline;
@@ -491,17 +506,162 @@ fn opentype_glyph_outline(face: OpenTypeFace, glyph_id: i32) GlyphOutline {
     let glyph_start: i32 = face.glyf_offset + start64 as i32;
     let glyph_end: i32 = face.glyf_offset + end64 as i32;
     let contour_count: i32 = opentype_i16(bytes, glyph_start);
-    if (contour_count < 0) {
-        opentype_outline_fail(&outline, OpenTypeError.unsupported_outline); return outline;
-    }
-    if (contour_count > 4096 || glyph_start + 10 + contour_count * 2 + 2 > glyph_end) {
-        opentype_outline_fail(&outline, OpenTypeError.invalid_outline); return outline;
-    }
     outline.x_min = opentype_i16(bytes, glyph_start + 2);
     outline.y_min = opentype_i16(bytes, glyph_start + 4);
     outline.x_max = opentype_i16(bytes, glyph_start + 6);
     outline.y_max = opentype_i16(bytes, glyph_start + 8);
     if (outline.x_min > outline.x_max || outline.y_min > outline.y_max) {
+        opentype_outline_fail(&outline, OpenTypeError.invalid_outline); return outline;
+    }
+    if (contour_count < 0) {
+        let cursor: i32 = glyph_start + 10;
+        let component_count: i32 = 0;
+        let more_components: i32 = 1;
+        let final_flags: i32 = 0;
+        while (more_components != 0) {
+            if (component_count >= 256 || cursor + 4 > glyph_end) {
+                opentype_outline_fail(&outline, OpenTypeError.invalid_outline); return outline;
+            }
+            let flags: i32 = opentype_u16(bytes, cursor);
+            let component_glyph: i32 = opentype_u16(bytes, cursor + 2);
+            cursor = cursor + 4; component_count = component_count + 1;
+            final_flags = flags;
+            if ((flags & 6144) == 6144 || (flags & (0 - 8192)) != 0) {
+                opentype_outline_fail(&outline, OpenTypeError.invalid_outline); return outline;
+            }
+            let arg_1: i32 = 0;
+            let arg_2: i32 = 0;
+            if ((flags & 1) != 0) {
+                if (cursor + 4 > glyph_end) {
+                    opentype_outline_fail(&outline, OpenTypeError.invalid_outline); return outline;
+                }
+                if ((flags & 2) != 0) {
+                    arg_1 = opentype_i16(bytes, cursor);
+                    arg_2 = opentype_i16(bytes, cursor + 2);
+                } else {
+                    arg_1 = opentype_u16(bytes, cursor);
+                    arg_2 = opentype_u16(bytes, cursor + 2);
+                }
+                cursor = cursor + 4;
+            } else {
+                if (cursor + 2 > glyph_end) {
+                    opentype_outline_fail(&outline, OpenTypeError.invalid_outline); return outline;
+                }
+                if ((flags & 2) != 0) {
+                    arg_1 = opentype_i8(bytes[cursor]); arg_2 = opentype_i8(bytes[cursor + 1]);
+                } else {
+                    arg_1 = bytes[cursor] as i32; arg_2 = bytes[cursor + 1] as i32;
+                }
+                cursor = cursor + 2;
+            }
+            let a: i32 = 16384; let b: i32 = 0;
+            let c: i32 = 0; let d: i32 = 16384;
+            let transform_kinds: i32 = (((flags & 8) != 0) as i32) +
+                (((flags & 64) != 0) as i32) + (((flags & 128) != 0) as i32);
+            if (transform_kinds > 1) {
+                opentype_outline_fail(&outline, OpenTypeError.invalid_outline); return outline;
+            }
+            if ((flags & 8) != 0) {
+                if (cursor + 2 > glyph_end) {
+                    opentype_outline_fail(&outline, OpenTypeError.invalid_outline); return outline;
+                }
+                a = opentype_i16(bytes, cursor); d = a; cursor = cursor + 2;
+            } else if ((flags & 64) != 0) {
+                if (cursor + 4 > glyph_end) {
+                    opentype_outline_fail(&outline, OpenTypeError.invalid_outline); return outline;
+                }
+                a = opentype_i16(bytes, cursor); d = opentype_i16(bytes, cursor + 2);
+                cursor = cursor + 4;
+            } else if ((flags & 128) != 0) {
+                if (cursor + 8 > glyph_end) {
+                    opentype_outline_fail(&outline, OpenTypeError.invalid_outline); return outline;
+                }
+                a = opentype_i16(bytes, cursor); b = opentype_i16(bytes, cursor + 2);
+                c = opentype_i16(bytes, cursor + 4); d = opentype_i16(bytes, cursor + 6);
+                cursor = cursor + 8;
+            }
+            let component: GlyphOutline = opentype_glyph_outline_depth(
+                face, component_glyph, depth + 1);
+            if (component.error != OpenTypeError.none) {
+                opentype_glyph_outline_free(&component);
+                opentype_outline_fail(&outline, OpenTypeError.invalid_outline); return outline;
+            }
+            if (outline.points.len + component.points.len > 65535 ||
+                outline.contour_ends.len + component.contour_ends.len > 4096) {
+                opentype_glyph_outline_free(&component);
+                opentype_outline_fail(&outline, OpenTypeError.invalid_outline); return outline;
+            }
+            let translate_x: i32 = arg_1;
+            let translate_y: i32 = arg_2;
+            if ((flags & 2) == 0) {
+                if (arg_1 < 0 || arg_1 >= outline.points.len ||
+                    arg_2 < 0 || arg_2 >= component.points.len) {
+                    opentype_glyph_outline_free(&component);
+                    opentype_outline_fail(&outline, OpenTypeError.invalid_outline); return outline;
+                }
+                let child_anchor: GlyphOutlinePoint = component.points.data[arg_2];
+                let anchor_x: i32 = opentype_f2dot14_round(
+                    (a as i64) * child_anchor.x + (c as i64) * child_anchor.y);
+                let anchor_y: i32 = opentype_f2dot14_round(
+                    (b as i64) * child_anchor.x + (d as i64) * child_anchor.y);
+                translate_x = outline.points.data[arg_1].x - anchor_x;
+                translate_y = outline.points.data[arg_1].y - anchor_y;
+            } else if ((flags & 2048) != 0) {
+                let raw_x: i32 = translate_x; let raw_y: i32 = translate_y;
+                translate_x = opentype_f2dot14_round(
+                    (a as i64) * raw_x + (c as i64) * raw_y);
+                translate_y = opentype_f2dot14_round(
+                    (b as i64) * raw_x + (d as i64) * raw_y);
+            }
+            let point_base: i32 = outline.points.len;
+            let component_point: i32 = 0;
+            while (component_point < component.points.len) {
+                let source: GlyphOutlinePoint = component.points.data[component_point];
+                let transformed_x: i64 = opentype_f2dot14_round(
+                    (a as i64) * source.x + (c as i64) * source.y) as i64 + translate_x;
+                let transformed_y: i64 = opentype_f2dot14_round(
+                    (b as i64) * source.x + (d as i64) * source.y) as i64 + translate_y;
+                if (transformed_x < (0 - 2147483647) || transformed_x > 2147483647 ||
+                    transformed_y < (0 - 2147483647) || transformed_y > 2147483647) {
+                    opentype_glyph_outline_free(&component);
+                    opentype_outline_fail(&outline, OpenTypeError.invalid_outline); return outline;
+                }
+                push[GlyphOutlinePoint](&outline.points, GlyphOutlinePoint{
+                    .x = transformed_x as i32, .y = transformed_y as i32,
+                    .on_curve = source.on_curve });
+                component_point = component_point + 1;
+            }
+            let component_contour: i32 = 0;
+            while (component_contour < component.contour_ends.len) {
+                push[i32](&outline.contour_ends,
+                    point_base + component.contour_ends.data[component_contour]);
+                component_contour = component_contour + 1;
+            }
+            opentype_glyph_outline_free(&component);
+            more_components = ((flags & 32) != 0) as i32;
+        }
+        if ((final_flags & 256) != 0) {
+            if (cursor + 2 > glyph_end) {
+                opentype_outline_fail(&outline, OpenTypeError.invalid_outline); return outline;
+            }
+            let instruction_length: i32 = opentype_u16(bytes, cursor);
+            cursor = cursor + 2;
+            if (cursor + instruction_length > glyph_end) {
+                opentype_outline_fail(&outline, OpenTypeError.invalid_outline); return outline;
+            }
+        }
+        let composed_point: i32 = 0;
+        while (composed_point < outline.points.len) {
+            let point: GlyphOutlinePoint = outline.points.data[composed_point];
+            if (point.x < outline.x_min || point.x > outline.x_max ||
+                point.y < outline.y_min || point.y > outline.y_max) {
+                opentype_outline_fail(&outline, OpenTypeError.invalid_outline); return outline;
+            }
+            composed_point = composed_point + 1;
+        }
+        return outline;
+    }
+    if (contour_count > 4096 || glyph_start + 10 + contour_count * 2 + 2 > glyph_end) {
         opentype_outline_fail(&outline, OpenTypeError.invalid_outline); return outline;
     }
     let cursor: i32 = glyph_start + 10;
@@ -601,6 +761,10 @@ fn opentype_glyph_outline(face: OpenTypeFace, glyph_id: i32) GlyphOutline {
     }
     free[u8](&flags);
     return outline;
+}
+
+fn opentype_glyph_outline(face: OpenTypeFace, glyph_id: i32) GlyphOutline {
+    return opentype_glyph_outline_depth(face, glyph_id, 0);
 }
 
 fn opentype_glyph_outline_free(outline: *GlyphOutline) void {
