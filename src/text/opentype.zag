@@ -16,6 +16,8 @@ enum OpenTypeError {
     missing_cmap,
     missing_head,
     missing_maxp,
+    missing_hhea,
+    missing_hmtx,
     invalid_metrics,
     unsupported_cmap,
     invalid_cmap,
@@ -30,12 +32,20 @@ struct OpenTypeFace {
     cmap_offset: i32,
     cmap_length: i32,
     cmap_format: i32,
+    hmtx_offset: i32,
+    hmtx_length: i32,
+    horizontal_metric_count: i32,
     error: OpenTypeError,
     error_offset: i64,
 }
 
 struct GlyphLookup {
     glyph_id: i32,
+    error: OpenTypeError,
+}
+
+struct GlyphHorizontalMetric {
+    advance_width: i32,
     error: OpenTypeError,
 }
 
@@ -58,6 +68,9 @@ fn opentype_face_empty() OpenTypeFace {
         .cmap_offset = 0,
         .cmap_length = 0,
         .cmap_format = 0,
+        .hmtx_offset = 0,
+        .hmtx_length = 0,
+        .horizontal_metric_count = 0,
         .error = OpenTypeError.none,
         .error_offset = 0,
     };
@@ -117,6 +130,10 @@ fn opentype_parse(data: []u8) OpenTypeFace {
     let head_length: i32 = 0;
     let maxp_offset: i32 = 0;
     let maxp_length: i32 = 0;
+    let hhea_offset: i32 = 0;
+    let hhea_length: i32 = 0;
+    let hmtx_offset: i32 = 0;
+    let hmtx_length: i32 = 0;
     let table_index: i32 = 0;
     while (table_index < table_count) {
         let record: i32 = 12 + table_index * 16;
@@ -144,13 +161,27 @@ fn opentype_parse(data: []u8) OpenTypeFace {
                 return face;
             }
             maxp_offset = offset64 as i32; maxp_length = length64 as i32;
+        } else if (opentype_tag(bytes, record, 104, 104, 101, 97) != 0) {
+            if (hhea_length != 0) {
+                opentype_fail(&face, OpenTypeError.duplicate_required_table, record);
+                return face;
+            }
+            hhea_offset = offset64 as i32; hhea_length = length64 as i32;
+        } else if (opentype_tag(bytes, record, 104, 109, 116, 120) != 0) {
+            if (hmtx_length != 0) {
+                opentype_fail(&face, OpenTypeError.duplicate_required_table, record);
+                return face;
+            }
+            hmtx_offset = offset64 as i32; hmtx_length = length64 as i32;
         }
         table_index = table_index + 1;
     }
     if (cmap_table_length == 0) { opentype_fail(&face, OpenTypeError.missing_cmap, 12); return face; }
     if (head_length == 0) { opentype_fail(&face, OpenTypeError.missing_head, 12); return face; }
     if (maxp_length == 0) { opentype_fail(&face, OpenTypeError.missing_maxp, 12); return face; }
-    if (head_length < 20 || maxp_length < 6 || cmap_table_length < 4) {
+    if (hhea_length == 0) { opentype_fail(&face, OpenTypeError.missing_hhea, 12); return face; }
+    if (hmtx_length == 0) { opentype_fail(&face, OpenTypeError.missing_hmtx, 12); return face; }
+    if (head_length < 20 || maxp_length < 6 || cmap_table_length < 4 || hhea_length < 36) {
         opentype_fail(&face, OpenTypeError.invalid_metrics, 12); return face;
     }
     face.units_per_em = opentype_u16(bytes, head_offset + 18);
@@ -159,6 +190,20 @@ fn opentype_parse(data: []u8) OpenTypeFace {
         opentype_fail(&face, OpenTypeError.invalid_metrics, head_offset + 18);
         return face;
     }
+    face.horizontal_metric_count = opentype_u16(bytes, hhea_offset + 34);
+    if (face.horizontal_metric_count <= 0 ||
+        face.horizontal_metric_count > face.glyph_count) {
+        opentype_fail(&face, OpenTypeError.invalid_metrics, hhea_offset + 34);
+        return face;
+    }
+    let required_hmtx: i64 = (face.horizontal_metric_count as i64) * 4 +
+        ((face.glyph_count - face.horizontal_metric_count) as i64) * 2;
+    if (required_hmtx > hmtx_length as i64) {
+        opentype_fail(&face, OpenTypeError.invalid_metrics, hmtx_offset);
+        return face;
+    }
+    face.hmtx_offset = hmtx_offset;
+    face.hmtx_length = hmtx_length;
     let cmap_count: i32 = opentype_u16(bytes, cmap_table_offset + 2);
     if (cmap_count <= 0 || cmap_count > 4096 ||
         4 + (cmap_count as i64) * 8 > cmap_table_length as i64) {
@@ -302,6 +347,31 @@ fn opentype_glyph_for_scalar(face: OpenTypeFace, codepoint: i64) GlyphLookup {
     if (face.cmap_format == 12) { return opentype_lookup_format12(face, codepoint); }
     if (face.cmap_format == 4) { return opentype_lookup_format4(face, codepoint); }
     return opentype_lookup_fail(OpenTypeError.unsupported_cmap);
+}
+
+fn opentype_horizontal_metric(face: OpenTypeFace,
+    glyph_id: i32) GlyphHorizontalMetric {
+    if (face.error != OpenTypeError.none) {
+        return GlyphHorizontalMetric{ .advance_width = 0, .error = face.error };
+    }
+    if (glyph_id < 0 || glyph_id >= face.glyph_count ||
+        face.horizontal_metric_count <= 0) {
+        return GlyphHorizontalMetric{
+            .advance_width = 0, .error = OpenTypeError.invalid_glyph };
+    }
+    let metric_index: i32 = glyph_id;
+    if (metric_index >= face.horizontal_metric_count) {
+        metric_index = face.horizontal_metric_count - 1;
+    }
+    let offset: i32 = face.hmtx_offset + metric_index * 4;
+    if (offset < face.hmtx_offset || offset + 2 > face.hmtx_offset + face.hmtx_length) {
+        return GlyphHorizontalMetric{
+            .advance_width = 0, .error = OpenTypeError.invalid_metrics };
+    }
+    return GlyphHorizontalMetric{
+        .advance_width = opentype_u16(face.bytes.data[0..face.bytes.len], offset),
+        .error = OpenTypeError.none,
+    };
 }
 
 fn opentype_face_free(face: *OpenTypeFace) void {

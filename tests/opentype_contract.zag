@@ -30,35 +30,44 @@ fn fixture_tag(bytes: *ArrayList[u8], offset: i32, tag: []u8) void {
 }
 
 fn fixture_font() ArrayList[u8] {
-    let bytes: ArrayList[u8] = make[u8](136);
+    let bytes: ArrayList[u8] = make[u8](248);
     let i: i32 = 0;
-    while (i < 136) { push[u8](&bytes, 0); i = i + 1; }
-    fixture_u32(&bytes, 0, 65536); fixture_u16(&bytes, 4, 3);
-    fixture_tag(&bytes, 12, "cmap"); fixture_u32(&bytes, 20, 60); fixture_u32(&bytes, 24, 44);
-    fixture_tag(&bytes, 28, "head"); fixture_u32(&bytes, 36, 104); fixture_u32(&bytes, 40, 20);
-    fixture_tag(&bytes, 44, "maxp"); fixture_u32(&bytes, 52, 124); fixture_u32(&bytes, 56, 6);
-    fixture_u16(&bytes, 60, 0); fixture_u16(&bytes, 62, 1);
-    fixture_u16(&bytes, 64, 3); fixture_u16(&bytes, 66, 1); fixture_u32(&bytes, 68, 12);
-    fixture_u16(&bytes, 72, 4); fixture_u16(&bytes, 74, 32);
-    fixture_u16(&bytes, 76, 0); fixture_u16(&bytes, 78, 4);
-    fixture_u16(&bytes, 80, 4); fixture_u16(&bytes, 82, 1); fixture_u16(&bytes, 84, 0);
-    fixture_u16(&bytes, 86, 65); fixture_u16(&bytes, 88, 65535); fixture_u16(&bytes, 90, 0);
-    fixture_u16(&bytes, 92, 65); fixture_u16(&bytes, 94, 65535);
-    fixture_u16(&bytes, 96, 65474); fixture_u16(&bytes, 98, 1);
-    fixture_u16(&bytes, 100, 0); fixture_u16(&bytes, 102, 0);
-    fixture_u16(&bytes, 122, 1000);
-    fixture_u32(&bytes, 124, 65536); fixture_u16(&bytes, 128, 10);
+    while (i < 248) { push[u8](&bytes, 0); i = i + 1; }
+    fixture_u32(&bytes, 0, 65536); fixture_u16(&bytes, 4, 5);
+    fixture_tag(&bytes, 12, "cmap"); fixture_u32(&bytes, 20, 96); fixture_u32(&bytes, 24, 44);
+    fixture_tag(&bytes, 28, "head"); fixture_u32(&bytes, 36, 144); fixture_u32(&bytes, 40, 20);
+    fixture_tag(&bytes, 44, "maxp"); fixture_u32(&bytes, 52, 164); fixture_u32(&bytes, 56, 6);
+    fixture_tag(&bytes, 60, "hhea"); fixture_u32(&bytes, 68, 172); fixture_u32(&bytes, 72, 36);
+    fixture_tag(&bytes, 76, "hmtx"); fixture_u32(&bytes, 84, 208); fixture_u32(&bytes, 88, 40);
+    fixture_u16(&bytes, 96, 0); fixture_u16(&bytes, 98, 1);
+    fixture_u16(&bytes, 100, 3); fixture_u16(&bytes, 102, 1); fixture_u32(&bytes, 104, 12);
+    fixture_u16(&bytes, 108, 4); fixture_u16(&bytes, 110, 32);
+    fixture_u16(&bytes, 112, 0); fixture_u16(&bytes, 114, 4);
+    fixture_u16(&bytes, 116, 4); fixture_u16(&bytes, 118, 1); fixture_u16(&bytes, 120, 0);
+    fixture_u16(&bytes, 122, 65); fixture_u16(&bytes, 124, 65535); fixture_u16(&bytes, 126, 0);
+    fixture_u16(&bytes, 128, 65); fixture_u16(&bytes, 130, 65535);
+    fixture_u16(&bytes, 132, 65474); fixture_u16(&bytes, 134, 1);
+    fixture_u16(&bytes, 136, 0); fixture_u16(&bytes, 138, 0);
+    fixture_u16(&bytes, 162, 1000);
+    fixture_u32(&bytes, 164, 65536); fixture_u16(&bytes, 168, 10);
+    fixture_u16(&bytes, 206, 10);
+    let metric: i32 = 0;
+    while (metric < 10) {
+        fixture_u16(&bytes, 208 + metric * 4, 500 + metric * 10);
+        fixture_u16(&bytes, 210 + metric * 4, 0);
+        metric = metric + 1;
+    }
     return bytes;
 }
 
 fn fixture_font_format12() ArrayList[u8] {
     let bytes: ArrayList[u8] = fixture_font();
-    fixture_u16(&bytes, 66, 10);
-    fixture_u16(&bytes, 72, 12); fixture_u16(&bytes, 74, 0);
-    fixture_u32(&bytes, 76, 28); fixture_u32(&bytes, 80, 0);
-    fixture_u32(&bytes, 84, 1);
-    fixture_u32(&bytes, 88, 128512); fixture_u32(&bytes, 92, 128512);
-    fixture_u32(&bytes, 96, 4);
+    fixture_u16(&bytes, 102, 10);
+    fixture_u16(&bytes, 108, 12); fixture_u16(&bytes, 110, 0);
+    fixture_u32(&bytes, 112, 28); fixture_u32(&bytes, 116, 0);
+    fixture_u32(&bytes, 120, 1);
+    fixture_u32(&bytes, 124, 128512); fixture_u32(&bytes, 128, 128512);
+    fixture_u32(&bytes, 132, 4);
     return bytes;
 }
 
@@ -68,7 +77,7 @@ fn parse_contract(state: *TestState) void {
     expect(state, face.error == OpenTypeError.none,
         "bounded SFNT directory and required tables parse");
     expect(state, face.units_per_em == 1000 && face.glyph_count == 10 &&
-        face.cmap_format == 4,
+        face.cmap_format == 4 && face.horizontal_metric_count == 10,
         "font metrics and selected cmap format remain explicit");
     let mapped: GlyphLookup = opentype_glyph_for_scalar(face, 65);
     let missing: GlyphLookup = opentype_glyph_for_scalar(face, 66);
@@ -79,6 +88,10 @@ fn parse_contract(state: *TestState) void {
     let invalid: GlyphLookup = opentype_glyph_for_scalar(face, 55296);
     expect(state, invalid.error == OpenTypeError.invalid_codepoint,
         "surrogate lookup fails before cmap access");
+    let horizontal: GlyphHorizontalMetric = opentype_horizontal_metric(face, 3);
+    expect(state, horizontal.error == OpenTypeError.none &&
+        horizontal.advance_width == 530,
+        "glyph advance widths come from the owned hmtx table");
     opentype_face_free(&face); free[u8](&bytes);
 
     let format12_bytes: ArrayList[u8] = fixture_font_format12();
