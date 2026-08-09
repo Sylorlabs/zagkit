@@ -206,7 +206,7 @@ fn linux_preview_layout(width: i32, height: i32) LinuxPreviewLayout {
         flex_spacing(FlexSpacingToken.large, density);
     let control_height: i64 =
         flex_spacing(FlexSpacingToken.xxlarge, density) +
-        flex_spacing(FlexSpacingToken.medium, density);
+        flex_spacing(FlexSpacingToken.large, density);
     let inner_width: i64 = result.main.width - result.panel_padding * 2;
     let inner_height: i64 = result.main.height - result.panel_padding * 2;
     result.page_heading = rect(result.main.x + result.panel_padding,

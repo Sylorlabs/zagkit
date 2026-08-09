@@ -33,6 +33,7 @@ fn main() i32 {
         "expanded placement has one navigation column and a status-only rail");
     expect(&state, expanded.chart_visible == 1 &&
         expanded.segmented_control_visible == 1 &&
+        expanded.segmented_control.height >= 48 * unit_scale() &&
         expanded.chart.width >= 640 * unit_scale() &&
         expanded.chart.height >= 420 * unit_scale(),
         "expanded placement honors the chart component minimum");
@@ -87,7 +88,7 @@ fn main() i32 {
     expect(&state, tight.error == LinuxPreviewLayoutError.none &&
         tight.mode == LinuxPreviewLayoutMode.medium &&
         tight.chart.width == 656 * unit_scale() &&
-        tight.chart.height == 436 * unit_scale(),
+        tight.chart.height == 432 * unit_scale(),
         "tight medium placement preserves the chart contract without clipping");
 
     let compact: LinuxPreviewLayout = linux_preview_layout(800, 600);
