@@ -1,5 +1,5 @@
 @import("../src/text/unicode.zag")
-@import("../src/text/opentype.zag")
+@import("../src/text/glyph_path.zag")
 
 fn main() i32 {
     if (_zag_argc() != 2) {
@@ -26,6 +26,7 @@ fn main() i32 {
     }
     let index: i32 = 0;
     let outline_points: i32 = 0;
+    let path_commands: i32 = 0;
     while (index < text.scalars.len) {
         let glyph: GlyphLookup = opentype_glyph_for_scalar(
             face, text.scalars.data[index].value);
@@ -43,6 +44,18 @@ fn main() i32 {
                 return 7;
             }
             outline_points = outline.points.len;
+            let glyph_path: GlyphPathResult = glyph_outline_to_path(
+                outline, face.units_per_em, 24 * unit_scale(), 0, 24 * unit_scale());
+            if (glyph_path.error != GlyphPathError.none ||
+                path_verify(glyph_path.path) != PathError.none) {
+                glyph_path_result_free(&glyph_path);
+                opentype_glyph_outline_free(&outline);
+                utf8_decode_free(&text); opentype_face_free(&face);
+                _zag_eprintln("system font smoke: first Latin path conversion failed");
+                return 8;
+            }
+            path_commands = glyph_path.path.commands.len;
+            glyph_path_result_free(&glyph_path);
             opentype_glyph_outline_free(&outline);
         }
         index = index + 1;
@@ -55,6 +68,8 @@ fn main() i32 {
     _zag_print_i64(text.scalars.len as i64);
     _zag_print(" first_outline_points=");
     _zag_print_i64(outline_points as i64);
+    _zag_print(" first_path_commands=");
+    _zag_print_i64(path_commands as i64);
     _zag_println("");
     utf8_decode_free(&text); opentype_face_free(&face);
     return 0;

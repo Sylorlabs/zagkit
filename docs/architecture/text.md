@@ -21,6 +21,11 @@ native widget text engines are not runtime dependencies.
   are valid; malformed locations, flags, coordinates, and bounds fail closed.
 - Composite TrueType glyphs and CFF/CFF2 outlines remain explicitly
   unsupported rather than being flattened incorrectly.
+- `src/text/glyph_path.zag` converts simple TrueType contours into immutable
+  quadratic Zagkit paths at an exact fixed-point font size and baseline,
+  including implied midpoints between consecutive off-curve points.
+- Those canonical paths already execute through the deterministic CPU oracle;
+  positioned multi-glyph run assembly and text antialiasing policy remain open.
 - Unicode-to-glyph lookup supports bounded `cmap` format 4 and format 12
   subtables. A missing mapping returns glyph zero; it does not invent fallback.
 - The parser rejects table escapes, duplicate required tables, malformed
@@ -35,8 +40,8 @@ native widget text engines are not runtime dependencies.
    bidi resolution, line breaking, fallback, and locale-aware shaping.
 3. Implement OpenType GSUB/GPOS and variation application with deterministic
    glyph-run serialization.
-4. Flatten/rasterize glyph outlines in the CPU oracle with subpixel-positioned
-   antialiasing and documented color-space behavior.
+4. Assemble and rasterize positioned glyph runs in the CPU oracle with
+   subpixel antialiasing and documented color-space behavior.
 5. Connect glyph runs to intrinsic measurement, selection, editing, semantics,
    IME composition, accessibility text navigation, Talkback, and replay.
 6. Prove representative Latin, Arabic, Hebrew, Indic, CJK, emoji, combining,
