@@ -66,6 +66,23 @@ but it must be labeled experimental and cannot promote the visual system.
   remains visibly and semantically disabled; changing only its highlight is a
   failing no-op, not navigation evidence.
 
+### Responsive placement
+
+- Rendering, semantics, hit testing, and Talkback consume one shared Flex
+  placement result. Independently scaled coordinate tables are a conformance
+  failure even when one screenshot happens to align.
+- Component minimums are hard constraints. In particular, the performance
+  chart is never squeezed below 640 by 420 logical pixels to preserve a
+  dashboard silhouette.
+- Expanded placement may expose the labelled system-status rail. Medium
+  placement releases that width to primary content, and compact placement
+  changes navigation structure rather than shrinking desktop columns.
+- In every valid desktop viewport, if the chart contract cannot fit, the page
+  exposes an explicit compact semantic summary and removes chart-only controls.
+  The desktop placement contract defines a 480 by 360 minimum; the Linux shell
+  must show an explicit unsupported-size state below it before promotion. A
+  cropped, overlapped, or silently incomplete chart is not adaptive evidence.
+
 ## Evidence matrix
 
 For each required component and state, record the semantic token trace,
