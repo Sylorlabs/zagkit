@@ -1,4 +1,5 @@
 @import("../render/cpu_raster.zag")
+@import("../text/glyph_run.zag")
 
 fn preview_fx(value: i64) i64 { return value * unit_scale(); }
 
@@ -8,6 +9,13 @@ fn preview_x(value: i64, width: i32) i64 {
 
 fn preview_y(value: i64, height: i32) i64 {
     return (value * (height as i64) * unit_scale()) / 720;
+}
+
+fn preview_scale(value: i64, width: i32, height: i32) i64 {
+    let x: i64 = preview_x(value, width);
+    let y: i64 = preview_y(value, height);
+    if (x < y) { return x; }
+    return y;
 }
 
 fn preview_push_rect(list: *DisplayList, id: i64, bounds: Rect,
@@ -44,6 +52,38 @@ fn preview_add_path(list: *DisplayList, id: i64, path: *PathData,
     return (display_list_push(list, op) == DisplayError.none) as i32;
 }
 
+fn preview_add_text(list: *DisplayList, face: OpenTypeFace, id_base: i64,
+    text: []u8, size: i64, x: i64, baseline: i64, paint: Paint) i32 {
+    let run: NominalGlyphRun = nominal_glyph_run_ltr(
+        face, text, size, x, baseline);
+    if (run.error != GlyphRunError.none) { nominal_glyph_run_free(&run); return 0; }
+    let glyph_index: i32 = 0;
+    while (glyph_index < run.glyphs.len) {
+        let glyph: PositionedGlyph = run.glyphs.data[glyph_index];
+        let outline: GlyphOutline = opentype_glyph_outline(face, glyph.glyph_id);
+        if (outline.error != OpenTypeError.none) {
+            opentype_glyph_outline_free(&outline); nominal_glyph_run_free(&run); return 0;
+        }
+        if (outline.points.len > 0) {
+            let glyph_path: GlyphPathResult = glyph_outline_to_path(outline,
+                face.units_per_em, run.font_size, glyph.origin_x, glyph.origin_y);
+            opentype_glyph_outline_free(&outline);
+            if (glyph_path.error != GlyphPathError.none) {
+                glyph_path_result_free(&glyph_path); nominal_glyph_run_free(&run); return 0;
+            }
+            let resource_id: i64 = id_base + glyph_index;
+            if (preview_add_path(list, resource_id, &glyph_path.path, paint) == 0) {
+                nominal_glyph_run_free(&run); return 0;
+            }
+        } else {
+            opentype_glyph_outline_free(&outline);
+        }
+        glyph_index = glyph_index + 1;
+    }
+    nominal_glyph_run_free(&run);
+    return 1;
+}
+
 fn preview_round_rect(list: *DisplayList, id: i64, x: i64, y: i64,
     width: i64, height: i64, radius: i64, paint: Paint) i32 {
     let r: i64 = radius;
@@ -75,7 +115,8 @@ fn preview_glass_panel(list: *DisplayList, id: i64, x: i64, y: i64,
         paint_rgba16(42000, 56000, 65535, 17000));
 }
 
-fn linux_preview_scene(width: i32, height: i32) DisplayList {
+fn linux_preview_scene_internal(width: i32, height: i32,
+    face: OpenTypeFace, has_font: i32) DisplayList {
     let list: DisplayList = display_list_make();
     let full: Rect = rect(0, 0, (width as i64) * unit_scale(),
         (height as i64) * unit_scale());
@@ -135,12 +176,14 @@ fn linux_preview_scene(width: i32, height: i32) DisplayList {
         preview_x(15, width), paint_rgba16(18000, 52000, 65535, 65535));
     _ = preview_circle(&list, 501, preview_x(62, width), preview_y(48, height),
         preview_x(7, width), paint_rgba16(52000, 63000, 65535, 56000));
-    _ = preview_round_rect(&list, 502, preview_x(88, width), preview_y(39, height),
-        preview_x(128, width), preview_y(12, height), preview_x(6, width),
-        paint_rgba16(52000, 58000, 65000, 60000));
-    _ = preview_round_rect(&list, 503, preview_x(88, width), preview_y(58, height),
-        preview_x(76, width), preview_y(7, height), preview_x(4, width),
-        paint_rgba16(25000, 34000, 50000, 50000));
+    if (has_font == 0) {
+        _ = preview_round_rect(&list, 502, preview_x(88, width), preview_y(39, height),
+            preview_x(128, width), preview_y(12, height), preview_x(6, width),
+            paint_rgba16(52000, 58000, 65000, 60000));
+        _ = preview_round_rect(&list, 503, preview_x(88, width), preview_y(58, height),
+            preview_x(76, width), preview_y(7, height), preview_x(4, width),
+            paint_rgba16(25000, 34000, 50000, 50000));
+    }
     _ = preview_round_rect(&list, 504, preview_x(935, width), preview_y(36, height),
         preview_x(132, width), preview_y(32, height), preview_x(16, width),
         paint_rgba16(12500, 38500, 61000, 58000));
@@ -160,10 +203,12 @@ fn linux_preview_scene(width: i32, height: i32) DisplayList {
             preview_x(7, width), paint_rgba16(
                 18000 + (nav as i64) * 1800,
                 35000 + (nav as i64) * 1900, 56000, 52000));
-        _ = preview_round_rect(&list, 640 + nav as i64,
-            preview_x(94, width), ny + preview_y(4, height),
-            preview_x(86 + ((nav % 3) as i64) * 18, width), preview_y(10, height),
-            preview_x(5, width), paint_rgba16(33000, 41000, 53500, 48000));
+        if (has_font == 0) {
+            _ = preview_round_rect(&list, 640 + nav as i64,
+                preview_x(94, width), ny + preview_y(4, height),
+                preview_x(86 + ((nav % 3) as i64) * 18, width), preview_y(10, height),
+                preview_x(5, width), paint_rgba16(33000, 41000, 53500, 48000));
+        }
         nav = nav + 1;
     }
 
@@ -171,12 +216,14 @@ fn linux_preview_scene(width: i32, height: i32) DisplayList {
     _ = preview_round_rect(&list, 700, preview_x(284, width), preview_y(132, height),
         preview_x(492, width), preview_y(72, height), preview_x(20, width),
         paint_rgba16(9000, 15500, 27500, 52000));
-    _ = preview_round_rect(&list, 701, preview_x(310, width), preview_y(151, height),
-        preview_x(184, width), preview_y(14, height), preview_x(7, width),
-        paint_rgba16(52000, 57500, 64500, 60000));
-    _ = preview_round_rect(&list, 702, preview_x(310, width), preview_y(175, height),
-        preview_x(116, width), preview_y(8, height), preview_x(4, width),
-        paint_rgba16(24500, 33000, 47500, 50000));
+    if (has_font == 0) {
+        _ = preview_round_rect(&list, 701, preview_x(310, width), preview_y(151, height),
+            preview_x(184, width), preview_y(14, height), preview_x(7, width),
+            paint_rgba16(52000, 57500, 64500, 60000));
+        _ = preview_round_rect(&list, 702, preview_x(310, width), preview_y(175, height),
+            preview_x(116, width), preview_y(8, height), preview_x(4, width),
+            paint_rgba16(24500, 33000, 47500, 50000));
+    }
     _ = preview_round_rect(&list, 703, preview_x(650, width), preview_y(148, height),
         preview_x(98, width), preview_y(34, height), preview_x(17, width),
         paint_rgba16(17000, 48500, 65535, 58000));
@@ -232,14 +279,16 @@ fn linux_preview_scene(width: i32, height: i32) DisplayList {
             preview_x(876, width), preview_y(ay + 27, height), preview_x(11, width),
             paint_rgba16(15000 + (activity as i64) * 6000,
                 51000 - (activity as i64) * 3500, 62000, 56000));
-        _ = preview_round_rect(&list, 880 + activity as i64,
-            preview_x(900, width), preview_y(ay + 17, height),
-            preview_x(126, width), preview_y(10, height), preview_x(5, width),
-            paint_rgba16(41000, 48500, 59000, 50000));
-        _ = preview_round_rect(&list, 900 + activity as i64,
-            preview_x(900, width), preview_y(ay + 38, height),
-            preview_x(88, width), preview_y(7, height), preview_x(4, width),
-            paint_rgba16(22000, 30000, 44000, 43000));
+        if (has_font == 0) {
+            _ = preview_round_rect(&list, 880 + activity as i64,
+                preview_x(900, width), preview_y(ay + 17, height),
+                preview_x(126, width), preview_y(10, height), preview_x(5, width),
+                paint_rgba16(41000, 48500, 59000, 50000));
+            _ = preview_round_rect(&list, 900 + activity as i64,
+                preview_x(900, width), preview_y(ay + 38, height),
+                preview_x(88, width), preview_y(7, height), preview_x(4, width),
+                paint_rgba16(22000, 30000, 44000, 43000));
+        }
         activity = activity + 1;
     }
 
@@ -247,6 +296,71 @@ fn linux_preview_scene(width: i32, height: i32) DisplayList {
         rect(preview_x(24, width), preview_y(20, height),
             preview_x(1072, width), preview_y(64, height)),
         paint_rgba16(32000, 47000, 65535, 15000), unit_scale());
+    if (has_font != 0) {
+        let title_size: i64 = preview_scale(22, width, height);
+        let body_size: i64 = preview_scale(15, width, height);
+        let quiet: Paint = paint_rgba16(35000, 43000, 56000, 60000);
+        let bright: Paint = paint_rgba16(57000, 61000, 65535, 65535);
+        _ = preview_add_text(&list, face, 10000, "Zagkit Studio", title_size,
+            preview_x(88, width), preview_y(61, height), bright);
+        _ = preview_add_text(&list, face, 10100, "Preview", body_size,
+            preview_x(968, width), preview_y(58, height), bright);
+        _ = preview_add_text(&list, face, 10200, "Overview", body_size,
+            preview_x(94, width), preview_y(158, height), quiet);
+        _ = preview_add_text(&list, face, 10300, "Components", body_size,
+            preview_x(94, width), preview_y(228, height), bright);
+        _ = preview_add_text(&list, face, 10400, "Motion", body_size,
+            preview_x(94, width), preview_y(298, height), quiet);
+        _ = preview_add_text(&list, face, 10500, "Typography", body_size,
+            preview_x(94, width), preview_y(368, height), quiet);
+        _ = preview_add_text(&list, face, 10600, "Talkback", body_size,
+            preview_x(94, width), preview_y(438, height), quiet);
+        _ = preview_add_text(&list, face, 10700, "Settings", body_size,
+            preview_x(94, width), preview_y(508, height), quiet);
+        _ = preview_add_text(&list, face, 10800, "Typography pipeline",
+            preview_scale(20, width, height), preview_x(310, width),
+            preview_y(170, height), bright);
+        _ = preview_add_text(&list, face, 10900, "Owned contours. Deterministic CPU.",
+            preview_scale(13, width, height), preview_x(310, width),
+            preview_y(190, height), quiet);
+        _ = preview_add_text(&list, face, 11000, "Inspect",
+            preview_scale(14, width, height), preview_x(670, width),
+            preview_y(171, height), bright);
+        _ = preview_add_text(&list, face, 11100, "State",
+            preview_scale(14, width, height), preview_x(318, width),
+            preview_y(557, height), bright);
+        _ = preview_add_text(&list, face, 11200, "Layout",
+            preview_scale(14, width, height), preview_x(437, width),
+            preview_y(557, height), bright);
+        _ = preview_add_text(&list, face, 11300, "Motion",
+            preview_scale(14, width, height), preview_x(559, width),
+            preview_y(557, height), bright);
+        _ = preview_add_text(&list, face, 11400, "Render",
+            preview_scale(14, width, height), preview_x(682, width),
+            preview_y(557, height), bright);
+        _ = preview_add_text(&list, face, 11500, "Frame pacing",
+            body_size, preview_x(900, width), preview_y(169, height), bright);
+        _ = preview_add_text(&list, face, 11600, "Semantics",
+            body_size, preview_x(900, width), preview_y(265, height), bright);
+        _ = preview_add_text(&list, face, 11700, "Motion",
+            body_size, preview_x(900, width), preview_y(361, height), bright);
+        _ = preview_add_text(&list, face, 11800, "Input",
+            body_size, preview_x(900, width), preview_y(457, height), bright);
+        _ = preview_add_text(&list, face, 11900, "Renderer",
+            body_size, preview_x(900, width), preview_y(553, height), bright);
+    }
     _ = display_list_seal(&list);
     return list;
+}
+
+fn linux_preview_scene(width: i32, height: i32) DisplayList {
+    let empty: OpenTypeFace = opentype_face_empty();
+    let list: DisplayList = linux_preview_scene_internal(width, height, empty, 0);
+    opentype_face_free(&empty);
+    return list;
+}
+
+fn linux_preview_scene_with_font(width: i32, height: i32,
+    face: OpenTypeFace) DisplayList {
+    return linux_preview_scene_internal(width, height, face, 1);
 }

@@ -19,6 +19,22 @@ Status: **experimental transport proof**, not a polished component or Linux beta
 - The legacy title is ASCII-safe and `_NET_WM_NAME` contains the intended UTF-8
   title `Zagkit — Linux Preview`.
 
+## Typography activation — 2026-08-09
+
+The native preview now requires an explicit `ZAGKIT_FONT_FILE`; the launcher
+resolves Noto Sans with fontconfig when the caller did not provide one. Missing
+or invalid font bytes fail before the window claims truthful typography.
+
+Using Noto Sans Regular SHA-256
+`89c3c497f618fdaa0b2d1e98fef93582f28c71debd2c4a8cdf41f190ced2909d`,
+the X11 fallback rendered and captured real owned outlines for navigation,
+titles, actions, status chips, and activity labels. Two independent native
+captures were byte-identical. The current 1120×720 evidence is
+`artifacts/evidence/linux-x11-typography-2026-08-09.png`, SHA-256
+`60d27685be55360d505e3b3fd9b487c46b49330764e1961ec5be7f1d82d754b9`.
+Original-resolution inspection caught and removed the previous placeholder bars
+under the main title before this hash was accepted.
+
 ## Upstream Zag issue fixed
 
 The first X11 launch exposed a compiler defect in nested dynamic C calls. When
@@ -38,9 +54,10 @@ X11 create/present/capture/cleanup gate.
 
 ## Honest limits
 
-This frame is an early renderer/shell witness. It does not yet contain real
-typography, icons, text shaping, controls, semantics, accessibility, IME,
-clipboard, drag and drop, multi-window behavior, GPU presentation, Wayland, or
-production materials and motion. Its visual quality does not satisfy the Linux
-polish gate or the SwiftUI/Web UI competitive target. Those remain checked by
-the project goal and agent checklist rather than being inferred from this image.
+This frame is still an early renderer/shell witness. It now contains real
+nominal LTR typography, but not shaping, fallback, icons, wired controls,
+platform accessibility, IME, clipboard, drag and drop, multi-window behavior,
+GPU presentation, Wayland, or production materials and motion. Its visual
+quality is improved but does not yet satisfy the Linux polish gate or the
+SwiftUI/Web UI competitive target. Those remain checked by the project goal and
+agent checklist rather than being inferred from this image.

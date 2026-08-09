@@ -3,8 +3,8 @@
 @import("../src/render/png_encode.zag")
 
 fn preview_render(host: *LinuxX11Window, width: i32, height: i32,
-    capture_path: []u8) i32 {
-    let list: DisplayList = linux_preview_scene(width, height);
+    capture_path: []u8, face: OpenTypeFace) i32 {
+    let list: DisplayList = linux_preview_scene_with_font(width, height, face);
     if (display_list_verify(list) != DisplayError.none) {
         display_list_free(&list);
         _zag_eprintln("zagkit: Linux preview display list verification failed");
@@ -50,6 +50,24 @@ fn main() i32 {
         capture_path = _zag_arg(2);
     }
 
+    let font_path: []u8 = _zag_getenv("ZAGKIT_FONT_FILE");
+    if (font_path.len == 0) {
+        _zag_eprintln("zagkit: ZAGKIT_FONT_FILE is required for truthful native typography");
+        return 3;
+    }
+    let font_bytes: []u8 = _zag_read_file(font_path);
+    if (font_bytes.len <= 0) {
+        _zag_eprintln("zagkit: configured font bytes are unavailable");
+        return 3;
+    }
+    let face: OpenTypeFace = opentype_parse(font_bytes);
+    _zag_free(_zag_slice_ptr(font_bytes));
+    if (face.error != OpenTypeError.none) {
+        _zag_eprintln("zagkit: configured font failed owned OpenType validation");
+        opentype_face_free(&face);
+        return 3;
+    }
+
     let wayland_available: i32 = (_zag_getenv("WAYLAND_DISPLAY").len > 0) as i32;
     let host: LinuxX11Window = linux_x11_open(1120, 720,
         "Zagkit — Linux Preview", wayland_available);
@@ -62,14 +80,17 @@ fn main() i32 {
     if (host.open == 0) {
         _zag_eprintln("zagkit: native Linux window unavailable; capability report remains fail-closed");
         linux_x11_close(&host);
+        opentype_face_free(&face);
         return 3;
     }
-    if (preview_render(&host, 1120, 720, capture_path) == 0) {
+    if (preview_render(&host, 1120, 720, capture_path, face) == 0) {
         linux_x11_close(&host);
+        opentype_face_free(&face);
         return 4;
     }
     if (capture_once != 0) {
         linux_x11_close(&host);
+        opentype_face_free(&face);
         return 0;
     }
 
@@ -77,13 +98,14 @@ fn main() i32 {
         let event: LinuxX11Event = linux_x11_next_event(&host);
         if (event.kind == LinuxX11EventKind.close) { host.open = 0; }
         else if (event.kind == LinuxX11EventKind.expose) {
-            _ = preview_render(&host, host.width, host.height, "");
+            _ = preview_render(&host, host.width, host.height, "", face);
         } else if (event.kind == LinuxX11EventKind.resize) {
             let next_width: i32 = preview_clamp_dimension(event.width, 480, 1920);
             let next_height: i32 = preview_clamp_dimension(event.height, 320, 1200);
-            _ = preview_render(&host, next_width, next_height, "");
+            _ = preview_render(&host, next_width, next_height, "", face);
         }
     }
     linux_x11_close(&host);
+    opentype_face_free(&face);
     return 0;
 }
