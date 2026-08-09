@@ -187,6 +187,113 @@ fn semantic_elevation(token: SemanticElevationToken) ResolvedElevationToken {
     };
 }
 
+enum SemanticMaterialToken {
+    showcase_backdrop,
+    shell,
+    panel,
+    raised,
+    overlay,
+}
+
+struct ResolvedMaterialToken {
+    id: []u8,
+    fill_token: SemanticColorToken,
+    tint_token: SemanticColorToken,
+    edge_token: SemanticColorToken,
+    radius_token: SemanticRadiusToken,
+    elevation_token: SemanticElevationToken,
+    tint_alpha_start: i64,
+    tint_alpha_end: i64,
+    blur_radius: i64,
+    cpu_fallback_reason: []u8,
+}
+
+fn semantic_material_token_count() i32 { return 5; }
+
+fn semantic_material(token: SemanticMaterialToken) ResolvedMaterialToken {
+    return switch (token) {
+        .showcase_backdrop => ResolvedMaterialToken{
+            .id = "material.showcase.backdrop",
+            .fill_token = SemanticColorToken.canvas,
+            .tint_token = SemanticColorToken.ambient_cool,
+            .edge_token = SemanticColorToken.border_subtle,
+            .radius_token = SemanticRadiusToken.control,
+            .elevation_token = SemanticElevationToken.base,
+            .tint_alpha_start = 1500, .tint_alpha_end = 12500,
+            .blur_radius = 0,
+            .cpu_fallback_reason = "retained color bands are the deterministic CPU gradient oracle",
+        },
+        .shell => ResolvedMaterialToken{
+            .id = "material.glass.shell",
+            .fill_token = SemanticColorToken.surface_base,
+            .tint_token = SemanticColorToken.ambient_cool,
+            .edge_token = SemanticColorToken.edge_highlight,
+            .radius_token = SemanticRadiusToken.panel,
+            .elevation_token = SemanticElevationToken.base,
+            .tint_alpha_start = 0, .tint_alpha_end = 0,
+            .blur_radius = 18 * unit_scale(),
+            .cpu_fallback_reason = "translucent fill and edge remain authoritative until backdrop blur lands",
+        },
+        .panel => ResolvedMaterialToken{
+            .id = "material.glass.panel",
+            .fill_token = SemanticColorToken.surface_panel,
+            .tint_token = SemanticColorToken.ambient_cool,
+            .edge_token = SemanticColorToken.edge_highlight,
+            .radius_token = SemanticRadiusToken.panel,
+            .elevation_token = SemanticElevationToken.panel,
+            .tint_alpha_start = 0, .tint_alpha_end = 0,
+            .blur_radius = 24 * unit_scale(),
+            .cpu_fallback_reason = "translucent fill edge and shadow are the current CPU material",
+        },
+        .raised => ResolvedMaterialToken{
+            .id = "material.glass.raised",
+            .fill_token = SemanticColorToken.surface_raised,
+            .tint_token = SemanticColorToken.ambient_cool,
+            .edge_token = SemanticColorToken.edge_highlight,
+            .radius_token = SemanticRadiusToken.card,
+            .elevation_token = SemanticElevationToken.raised,
+            .tint_alpha_start = 0, .tint_alpha_end = 0,
+            .blur_radius = 30 * unit_scale(),
+            .cpu_fallback_reason = "translucent fill edge and raised shadow are the current CPU material",
+        },
+        .overlay => ResolvedMaterialToken{
+            .id = "material.glass.overlay",
+            .fill_token = SemanticColorToken.surface_raised,
+            .tint_token = SemanticColorToken.ambient_warm,
+            .edge_token = SemanticColorToken.edge_highlight,
+            .radius_token = SemanticRadiusToken.card,
+            .elevation_token = SemanticElevationToken.overlay,
+            .tint_alpha_start = 0, .tint_alpha_end = 0,
+            .blur_radius = 36 * unit_scale(),
+            .cpu_fallback_reason = "translucent fill edge and overlay shadow are the current CPU material",
+        },
+    };
+}
+
+fn semantic_material_band_paint(token: SemanticMaterialToken,
+    band: i32, band_count: i32) Paint {
+    let material: ResolvedMaterialToken = semantic_material(token);
+    let fill: Paint = semantic_color_paint(material.fill_token);
+    let tint: Paint = semantic_color_paint(material.tint_token);
+    let denominator: i64 = 1;
+    let index: i64 = 0;
+    if (band_count > 1) {
+        denominator = (band_count - 1) as i64;
+        index = band as i64;
+        if (index < 0) { index = 0; }
+        if (index > denominator) { index = denominator; }
+    }
+    let alpha: i64 = material.tint_alpha_start +
+        ((material.tint_alpha_end - material.tint_alpha_start) * index) /
+            denominator;
+    let inverse: i64 = 65535 - alpha;
+    return paint_rgba16(
+        (fill.red * inverse + tint.red * alpha) / 65535,
+        (fill.green * inverse + tint.green * alpha) / 65535,
+        (fill.blue * inverse + tint.blue * alpha) / 65535,
+        fill.alpha);
+}
+
 enum ShowcaseCategory { frame_pacing, semantics, motion, input, renderer }
 
 fn showcase_category_at(index: i32) ShowcaseCategory {
