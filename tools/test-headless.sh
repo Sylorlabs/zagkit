@@ -38,6 +38,17 @@ cd "$root"
 "$tmp/design-tokens-contract"
 "$znc" tests/button_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/button-contract"
 "$tmp/button-contract"
+if ! command -v fc-match >/dev/null 2>&1; then
+    printf 'headless test: FAIL: Button gallery requires fontconfig fc-match\n' >&2
+    exit 1
+fi
+gallery_font=$(fc-match -f '%{file}\n' 'Noto Sans' | sed -n '1p')
+if [ -z "$gallery_font" ] || [ ! -f "$gallery_font" ]; then
+    printf 'headless test: FAIL: Button gallery could not resolve a system font\n' >&2
+    exit 1
+fi
+"$znc" tests/button_gallery_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/button-gallery-contract"
+"$tmp/button-gallery-contract" "$gallery_font"
 "$znc" tests/canvas_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/canvas-contract"
 "$tmp/canvas-contract"
 "$znc" tests/measure_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/measure-contract"
@@ -98,4 +109,4 @@ printf 'Linux preview CPU snapshot contract: pass=2 fail=0\n'
 "$znc" tests/motion_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/motion-contract"
 "$tmp/motion-contract"
 
-printf 'headless test: PASS (backend truth, state, reconciliation, intrinsic measurement, constraints, Flex, shared Button state/render/hit/semantics/Talkback, retained Canvas immediate drawing, Grid, Overlay, scroll, virtual list, Table, Tree, recycling, Unicode grapheme segmentation, positioned glyph-run transport, collection semantics, Talkback, native-preview semantics, owned render resources, canonical paths and images, bounded PNG decode, display lists, analytic rounded geometry, CPU shape and image raster, deterministic PNG snapshots, input, replay, and motion)\n'
+printf 'headless test: PASS (backend truth, state, reconciliation, intrinsic measurement, constraints, Flex, shared Button state/render/hit/semantics/Talkback plus its executable conformance gallery, retained Canvas immediate drawing, Grid, Overlay, scroll, virtual list, Table, Tree, recycling, Unicode grapheme segmentation, positioned glyph-run transport, collection semantics, Talkback, native-preview semantics, owned render resources, canonical paths and images, bounded PNG decode, display lists, analytic rounded geometry, CPU shape and image raster, deterministic PNG snapshots, input, replay, and motion)\n'

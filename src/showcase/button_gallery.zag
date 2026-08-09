@@ -1,0 +1,772 @@
+@import("../components/button.zag")
+@import("../text/glyph_run.zag")
+
+// Experimental Button conformance gallery. The visual direction remains
+// blocked on RFC 0007; this scene proves component contracts, not a 1.0 theme.
+
+enum ButtonGalleryError {
+    none,
+    invalid_font,
+    display_error,
+    button_error,
+    semantics_error,
+    text_shape_error,
+    text_path_error,
+    text_resource_error,
+}
+
+struct ButtonGalleryTextResult {
+    error: ButtonGalleryError,
+    glyph_error: GlyphRunError,
+    glyph_count: i32,
+    path_count: i32,
+    advance: i64,
+}
+
+struct ButtonGalleryLayoutMetrics {
+    canvas_inset: i64,
+    panel_padding: i64,
+    card_gap: i64,
+    card_padding: i64,
+    state_row_gap: i64,
+    heading_gap: i64,
+    control_height: i64,
+    variant_control_height: i64,
+    card_width: i64,
+    column_stride: i64,
+    header_top: i64,
+    header_height: i64,
+    state_panel_top: i64,
+    state_panel_height: i64,
+    state_card_top: i64,
+    state_card_height: i64,
+    state_control_offset: i64,
+    variant_panel_top: i64,
+    variant_panel_height: i64,
+    variant_card_top: i64,
+    variant_card_height: i64,
+    variant_control_offset: i64,
+    content_left: i64,
+    header_title_x: i64,
+    header_title_baseline: i64,
+    header_subtitle_baseline: i64,
+    experimental_bounds: Rect,
+    title_semantic_bounds: Rect,
+    state_heading_baseline: i64,
+    state_subtitle_baseline: i64,
+    state_heading_bounds: Rect,
+    variant_heading_baseline: i64,
+    variant_subtitle_baseline: i64,
+    variant_heading_bounds: Rect,
+}
+
+struct ButtonGallery {
+    display: DisplayList,
+    hits: HitTree,
+    semantics: SemanticsTree,
+    artifacts: ArrayList[ButtonArtifact],
+    error: ButtonGalleryError,
+    button_error: ButtonBuildError,
+    display_error: DisplayError,
+    semantics_error: SemanticsError,
+    glyph_error: GlyphRunError,
+    button_count: i32,
+    visible_button_label_count: i32,
+    text_run_count: i32,
+    glyph_path_count: i32,
+    elevation_tier_count: i32,
+    evidence_hash: i64,
+}
+
+fn button_gallery_width() i32 { return 1280; }
+fn button_gallery_height() i32 { return 900; }
+fn button_gallery_state_count() i32 { return 8; }
+fn button_gallery_variant_count() i32 { return 4; }
+fn button_gallery_button_count() i32 { return 12; }
+
+fn button_gallery_layout_metrics() ButtonGalleryLayoutMetrics {
+    let density: FlexDensity = FlexDensity.standard;
+    let canvas_inset: i64 = flex_spacing(FlexSpacingToken.xxlarge, density) +
+        flex_spacing(FlexSpacingToken.small, density);
+    let panel_padding: i64 = flex_spacing(FlexSpacingToken.xlarge, density);
+    let card_gap: i64 = flex_spacing(FlexSpacingToken.xlarge, density);
+    let card_padding: i64 = flex_spacing(FlexSpacingToken.large, density);
+    let state_row_gap: i64 = flex_spacing(FlexSpacingToken.large, density) +
+        flex_spacing(FlexSpacingToken.tiny, density);
+    let heading_gap: i64 = flex_spacing(FlexSpacingToken.small, density);
+    let control_height: i64 = button_minimum_target(density) +
+        flex_spacing(FlexSpacingToken.small, density);
+    let variant_control_height: i64 = button_minimum_target(density) +
+        flex_spacing(FlexSpacingToken.medium, density);
+    let card_width: i64 = 270 * unit_scale();
+    let header_top: i64 = flex_spacing(FlexSpacingToken.xlarge, density) +
+        flex_spacing(FlexSpacingToken.micro, density);
+    let header_height: i64 = flex_spacing(FlexSpacingToken.xxlarge, density) * 3;
+    let state_panel_top: i64 = header_top + header_height +
+        flex_spacing(FlexSpacingToken.xlarge, density);
+    let heading_band: i64 = flex_spacing(FlexSpacingToken.xxlarge, density) * 2 +
+        flex_spacing(FlexSpacingToken.large, density);
+    let state_card_height: i64 = control_height + card_padding * 2 +
+        flex_spacing(FlexSpacingToken.xxlarge, density) * 2 + state_row_gap;
+    let state_panel_height: i64 = heading_band + state_card_height * 2 +
+        state_row_gap + flex_spacing(FlexSpacingToken.xxlarge, density);
+    let state_card_top: i64 = state_panel_top + heading_band;
+    let state_control_offset: i64 =
+        flex_spacing(FlexSpacingToken.xxlarge, density) * 2 +
+        flex_spacing(FlexSpacingToken.large, density) +
+        flex_spacing(FlexSpacingToken.medium, density);
+    let variant_panel_top: i64 = state_panel_top + state_panel_height +
+        state_row_gap;
+    let variant_card_top: i64 = variant_panel_top + heading_band;
+    let variant_card_height: i64 = variant_control_height + card_padding * 2 +
+        state_row_gap * 2;
+    let variant_panel_height: i64 = heading_band + variant_card_height + header_top;
+    let variant_control_offset: i64 = card_padding +
+        semantic_type_size(SemanticTypeToken.caption) + state_row_gap;
+    let content_width: i64 = (button_gallery_width() as i64) * unit_scale() -
+        canvas_inset * 2;
+    let content_left: i64 = canvas_inset + panel_padding;
+    let header_title_x: i64 = content_left +
+        flex_spacing(FlexSpacingToken.micro, density);
+    let header_title_baseline: i64 = header_top +
+        flex_spacing(FlexSpacingToken.xxlarge, density) +
+        flex_spacing(FlexSpacingToken.medium, density);
+    let header_subtitle_baseline: i64 = header_title_baseline +
+        semantic_type_size(SemanticTypeToken.body) +
+        flex_spacing(FlexSpacingToken.large, density);
+    let experimental_width: i64 = 282 * unit_scale();
+    let experimental_height: i64 = button_minimum_target(density);
+    let experimental_right: i64 = canvas_inset +
+        flex_spacing(FlexSpacingToken.xxlarge, density) +
+        flex_spacing(FlexSpacingToken.tiny, density);
+    let experimental_bounds: Rect = rect(
+        (button_gallery_width() as i64) * unit_scale() -
+            experimental_right - experimental_width,
+        header_top + (header_height - experimental_height) / 2,
+        experimental_width, experimental_height);
+    let title_semantic_bounds: Rect = rect(header_title_x,
+        header_top + flex_spacing(FlexSpacingToken.large, density),
+        experimental_bounds.x - heading_gap - header_title_x,
+        header_height - flex_spacing(FlexSpacingToken.large, density) * 2);
+    let state_heading_baseline: i64 = state_panel_top +
+        flex_spacing(FlexSpacingToken.xxlarge, density);
+    let state_subtitle_baseline: i64 = state_heading_baseline +
+        semantic_type_size(SemanticTypeToken.heading) + heading_gap;
+    let state_heading_bounds: Rect = rect(content_left,
+        state_panel_top + flex_spacing(FlexSpacingToken.medium, density),
+        content_width - panel_padding * 2,
+        heading_band - flex_spacing(FlexSpacingToken.medium, density) * 2);
+    let variant_heading_baseline: i64 = variant_panel_top +
+        flex_spacing(FlexSpacingToken.xxlarge, density);
+    let variant_subtitle_baseline: i64 = variant_heading_baseline +
+        semantic_type_size(SemanticTypeToken.heading) + heading_gap;
+    let variant_heading_bounds: Rect = rect(content_left,
+        variant_panel_top + flex_spacing(FlexSpacingToken.medium, density),
+        content_width - panel_padding * 2,
+        heading_band - flex_spacing(FlexSpacingToken.medium, density) * 2);
+    return ButtonGalleryLayoutMetrics{
+        .canvas_inset = canvas_inset,
+        .panel_padding = panel_padding,
+        .card_gap = card_gap,
+        .card_padding = card_padding,
+        .state_row_gap = state_row_gap,
+        .heading_gap = heading_gap,
+        .control_height = control_height,
+        .variant_control_height = variant_control_height,
+        .card_width = card_width,
+        .column_stride = card_width + card_gap,
+        .header_top = header_top,
+        .header_height = header_height,
+        .state_panel_top = state_panel_top,
+        .state_panel_height = state_panel_height,
+        .state_card_top = state_card_top,
+        .state_card_height = state_card_height,
+        .state_control_offset = state_control_offset,
+        .variant_panel_top = variant_panel_top,
+        .variant_panel_height = variant_panel_height,
+        .variant_card_top = variant_card_top,
+        .variant_card_height = variant_card_height,
+        .variant_control_offset = variant_control_offset,
+        .content_left = content_left,
+        .header_title_x = header_title_x,
+        .header_title_baseline = header_title_baseline,
+        .header_subtitle_baseline = header_subtitle_baseline,
+        .experimental_bounds = experimental_bounds,
+        .title_semantic_bounds = title_semantic_bounds,
+        .state_heading_baseline = state_heading_baseline,
+        .state_subtitle_baseline = state_subtitle_baseline,
+        .state_heading_bounds = state_heading_bounds,
+        .variant_heading_baseline = variant_heading_baseline,
+        .variant_subtitle_baseline = variant_subtitle_baseline,
+        .variant_heading_bounds = variant_heading_bounds,
+    };
+}
+
+fn button_gallery_state_id(index: i32) NodeKey {
+    return node_key(4100 + index as i64);
+}
+
+fn button_gallery_variant_id(index: i32) NodeKey {
+    return node_key(4200 + index as i64);
+}
+
+fn button_gallery_title_id() NodeKey { return node_key(4300); }
+fn button_gallery_state_heading_id() NodeKey { return node_key(4301); }
+fn button_gallery_variant_heading_id() NodeKey { return node_key(4302); }
+fn button_gallery_experimental_id() NodeKey { return node_key(4303); }
+
+fn button_gallery_state(index: i32) ButtonCanonicalState {
+    return switch (index) {
+        1 => ButtonCanonicalState.hover,
+        2 => ButtonCanonicalState.focus,
+        3 => ButtonCanonicalState.pressed,
+        4 => ButtonCanonicalState.selected,
+        5 => ButtonCanonicalState.disabled,
+        6 => ButtonCanonicalState.loading,
+        7 => ButtonCanonicalState.error,
+        else => ButtonCanonicalState.rest,
+    };
+}
+
+fn button_gallery_state_name(index: i32) []u8 {
+    return switch (index) {
+        1 => "HOVER",
+        2 => "FOCUS",
+        3 => "PRESSED",
+        4 => "SELECTED",
+        5 => "DISABLED",
+        6 => "LOADING",
+        7 => "ERROR",
+        else => "REST",
+    };
+}
+
+fn button_gallery_state_detail(index: i32) []u8 {
+    return switch (index) {
+        1 => "POINTER / INSIDE",
+        2 => "KEYBOARD / FOCUS RING",
+        3 => "POINTER / DOWN",
+        4 => "STATE / SELECTED",
+        5 => "ACTIONS / UNAVAILABLE",
+        6 => "PROGRESS / BUSY",
+        7 => "STATUS / ERROR",
+        else => "ENABLED / AT REST",
+    };
+}
+
+fn button_gallery_state_description(index: i32) []u8 {
+    return switch (index) {
+        1 => "Button state fixture: pointer hover",
+        2 => "Button state fixture: keyboard focus",
+        3 => "Button state fixture: pointer pressed",
+        4 => "Button state fixture: selected",
+        5 => "Button state fixture: disabled and unavailable",
+        6 => "Button state fixture: loading and unavailable",
+        7 => "Button state fixture: recoverable error",
+        else => "Button state fixture: enabled and at rest",
+    };
+}
+
+fn button_gallery_variant(index: i32) ButtonVariant {
+    return switch (index) {
+        1 => ButtonVariant.secondary,
+        2 => ButtonVariant.quiet,
+        3 => ButtonVariant.destructive,
+        else => ButtonVariant.primary,
+    };
+}
+
+fn button_gallery_variant_name(index: i32) []u8 {
+    return switch (index) {
+        1 => "SECONDARY",
+        2 => "QUIET",
+        3 => "DESTRUCTIVE",
+        else => "PRIMARY",
+    };
+}
+
+fn button_gallery_variant_label(index: i32) []u8 {
+    return switch (index) {
+        1 => "Open details",
+        2 => "Not now",
+        3 => "Delete item",
+        else => "Continue",
+    };
+}
+
+fn button_gallery_variant_description(index: i32) []u8 {
+    return switch (index) {
+        1 => "Secondary action Button variant",
+        2 => "Quiet action Button variant",
+        3 => "Destructive action Button variant",
+        else => "Primary action Button variant",
+    };
+}
+
+fn button_gallery_empty() ButtonGallery {
+    return ButtonGallery{
+        .display = display_list_make(),
+        .hits = hit_tree_make(),
+        .semantics = semantics_tree_make(),
+        .artifacts = make[ButtonArtifact](button_gallery_button_count()),
+        .error = ButtonGalleryError.none,
+        .button_error = ButtonBuildError.none,
+        .display_error = DisplayError.none,
+        .semantics_error = SemanticsError.none,
+        .glyph_error = GlyphRunError.none,
+        .button_count = 0,
+        .visible_button_label_count = 0,
+        .text_run_count = 0,
+        .glyph_path_count = 0,
+        .elevation_tier_count = 3,
+        .evidence_hash = 0,
+    };
+}
+
+fn button_gallery_free(gallery: *ButtonGallery) void {
+    free[ButtonArtifact](&gallery.*.artifacts);
+    semantics_tree_free(&gallery.*.semantics);
+    hit_tree_free(&gallery.*.hits);
+    display_list_free(&gallery.*.display);
+}
+
+fn button_gallery_text_result(error: ButtonGalleryError,
+    glyph_error: GlyphRunError) ButtonGalleryTextResult {
+    return ButtonGalleryTextResult{
+        .error = error, .glyph_error = glyph_error,
+        .glyph_count = 0, .path_count = 0, .advance = 0,
+    };
+}
+
+fn button_gallery_push_round(list: *DisplayList, owner: NodeKey, bounds: Rect,
+    radius: i64, paint: Paint) i32 {
+    let resolved_radius: i64 = radius;
+    if (resolved_radius * 2 > bounds.width) { resolved_radius = bounds.width / 2; }
+    if (resolved_radius * 2 > bounds.height) { resolved_radius = bounds.height / 2; }
+    if (resolved_radius <= 0) { return 0; }
+    let op: DisplayOp = display_op(DisplayOpKind.fill_rounded_rect, owner);
+    op.bounds = bounds; op.parameter = resolved_radius; op.paint = paint;
+    return (display_list_push(list, op) == DisplayError.none) as i32;
+}
+
+fn button_gallery_push_rect(list: *DisplayList, owner: NodeKey, bounds: Rect,
+    paint: Paint) i32 {
+    let op: DisplayOp = display_op(DisplayOpKind.fill_rect, owner);
+    op.bounds = bounds; op.paint = paint;
+    return (display_list_push(list, op) == DisplayError.none) as i32;
+}
+
+fn button_gallery_surface(list: *DisplayList, owner: NodeKey, bounds: Rect,
+    radius_token: SemanticRadiusToken, fill_token: SemanticColorToken,
+    elevation_token: SemanticElevationToken) i32 {
+    let elevation: ResolvedElevationToken = semantic_elevation(elevation_token);
+    let radius: i64 = semantic_radius(radius_token);
+    if (elevation.shadow_alpha > 0) {
+        let spread: i64 = elevation.shadow_spread;
+        if (button_gallery_push_round(list, owner,
+            rect(bounds.x - spread,
+                bounds.y + elevation.shadow_offset_y - spread,
+                bounds.width + spread * 2, bounds.height + spread * 2),
+            radius + spread, semantic_color_with_alpha(
+                SemanticColorToken.shadow, elevation.shadow_alpha)) == 0) {
+            return 0;
+        }
+    }
+    if (button_gallery_push_round(list, owner, bounds, radius,
+        semantic_color_with_alpha(SemanticColorToken.border_subtle,
+            elevation.border_alpha)) == 0) { return 0; }
+    let edge: i64 = unit_scale();
+    return button_gallery_push_round(list, owner,
+        rect(bounds.x + edge, bounds.y + edge,
+            bounds.width - edge * 2, bounds.height - edge * 2),
+        radius - edge, semantic_color_paint(fill_token));
+}
+
+fn button_gallery_emit_run(list: *DisplayList, face: OpenTypeFace,
+    resource_id: i64, owner: NodeKey, text: []u8, font_size: i64,
+    origin_x: i64, baseline_y: i64, paint: Paint) ButtonGalleryTextResult {
+    let run: NominalGlyphRun = nominal_glyph_run_ltr(
+        face, text, font_size, origin_x, baseline_y);
+    if (run.error != GlyphRunError.none) {
+        let failure: ButtonGalleryTextResult = button_gallery_text_result(
+            ButtonGalleryError.text_shape_error, run.error);
+        nominal_glyph_run_free(&run); return failure;
+    }
+    let result: ButtonGalleryTextResult = button_gallery_text_result(
+        ButtonGalleryError.none, GlyphRunError.none);
+    result.glyph_count = run.glyphs.len; result.advance = run.total_advance;
+    let glyph_index: i32 = 0;
+    while (glyph_index < run.glyphs.len) {
+        let glyph: PositionedGlyph = run.glyphs.data[glyph_index];
+        let outline: GlyphOutline = opentype_glyph_outline(face, glyph.glyph_id);
+        if (outline.error != OpenTypeError.none) {
+            opentype_glyph_outline_free(&outline);
+            result.error = ButtonGalleryError.text_path_error;
+            result.glyph_error = GlyphRunError.invalid_outline;
+            nominal_glyph_run_free(&run); return result;
+        }
+        if (outline.points.len > 0) {
+            let path: GlyphPathResult = glyph_outline_to_path(outline,
+                face.units_per_em, run.font_size,
+                glyph.origin_x, glyph.origin_y);
+            opentype_glyph_outline_free(&outline);
+            if (path.error != GlyphPathError.none) {
+                glyph_path_result_free(&path);
+                result.error = ButtonGalleryError.text_path_error;
+                result.glyph_error = GlyphRunError.path_error;
+                nominal_glyph_run_free(&run); return result;
+            }
+            let encoded: PathEncodeResult = path_encode(path.path);
+            glyph_path_result_free(&path);
+            if (encoded.error != PathError.none) {
+                path_encode_free(&encoded);
+                result.error = ButtonGalleryError.text_path_error;
+                nominal_glyph_run_free(&run); return result;
+            }
+            let glyph_resource_id: i64 = resource_id + glyph_index as i64;
+            let resource_error: RenderResourceError = display_list_add_resource(list,
+                render_resource_spec(glyph_resource_id, RenderResourceKind.path,
+                    encoded.bytes.data[0..encoded.bytes.len],
+                    path_resource_format_tag()));
+            path_encode_free(&encoded);
+            if (resource_error != RenderResourceError.none) {
+                result.error = ButtonGalleryError.text_resource_error;
+                nominal_glyph_run_free(&run); return result;
+            }
+            let draw: DisplayOp = display_op(DisplayOpKind.draw_path, owner);
+            draw.resource_id = glyph_resource_id; draw.paint = paint;
+            if (display_list_push(list, draw) != DisplayError.none) {
+                result.error = ButtonGalleryError.display_error;
+                nominal_glyph_run_free(&run); return result;
+            }
+            result.path_count = result.path_count + 1;
+        } else {
+            opentype_glyph_outline_free(&outline);
+        }
+        glyph_index = glyph_index + 1;
+    }
+    nominal_glyph_run_free(&run);
+    return result;
+}
+
+fn button_gallery_emit_centered_run(list: *DisplayList, face: OpenTypeFace,
+    resource_id: i64, owner: NodeKey, text: []u8, font_size: i64,
+    bounds: Rect, paint: Paint) ButtonGalleryTextResult {
+    let measured: NominalGlyphRun = nominal_glyph_run_ltr(
+        face, text, font_size, 0, 0);
+    if (measured.error != GlyphRunError.none) {
+        let error: GlyphRunError = measured.error;
+        nominal_glyph_run_free(&measured);
+        return button_gallery_text_result(
+            ButtonGalleryError.text_shape_error, error);
+    }
+    let x: i64 = bounds.x + (bounds.width - measured.total_advance) / 2;
+    let baseline: i64 = bounds.y + bounds.height / 2 + font_size / 3;
+    nominal_glyph_run_free(&measured);
+    return button_gallery_emit_run(list, face, resource_id, owner, text,
+        font_size, x, baseline, paint);
+}
+
+fn button_gallery_record_text(gallery: *ButtonGallery,
+    result: ButtonGalleryTextResult) i32 {
+    if (result.error == ButtonGalleryError.none) {
+        gallery.*.text_run_count = gallery.*.text_run_count + 1;
+        gallery.*.glyph_path_count = gallery.*.glyph_path_count +
+            result.path_count;
+        return 1;
+    }
+    gallery.*.error = result.error;
+    gallery.*.glyph_error = result.glyph_error;
+    if (result.error == ButtonGalleryError.display_error) {
+        gallery.*.display_error = gallery.*.display.last_error;
+    }
+    return 0;
+}
+
+fn button_gallery_semantic_text(gallery: *ButtonGallery, id: NodeKey,
+    name: []u8, description: []u8, bounds: Rect) i32 {
+    let spec: SemanticsSpec = semantics_spec(
+        id, semantic_root_key(), SemanticRole.text, name);
+    spec.description = description; spec.has_bounds = 1; spec.bounds = bounds;
+    let error: SemanticsError = semantics_add(&gallery.*.semantics, spec);
+    if (error == SemanticsError.none) { return 1; }
+    gallery.*.error = ButtonGalleryError.semantics_error;
+    gallery.*.semantics_error = error;
+    return 0;
+}
+
+fn button_gallery_background(gallery: *ButtonGallery) i32 {
+    let scale: i64 = unit_scale();
+    let metrics: ButtonGalleryLayoutMetrics = button_gallery_layout_metrics();
+    let content_width: i64 = (button_gallery_width() as i64) * scale -
+        metrics.canvas_inset * 2;
+    if (button_gallery_push_rect(&gallery.*.display, node_key(9000),
+        rect(0, 0, (button_gallery_width() as i64) * scale,
+            (button_gallery_height() as i64) * scale),
+        semantic_color_paint(SemanticColorToken.canvas)) == 0) { return 0; }
+    if (button_gallery_surface(&gallery.*.display, node_key(9001),
+        rect(metrics.canvas_inset, metrics.header_top,
+            content_width, metrics.header_height),
+        SemanticRadiusToken.card, SemanticColorToken.surface_raised,
+        SemanticElevationToken.raised) == 0) { return 0; }
+    if (button_gallery_push_rect(&gallery.*.display, node_key(9002),
+        rect(metrics.canvas_inset, metrics.header_top,
+            flex_spacing(FlexSpacingToken.small, FlexDensity.standard) - scale,
+            metrics.header_height),
+        semantic_color_paint(SemanticColorToken.accent)) == 0) { return 0; }
+    if (button_gallery_surface(&gallery.*.display, node_key(9010),
+        rect(metrics.canvas_inset, metrics.state_panel_top,
+            content_width, metrics.state_panel_height),
+        SemanticRadiusToken.panel, SemanticColorToken.surface_panel,
+        SemanticElevationToken.panel) == 0) { return 0; }
+    if (button_gallery_surface(&gallery.*.display, node_key(9020),
+        rect(metrics.canvas_inset, metrics.variant_panel_top,
+            content_width, metrics.variant_panel_height),
+        SemanticRadiusToken.panel, SemanticColorToken.surface_panel,
+        SemanticElevationToken.panel) == 0) { return 0; }
+    let state_index: i32 = 0;
+    while (state_index < button_gallery_state_count()) {
+        let column: i32 = state_index % 4;
+        let row: i32 = state_index / 4;
+        let x: i64 = metrics.canvas_inset + metrics.panel_padding +
+            (column as i64) * metrics.column_stride;
+        let y: i64 = metrics.state_card_top +
+            (row as i64) * (metrics.state_card_height + metrics.state_row_gap);
+        if (button_gallery_surface(&gallery.*.display,
+            node_key(9100 + state_index as i64),
+            rect(x, y, metrics.card_width, metrics.state_card_height),
+            SemanticRadiusToken.card, SemanticColorToken.surface_inset,
+            SemanticElevationToken.base) == 0) { return 0; }
+        state_index = state_index + 1;
+    }
+    let variant_index: i32 = 0;
+    while (variant_index < button_gallery_variant_count()) {
+        let x: i64 = metrics.canvas_inset + metrics.panel_padding +
+            (variant_index as i64) * metrics.column_stride;
+        if (button_gallery_surface(&gallery.*.display,
+            node_key(9200 + variant_index as i64),
+            rect(x, metrics.variant_card_top,
+                metrics.card_width, metrics.variant_card_height),
+            SemanticRadiusToken.card, SemanticColorToken.surface_inset,
+            SemanticElevationToken.base) == 0) { return 0; }
+        variant_index = variant_index + 1;
+    }
+    return 1;
+}
+
+fn button_gallery_static_text(gallery: *ButtonGallery,
+    face: OpenTypeFace) i32 {
+    let metrics: ButtonGalleryLayoutMetrics = button_gallery_layout_metrics();
+    if (button_gallery_record_text(gallery, button_gallery_emit_run(
+        &gallery.*.display, face, 50000, button_gallery_title_id(),
+        "Button / interaction conformance", semantic_type_size(
+            SemanticTypeToken.title), metrics.header_title_x,
+        metrics.header_title_baseline,
+        semantic_color_paint(SemanticColorToken.text_primary))) == 0) { return 0; }
+    if (button_gallery_record_text(gallery, button_gallery_emit_run(
+        &gallery.*.display, face, 50100, button_gallery_title_id(),
+        "One retained component. One identity across pixels, focus, semantics, and Talkback.",
+        semantic_type_size(SemanticTypeToken.body), metrics.header_title_x,
+        metrics.header_subtitle_baseline,
+        semantic_color_paint(SemanticColorToken.text_secondary))) == 0) { return 0; }
+    if (button_gallery_push_round(&gallery.*.display,
+        button_gallery_experimental_id(),
+        metrics.experimental_bounds,
+        semantic_radius(SemanticRadiusToken.pill),
+        semantic_color_with_alpha(SemanticColorToken.status_experimental,
+            18000)) == 0) { return 0; }
+    if (button_gallery_record_text(gallery, button_gallery_emit_centered_run(
+        &gallery.*.display, face, 50200, button_gallery_experimental_id(),
+        "EXPERIMENTAL / RFC 0007 OPEN",
+        semantic_type_size(SemanticTypeToken.caption),
+        metrics.experimental_bounds,
+        semantic_color_paint(SemanticColorToken.status_experimental))) == 0) { return 0; }
+    if (button_gallery_record_text(gallery, button_gallery_emit_run(
+        &gallery.*.display, face, 50300, button_gallery_state_heading_id(),
+        "Canonical interaction states",
+        semantic_type_size(SemanticTypeToken.heading),
+        metrics.content_left, metrics.state_heading_baseline,
+        semantic_color_paint(SemanticColorToken.text_primary))) == 0) { return 0; }
+    if (button_gallery_record_text(gallery, button_gallery_emit_run(
+        &gallery.*.display, face, 50400, button_gallery_state_heading_id(),
+        "The same secondary Button, with state expressed in shape, elevation, semantics, and action truth.",
+        semantic_type_size(SemanticTypeToken.caption),
+        metrics.content_left, metrics.state_subtitle_baseline,
+        semantic_color_paint(SemanticColorToken.text_secondary))) == 0) { return 0; }
+    if (button_gallery_record_text(gallery, button_gallery_emit_run(
+        &gallery.*.display, face, 50500, button_gallery_variant_heading_id(),
+        "Semantic variants",
+        semantic_type_size(SemanticTypeToken.heading),
+        metrics.content_left, metrics.variant_heading_baseline,
+        semantic_color_paint(SemanticColorToken.text_primary))) == 0) { return 0; }
+    if (button_gallery_record_text(gallery, button_gallery_emit_run(
+        &gallery.*.display, face, 50600, button_gallery_variant_heading_id(),
+        "Rest state isolates role differences. Literal colors are not component API.",
+        semantic_type_size(SemanticTypeToken.caption),
+        metrics.content_left, metrics.variant_subtitle_baseline,
+        semantic_color_paint(SemanticColorToken.text_secondary))) == 0) { return 0; }
+    return 1;
+}
+
+fn button_gallery_emit_button(gallery: *ButtonGallery, face: OpenTypeFace,
+    spec: ButtonSpec, text_resource_id: i64) i32 {
+    let built: ButtonBuildResult = button_emit(
+        spec, &gallery.*.display, &gallery.*.hits, &gallery.*.semantics);
+    if (built.error != ButtonBuildError.none) {
+        gallery.*.error = ButtonGalleryError.button_error;
+        gallery.*.button_error = built.error;
+        gallery.*.display_error = built.display_error;
+        gallery.*.semantics_error = built.semantics_error;
+        return 0;
+    }
+    push[ButtonArtifact](&gallery.*.artifacts, built.artifact);
+    gallery.*.button_count = gallery.*.button_count + 1;
+    if (built.artifact.content_visible != 0) {
+        let text: ButtonGalleryTextResult = button_gallery_emit_centered_run(
+            &gallery.*.display, face, text_resource_id, spec.id, spec.label,
+            semantic_type_size(SemanticTypeToken.label),
+            built.artifact.content_bounds,
+            semantic_color_paint(built.artifact.style.text_token));
+        if (button_gallery_record_text(gallery, text) == 0) { return 0; }
+        gallery.*.visible_button_label_count =
+            gallery.*.visible_button_label_count + 1;
+    }
+    return 1;
+}
+
+fn button_gallery_state_matrix(gallery: *ButtonGallery,
+    face: OpenTypeFace) i32 {
+    let scale: i64 = unit_scale();
+    let metrics: ButtonGalleryLayoutMetrics = button_gallery_layout_metrics();
+    let index: i32 = 0;
+    while (index < button_gallery_state_count()) {
+        let column: i32 = index % 4;
+        let row: i32 = index / 4;
+        let x: i64 = metrics.canvas_inset + metrics.panel_padding +
+            (column as i64) * metrics.column_stride;
+        let y: i64 = metrics.state_card_top +
+            (row as i64) * (metrics.state_card_height + metrics.state_row_gap);
+        if (button_gallery_record_text(gallery, button_gallery_emit_run(
+            &gallery.*.display, face, 51000 + (index as i64) * 100,
+            node_key(9300 + index as i64), button_gallery_state_name(index),
+            semantic_type_size(SemanticTypeToken.label),
+            x + metrics.card_padding,
+            y + metrics.card_padding +
+                semantic_type_size(SemanticTypeToken.label),
+            semantic_color_paint(SemanticColorToken.text_primary))) == 0) { return 0; }
+        if (button_gallery_record_text(gallery, button_gallery_emit_run(
+            &gallery.*.display, face, 51050 + (index as i64) * 100,
+            node_key(9400 + index as i64), button_gallery_state_detail(index),
+            semantic_type_size(SemanticTypeToken.caption),
+            x + metrics.card_padding,
+            y + metrics.card_padding +
+                semantic_type_size(SemanticTypeToken.label) +
+                metrics.heading_gap +
+                semantic_type_size(SemanticTypeToken.caption),
+            semantic_color_paint(SemanticColorToken.text_secondary))) == 0) { return 0; }
+        let spec: ButtonSpec = button_spec(button_gallery_state_id(index),
+            hit_root_key(), rect(x + metrics.card_padding,
+                y + metrics.state_control_offset,
+                metrics.card_width - metrics.card_padding * 2,
+                metrics.control_height), "Run build");
+        spec.description = button_gallery_state_description(index);
+        spec.focus_order = 1 + index as i64;
+        spec.z_order = 100 + index as i64;
+        spec.variant = ButtonVariant.secondary;
+        spec.interaction = button_canonical_state(button_gallery_state(index));
+        if (button_gallery_emit_button(gallery, face, spec,
+            53000 + (index as i64) * 100) == 0) { return 0; }
+        index = index + 1;
+    }
+    return 1;
+}
+
+fn button_gallery_variant_matrix(gallery: *ButtonGallery,
+    face: OpenTypeFace) i32 {
+    let scale: i64 = unit_scale();
+    let metrics: ButtonGalleryLayoutMetrics = button_gallery_layout_metrics();
+    let index: i32 = 0;
+    while (index < button_gallery_variant_count()) {
+        let x: i64 = metrics.canvas_inset + metrics.panel_padding +
+            (index as i64) * metrics.column_stride;
+        if (button_gallery_record_text(gallery, button_gallery_emit_run(
+            &gallery.*.display, face, 55000 + (index as i64) * 100,
+            node_key(9500 + index as i64), button_gallery_variant_name(index),
+            semantic_type_size(SemanticTypeToken.caption),
+            x + metrics.card_padding,
+            metrics.variant_card_top + metrics.card_padding +
+                semantic_type_size(SemanticTypeToken.caption),
+            semantic_color_paint(SemanticColorToken.text_secondary))) == 0) { return 0; }
+        let spec: ButtonSpec = button_spec(button_gallery_variant_id(index),
+            hit_root_key(), rect(x + metrics.card_padding,
+                metrics.variant_card_top + metrics.variant_control_offset,
+                metrics.card_width - metrics.card_padding * 2,
+                metrics.variant_control_height),
+            button_gallery_variant_label(index));
+        spec.description = button_gallery_variant_description(index);
+        spec.focus_order = 9 + index as i64;
+        spec.z_order = 200 + index as i64;
+        spec.variant = button_gallery_variant(index);
+        spec.interaction = button_canonical_state(ButtonCanonicalState.rest);
+        if (button_gallery_emit_button(gallery, face, spec,
+            56000 + (index as i64) * 100) == 0) { return 0; }
+        index = index + 1;
+    }
+    return 1;
+}
+
+fn button_gallery_hash(gallery: ButtonGallery) i64 {
+    let hash: i64 = button_hash_mix(17, gallery.display.content_hash);
+    hash = button_hash_mix(hash, gallery.display.ops.len as i64);
+    hash = button_hash_mix(hash, gallery.display.resources.resources.len as i64);
+    hash = button_hash_mix(hash, gallery.hits.revision);
+    hash = button_hash_mix(hash, gallery.semantics.revision);
+    hash = button_hash_mix(hash, gallery.button_count as i64);
+    hash = button_hash_mix(hash, gallery.visible_button_label_count as i64);
+    hash = button_hash_mix(hash, gallery.text_run_count as i64);
+    hash = button_hash_mix(hash, gallery.glyph_path_count as i64);
+    let i: i32 = 0;
+    while (i < gallery.artifacts.len) {
+        hash = button_hash_mix(hash, gallery.artifacts.data[i].evidence_hash);
+        i = i + 1;
+    }
+    return hash;
+}
+
+fn button_gallery_build(face: OpenTypeFace) ButtonGallery {
+    let gallery: ButtonGallery = button_gallery_empty();
+    let metrics: ButtonGalleryLayoutMetrics = button_gallery_layout_metrics();
+    if (face.error != OpenTypeError.none || face.units_per_em <= 0) {
+        gallery.error = ButtonGalleryError.invalid_font; return gallery;
+    }
+    if (button_gallery_background(&gallery) == 0) {
+        gallery.error = ButtonGalleryError.display_error;
+        gallery.display_error = gallery.display.last_error; return gallery;
+    }
+    if (button_gallery_semantic_text(&gallery, button_gallery_title_id(),
+        "Button interaction conformance",
+        "Experimental component contract showcase",
+        metrics.title_semantic_bounds) == 0) { return gallery; }
+    if (button_gallery_semantic_text(&gallery,
+        button_gallery_experimental_id(), "Experimental",
+        "Visual direction RFC 0007 remains open",
+        metrics.experimental_bounds) == 0) { return gallery; }
+    if (button_gallery_semantic_text(&gallery,
+        button_gallery_state_heading_id(), "Canonical interaction states",
+        "The same secondary Button across eight states",
+        metrics.state_heading_bounds) == 0) { return gallery; }
+    if (button_gallery_semantic_text(&gallery,
+        button_gallery_variant_heading_id(), "Semantic variants",
+        "Four Button roles shown at rest",
+        metrics.variant_heading_bounds) == 0) { return gallery; }
+    if (button_gallery_static_text(&gallery, face) == 0) { return gallery; }
+    if (button_gallery_state_matrix(&gallery, face) == 0) { return gallery; }
+    if (button_gallery_variant_matrix(&gallery, face) == 0) { return gallery; }
+    let sealed: DisplayError = display_list_seal(&gallery.display);
+    if (sealed != DisplayError.none) {
+        gallery.error = ButtonGalleryError.display_error;
+        gallery.display_error = sealed; return gallery;
+    }
+    gallery.evidence_hash = button_gallery_hash(gallery);
+    return gallery;
+}

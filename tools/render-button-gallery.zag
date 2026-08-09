@@ -1,0 +1,42 @@
+@import("../src/showcase/button_gallery.zag")
+@import("../src/render/png_encode.zag")
+
+fn main() i32 {
+    if (_zag_argc() != 3) {
+        _zag_eprintln("usage: render-button-gallery <font.ttf> <output.png>");
+        return 2;
+    }
+    let font_bytes: []u8 = _zag_read_file(_zag_arg(1));
+    if (font_bytes.len <= 0) { return 3; }
+    let face: OpenTypeFace = opentype_parse(font_bytes);
+    _zag_free(_zag_slice_ptr(font_bytes));
+    if (face.error != OpenTypeError.none) {
+        opentype_face_free(&face); return 4;
+    }
+    let gallery: ButtonGallery = button_gallery_build(face);
+    if (gallery.error != ButtonGalleryError.none ||
+        display_list_verify(gallery.display) != DisplayError.none) {
+        button_gallery_free(&gallery); opentype_face_free(&face); return 5;
+    }
+    let raster: CpuRasterResult = cpu_rasterize(gallery.display,
+        button_gallery_width(), button_gallery_height());
+    if (raster.error != CpuRasterError.none) {
+        cpu_raster_free(&raster); button_gallery_free(&gallery);
+        opentype_face_free(&face); return 6;
+    }
+    let png: PngEncodeResult = png_encode_surface(raster.surface);
+    if (png.error != PngEncodeError.none) {
+        png_encode_free(&png); cpu_raster_free(&raster);
+        button_gallery_free(&gallery); opentype_face_free(&face); return 7;
+    }
+    let write_error: i32 = _zag_write_file(
+        _zag_arg(2), png.bytes.data[0..png.bytes.len]);
+    _zag_print("button gallery evidence hash: ");
+    _zag_print_i64(gallery.evidence_hash); _zag_println("");
+    _zag_print("button gallery CPU hash: ");
+    _zag_print_i64(cpu_surface_hash(raster.surface)); _zag_println("");
+    png_encode_free(&png); cpu_raster_free(&raster);
+    button_gallery_free(&gallery); opentype_face_free(&face);
+    if (write_error != 0) { return 8; }
+    return 0;
+}

@@ -97,3 +97,7 @@ The executable contract in `tests/button_contract.zag` covers measurement,
 state reduction, all eight showcase states, token mapping, immutable display
 verification, hit identity, semantic state, Talkback activation, fail-closed
 disabled behavior, and atomic rollback.
+
+The executable [Button conformance gallery](button-gallery.md) repeats this
+same public component across every canonical state and semantic variant. It is
+headless CPU evidence and does not promote Button beyond `implementing`.

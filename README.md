@@ -44,7 +44,7 @@ is normative in [DEPENDENCIES.md](DEPENDENCIES.md).
 | Compiler dependency | pinned, prerequisites incomplete | [toolchain lock](contracts/toolchain.json) |
 | Platform shells | unavailable | [support matrix](SUPPORT.md) |
 | Headless core | experimental state, reconciliation, intrinsic measurement, geometry, Flex, shared Button composition, retained Canvas drawing, Grid, Overlay, scroll, virtual collections, collection semantics, Talkback, canonical paths and images, display lists, CPU raster, input, replay, and motion | [headless test](tools/test-headless.sh) |
-| Components and visual language | Button and Canvas implementing against headless contracts; direction review and all other component families remain incomplete | [component inventory](contracts/components.json) |
+| Components and visual language | Button and Canvas implementing against headless contracts; Button has an executable state/variant gallery; direction review and all other component families remain incomplete | [component inventory](contracts/components.json) |
 | Flex and Zagkit Talkback | Flex foundation and in-process ID-first Talkback dispatch executing; native transport remains unavailable | [Talkback contract](docs/automation/talkback.md) |
 | Benchmarks | scene specifications only, no results | [benchmark contract](benchmarks/README.md) |
 
@@ -57,6 +57,18 @@ Run the repository contract gate with:
 The gate validates the release identity, exact Zag revision, required platform
 families, backend truth states, upstream prerequisite ledger, component
 inventory, benchmark scene coverage, and the 1.0 block.
+
+Run and render the experimental Button conformance gallery with:
+
+```sh
+./tools/test-button-gallery.sh
+./tools/render-button-gallery.sh
+```
+
+The gallery uses the real retained Button, OpenType glyph paths, semantic
+tokens, Flex spacing, shared hit and semantics identity, and ID-first Zagkit
+Talkback. It is explicitly not the still-unselected production visual
+direction; see the [gallery contract](docs/components/button-gallery.md).
 
 The compiled headless contract currently provides revisioned `State<T>`,
 action-producing `Binding<T>`, inherited integer environment values, exact
