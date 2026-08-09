@@ -1,0 +1,324 @@
+@import("../layout/adaptive.zag")
+
+// Shared placement authority for the native showcase. Rendering, semantics,
+// hit testing, and Talkback must consume these same rectangles; no layer gets
+// to maintain a parallel set of scaled magic coordinates.
+
+enum LinuxPreviewLayoutMode { expanded, medium, compact }
+
+enum LinuxPreviewLayoutError {
+    none,
+    invalid_viewport,
+    flex_error,
+    chart_contract_violation,
+}
+
+struct LinuxPreviewLayout {
+    error: LinuxPreviewLayoutError,
+    flex_error: FlexError,
+    mode: LinuxPreviewLayoutMode,
+    viewport: Rect,
+    header: Rect,
+    header_status: Rect,
+    navigation: Rect,
+    main: Rect,
+    status: Rect,
+    page_heading: Rect,
+    chart: Rect,
+    segmented_control: Rect,
+    compact_summary: Rect,
+    navigation_is_column: i32,
+    status_visible: i32,
+    chart_visible: i32,
+    segmented_control_visible: i32,
+    outer_spacing: i64,
+    panel_padding: i64,
+    content_gap: i64,
+    section_gap: i64,
+}
+
+fn linux_preview_layout_empty(error: LinuxPreviewLayoutError)
+    LinuxPreviewLayout {
+    return LinuxPreviewLayout{
+        .error = error,
+        .flex_error = FlexError.none,
+        .mode = LinuxPreviewLayoutMode.compact,
+        .viewport = rect(0, 0, 0, 0),
+        .header = rect(0, 0, 0, 0),
+        .header_status = rect(0, 0, 0, 0),
+        .navigation = rect(0, 0, 0, 0),
+        .main = rect(0, 0, 0, 0),
+        .status = rect(0, 0, 0, 0),
+        .page_heading = rect(0, 0, 0, 0),
+        .chart = rect(0, 0, 0, 0),
+        .segmented_control = rect(0, 0, 0, 0),
+        .compact_summary = rect(0, 0, 0, 0),
+        .navigation_is_column = 0,
+        .status_visible = 0,
+        .chart_visible = 0,
+        .segmented_control_visible = 0,
+        .outer_spacing = 0,
+        .panel_padding = 0,
+        .content_gap = 0,
+        .section_gap = 0,
+    };
+}
+
+fn linux_preview_layout_mode(width: i32, height: i32)
+    LinuxPreviewLayoutMode {
+    if (width >= 1280 && height >= 800) {
+        return LinuxPreviewLayoutMode.expanded;
+    }
+    if (width >= 960 && height >= 720) {
+        return LinuxPreviewLayoutMode.medium;
+    }
+    return LinuxPreviewLayoutMode.compact;
+}
+
+fn linux_preview_layout_offset(value: Rect, x: i64, y: i64) Rect {
+    return rect(value.x + x, value.y + y, value.width, value.height);
+}
+
+fn linux_preview_layout_column_frame(layout: @borrows *FlexResult,
+    id: i64) Rect {
+    let index: i32 = 0;
+    while (index < layout.*.placements.len) {
+        if (layout.*.placements.data[index].id == id) {
+            return layout.*.placements.data[index].frame;
+        }
+        index = index + 1;
+    }
+    return rect(0, 0, 0, 0);
+}
+
+fn linux_preview_layout(width: i32, height: i32) LinuxPreviewLayout {
+    // The desktop showcase intentionally fails closed below the smallest
+    // viewport that can preserve its header, 48 px route strip, and a useful
+    // compact summary. Mobile shells have a separate placement contract.
+    if (width < 480 || height < 360 || width > 4096 || height > 2160) {
+        return linux_preview_layout_empty(
+            LinuxPreviewLayoutError.invalid_viewport);
+    }
+
+    let result: LinuxPreviewLayout = linux_preview_layout_empty(
+        LinuxPreviewLayoutError.none);
+    result.mode = linux_preview_layout_mode(width, height);
+    result.viewport = rect(0, 0, (width as i64) * unit_scale(),
+        (height as i64) * unit_scale());
+
+    let density: FlexDensity = FlexDensity.standard;
+    let outer_token: FlexSpacingToken = FlexSpacingToken.xlarge;
+    let panel_token: FlexSpacingToken = FlexSpacingToken.xlarge;
+    if (result.mode == LinuxPreviewLayoutMode.compact) {
+        outer_token = FlexSpacingToken.large;
+        panel_token = FlexSpacingToken.large;
+    }
+    result.outer_spacing = flex_spacing(outer_token, density);
+    result.panel_padding = flex_spacing(panel_token, density);
+    result.content_gap = flex_spacing(FlexSpacingToken.large, density);
+    result.section_gap = flex_spacing(FlexSpacingToken.small, density);
+
+    let header_height: i64 =
+        flex_spacing(FlexSpacingToken.xxlarge, density) * 2;
+    result.header = rect(result.outer_spacing, result.outer_spacing,
+        result.viewport.width - result.outer_spacing * 2, header_height);
+    let status_width: i64 = 200 * unit_scale();
+    let status_height: i64 = 40 * unit_scale();
+    result.header_status = rect(
+        result.header.x + result.header.width - result.panel_padding -
+            status_width,
+        result.header.y + (result.header.height - status_height) / 2,
+        status_width, status_height);
+
+    let body_y: i64 = result.header.y + result.header.height +
+        result.content_gap;
+    let body_height: i64 = result.viewport.height - result.outer_spacing -
+        body_y;
+    let body_width: i64 = result.viewport.width - result.outer_spacing * 2;
+
+    if (result.mode != LinuxPreviewLayoutMode.compact) {
+        let columns: ArrayList[FlexItem] = make[FlexItem](3);
+        let nav_width: i64 = 192 * unit_scale();
+        if (result.mode == LinuxPreviewLayoutMode.expanded) {
+            nav_width = 216 * unit_scale();
+        }
+        let nav: FlexItem = flex_item(1, nav_width, body_height);
+        nav.min_main = nav_width; nav.max_main = nav_width;
+        nav.shrink = 0;
+        push[FlexItem](&columns, nav);
+
+        let main_minimum: i64 = 688 * unit_scale();
+        let main_item: FlexItem = flex_item(2, main_minimum, body_height);
+        main_item.min_main = main_minimum;
+        main_item.grow = 1; main_item.shrink = 0;
+        push[FlexItem](&columns, main_item);
+
+        if (result.mode == LinuxPreviewLayoutMode.expanded) {
+            let rail_width: i64 = 264 * unit_scale();
+            let status_item: FlexItem = flex_item(3, rail_width, body_height);
+            status_item.min_main = rail_width;
+            status_item.max_main = rail_width;
+            status_item.shrink = 0;
+            push[FlexItem](&columns, status_item);
+            result.status_visible = 1;
+        }
+
+        let style: FlexStyle = flex_style(FlexAxis.row,
+            result.content_gap, insets_all(0));
+        style.cross_alignment = CrossAlignment.stretch;
+        let placed: FlexResult = flex_layout(columns,
+            tight_constraints(body_width, body_height), style);
+        free[FlexItem](&columns);
+        if (placed.error != FlexError.none || placed.overflow != 0 ||
+            placed.duplicate_ids != 0) {
+            result.error = LinuxPreviewLayoutError.flex_error;
+            result.flex_error = placed.error;
+            flex_free(&placed);
+            return result;
+        }
+        result.navigation = linux_preview_layout_offset(
+            linux_preview_layout_column_frame(&placed, 1),
+            result.outer_spacing, body_y);
+        result.main = linux_preview_layout_offset(
+            linux_preview_layout_column_frame(&placed, 2),
+            result.outer_spacing, body_y);
+        if (result.status_visible != 0) {
+            result.status = linux_preview_layout_offset(
+                linux_preview_layout_column_frame(&placed, 3),
+                result.outer_spacing, body_y);
+        }
+        result.navigation_is_column = 1;
+        flex_free(&placed);
+    } else {
+        let navigation_height: i64 =
+            flex_spacing(FlexSpacingToken.xxlarge, density) +
+            flex_spacing(FlexSpacingToken.large, density);
+        result.navigation = rect(result.outer_spacing, body_y, body_width,
+            navigation_height);
+        let main_y: i64 = result.navigation.y + result.navigation.height +
+            result.content_gap;
+        result.main = rect(result.outer_spacing, main_y, body_width,
+            result.viewport.height - result.outer_spacing - main_y);
+    }
+
+    let heading_height: i64 =
+        flex_spacing(FlexSpacingToken.xxlarge, density) +
+        flex_spacing(FlexSpacingToken.large, density);
+    let control_height: i64 =
+        flex_spacing(FlexSpacingToken.xxlarge, density) +
+        flex_spacing(FlexSpacingToken.medium, density);
+    let inner_width: i64 = result.main.width - result.panel_padding * 2;
+    let inner_height: i64 = result.main.height - result.panel_padding * 2;
+    result.page_heading = rect(result.main.x + result.panel_padding,
+        result.main.y + result.panel_padding, inner_width, heading_height);
+    let chart_y: i64 = result.page_heading.y + result.page_heading.height +
+        result.section_gap;
+    let chart_height: i64 = inner_height - heading_height -
+        result.section_gap * 2 - control_height;
+
+    if (inner_width >= 640 * unit_scale() &&
+        chart_height >= 420 * unit_scale()) {
+        result.chart_visible = 1;
+        result.segmented_control_visible = 1;
+        result.chart = rect(result.main.x + result.panel_padding, chart_y,
+            inner_width, chart_height);
+        let segmented_width: i64 = 520 * unit_scale();
+        if (segmented_width > inner_width) { segmented_width = inner_width; }
+        result.segmented_control = rect(result.chart.x,
+            result.chart.y + result.chart.height + result.section_gap,
+            segmented_width, control_height);
+    } else {
+        result.compact_summary = rect(result.main.x + result.panel_padding,
+            chart_y, inner_width,
+            result.main.y + result.main.height - result.panel_padding -
+                chart_y);
+    }
+
+    if (result.mode != LinuxPreviewLayoutMode.compact &&
+        result.chart_visible == 0) {
+        result.error = LinuxPreviewLayoutError.chart_contract_violation;
+    }
+    return result;
+}
+
+fn linux_preview_navigation_item_bounds(layout: LinuxPreviewLayout,
+    index: i32, item_count: i32) Rect {
+    if (layout.error != LinuxPreviewLayoutError.none || index < 0 ||
+        item_count <= 0 || index >= item_count) {
+        return rect(0, 0, 0, 0);
+    }
+    let density: FlexDensity = FlexDensity.standard;
+    let inset: i64 = flex_spacing(FlexSpacingToken.large, density);
+    let gap: i64 = flex_spacing(FlexSpacingToken.small, density);
+    let target: i64 = 48 * unit_scale();
+    if (layout.navigation_is_column != 0) {
+        return rect(layout.navigation.x + inset,
+            layout.navigation.y + inset + (target + gap) * (index as i64),
+            layout.navigation.width - inset * 2, target);
+    }
+    let available: i64 = layout.navigation.width - inset * 2 -
+        gap * ((item_count - 1) as i64);
+    let item_width: i64 = available / (item_count as i64);
+    let leading: i64 = inset + (available -
+        item_width * (item_count as i64)) / 2;
+    return rect(layout.navigation.x + leading +
+        (item_width + gap) * (index as i64),
+        layout.navigation.y + (layout.navigation.height - target) / 2,
+        item_width, target);
+}
+
+fn linux_preview_inspect_bounds(layout: LinuxPreviewLayout) Rect {
+    if (layout.error != LinuxPreviewLayoutError.none ||
+        layout.page_heading.width <= 0) {
+        return rect(0, 0, 0, 0);
+    }
+    let width: i64 = 120 * unit_scale();
+    let height: i64 = 44 * unit_scale();
+    return rect(layout.page_heading.x + layout.page_heading.width - width,
+        layout.page_heading.y + (layout.page_heading.height - height) / 2,
+        width, height);
+}
+
+fn linux_preview_segment_bounds(layout: LinuxPreviewLayout,
+    index: i32, item_count: i32) Rect {
+    if (layout.error != LinuxPreviewLayoutError.none ||
+        layout.segmented_control_visible == 0 || index < 0 ||
+        item_count <= 0 || index >= item_count) {
+        return rect(0, 0, 0, 0);
+    }
+    let item_width: i64 = layout.segmented_control.width /
+        (item_count as i64);
+    let right: i64 = layout.segmented_control.x +
+        layout.segmented_control.width;
+    let x: i64 = layout.segmented_control.x +
+        item_width * (index as i64);
+    let width: i64 = item_width;
+    if (index == item_count - 1) { width = right - x; }
+    return rect(x, layout.segmented_control.y, width,
+        layout.segmented_control.height);
+}
+
+fn linux_preview_status_item_bounds(layout: LinuxPreviewLayout,
+    index: i32, item_count: i32) Rect {
+    if (layout.error != LinuxPreviewLayoutError.none ||
+        layout.status_visible == 0 || index < 0 || item_count <= 0 ||
+        index >= item_count) {
+        return rect(0, 0, 0, 0);
+    }
+    let density: FlexDensity = FlexDensity.standard;
+    let inset: i64 = flex_spacing(FlexSpacingToken.large, density);
+    let gap: i64 = flex_spacing(FlexSpacingToken.small, density);
+    let desired_height: i64 = 96 * unit_scale();
+    let available: i64 = layout.status.height - inset * 2 -
+        gap * ((item_count - 1) as i64);
+    let item_height: i64 = desired_height;
+    if (item_height * (item_count as i64) > available) {
+        item_height = available / (item_count as i64);
+    }
+    if (item_height < 44 * unit_scale()) {
+        return rect(0, 0, 0, 0);
+    }
+    return rect(layout.status.x + inset,
+        layout.status.y + inset + (item_height + gap) * (index as i64),
+        layout.status.width - inset * 2, item_height);
+}
