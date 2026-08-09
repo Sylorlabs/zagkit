@@ -17,6 +17,10 @@ but it must be labeled experimental and cannot promote the visual system.
   accepted as token proof.
 - Component-local exceptions are named, reviewable, and never silently become
   a second token scale.
+- The showcase includes a live token-catalog/inspector route where reviewers
+  can select a rendered node and see its color, type, spacing, radius,
+  elevation, material, and interaction-state token IDs. Source-only token
+  tables do not count as visible showcase proof.
 
 ### Semantic symbols and color
 
@@ -35,6 +39,9 @@ but it must be labeled experimental and cannot promote the visual system.
   navigation system.
 - Typography demonstrates display, title, heading, body, label, caption, and
   code roles with tested line-height, truncation, locale, and large-text rules.
+- A reusable component gallery, typography route, and inspector route are
+  independently navigable native compositions. A single dashboard containing
+  one instance of each shape does not count as proof that the system scales.
 
 ### Interaction states
 
@@ -45,6 +52,9 @@ but it must be labeled experimental and cannot promote the visual system.
   transparency, reduced motion, grayscale, and color-vision simulations.
 - Hover is supplementary. Keyboard, touch, pen, gamepad, accessibility action,
   and Zagkit Talkback reach the same action and state truth.
+- State fixtures identify their state in visible text and semantics, so color
+  alone is never the evidence that hover, focus, selection, loading, disabled,
+  or error styling exists.
 
 ### Data visualization
 
@@ -60,6 +70,10 @@ but it must be labeled experimental and cannot promote the visual system.
   focused states, arrow-key behavior, disabled behavior, and tab semantics.
 - Navigation exposes one canonical active location. Contextual inspectors and
   system status are labeled and styled as their actual roles.
+- A read-only status rail owns no navigation actions, focus stops, selection,
+  or pointer hit targets. Its category/status marks are either documented
+  semantic symbols with redundant text or explicitly decorative; arbitrary
+  colored-dot filler is a conformance failure.
 - Every enabled navigation item activates its named destination: the selected
   label, main landmark, visible heading, semantics, actions, and Talkback tree
   must describe the same content. An item whose destination is not implemented
