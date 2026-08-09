@@ -334,7 +334,8 @@ fn semantics_find_index(tree: SemanticsTree, id: NodeKey) i32 {
     return 0 - 1;
 }
 
-fn semantics_fail(tree: *SemanticsTree, error: SemanticsError, id: NodeKey) SemanticsError {
+fn semantics_fail(tree: @borrows_mut *SemanticsTree,
+    error: SemanticsError, id: NodeKey) SemanticsError {
     tree.*.last_error = error;
     tree.*.error_node = id;
     return error;
@@ -389,7 +390,8 @@ fn semantics_state_valid(spec: SemanticsSpec) i32 {
     return 1;
 }
 
-fn semantics_add(tree: *SemanticsTree, spec: SemanticsSpec) SemanticsError {
+fn semantics_add(tree: @borrows_mut *SemanticsTree,
+    spec: SemanticsSpec) SemanticsError {
     if (node_key_equal(spec.id, semantic_root_key()) == 1 ||
         node_key_equal(spec.id, semantic_none_key()) == 1) {
         return semantics_fail(tree, SemanticsError.invalid_id, spec.id);
