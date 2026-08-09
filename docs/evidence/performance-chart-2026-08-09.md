@@ -7,6 +7,8 @@ production polish.
 ## Focused result
 
 - Strict executable contract: `Performance chart contract: pass=18 fail=0`.
+- Strict hosted-composition contract:
+  `Performance chart host contract: pass=9 fail=0`.
 - Retained evidence hash: `1042463816`.
 - Deterministic Canvas-only CPU surface hash: `1813314353`.
 - The same spec rebuilt with identical display-list, semantic, typography-slot,
@@ -28,6 +30,11 @@ table cell by derived stable ID, and keeps pixel fallback disabled.
 Twenty-four owned typography slots cover the title, four axis name/unit roles,
 fourteen tick labels, three legend names, baseline, and deadline. Each slot
 records exact bounds, stable semantic ID, type token, and color token.
+
+The hosted contract contributes the same built artifact beneath explicit caller
+semantic and hit parents. It preserves all chart-local IDs and child parentage,
+offsets focus order through a caller-selected collision-checked range, stages
+display ownership, and fails atomically on duplicate IDs or missing parents.
 
 ## Honest boundary
 

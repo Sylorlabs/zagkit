@@ -122,6 +122,75 @@ struct PerformanceChartArtifact {
     evidence_hash: i64,
 }
 
+enum PerformanceChartHostError {
+    none,
+    invalid_artifact,
+    invalid_destination,
+    invalid_focus_offset,
+    missing_semantic_parent,
+    missing_hit_parent,
+    duplicate_semantic_id,
+    duplicate_hit_id,
+    focus_order_collision,
+    display_error,
+    semantics_error,
+    hit_error,
+}
+
+struct PerformanceChartHostSpec {
+    semantic_parent: NodeKey,
+    hit_parent: NodeKey,
+    focus_order_offset: i64,
+}
+
+struct PerformanceChartHostResult {
+    error: PerformanceChartHostError,
+    canvas_error: CanvasError,
+    display_error: DisplayError,
+    semantics_error: SemanticsError,
+    hit_error: HitTreeError,
+    display_operations_added: i32,
+    display_resources_added: i32,
+    semantic_nodes_added: i32,
+    hit_nodes_added: i32,
+}
+
+struct PerformanceChartHostCheckpoint {
+    semantics: SemanticsCheckpoint,
+    hit_length: i32,
+    hit_revision: i64,
+    hit_last_error: HitTreeError,
+    hit_error_node: NodeKey,
+}
+
+struct PerformanceChartDisplayStage {
+    display: DisplayList,
+    valid: i32,
+}
+
+fn performance_chart_host_spec(semantic_parent: NodeKey,
+    hit_parent: NodeKey, focus_order_offset: i64) PerformanceChartHostSpec {
+    return PerformanceChartHostSpec{
+        .semantic_parent = semantic_parent,
+        .hit_parent = hit_parent,
+        .focus_order_offset = focus_order_offset,
+    };
+}
+
+fn performance_chart_host_empty_result() PerformanceChartHostResult {
+    return PerformanceChartHostResult{
+        .error = PerformanceChartHostError.none,
+        .canvas_error = CanvasError.none,
+        .display_error = DisplayError.none,
+        .semantics_error = SemanticsError.none,
+        .hit_error = HitTreeError.none,
+        .display_operations_added = 0,
+        .display_resources_added = 0,
+        .semantic_nodes_added = 0,
+        .hit_nodes_added = 0,
+    };
+}
+
 fn performance_chart_point(x: i64, y: i64,
     x_value: []u8, y_value: []u8) PerformanceChartPoint {
     return PerformanceChartPoint{
@@ -1048,4 +1117,352 @@ fn performance_chart_build(spec: PerformanceChartSpec) PerformanceChartArtifact 
         performance_chart_table(&artifact, spec) == 0) { return artifact; }
     artifact.evidence_hash = performance_chart_hash(artifact);
     return artifact;
+}
+
+fn performance_chart_host_focus_order_limit() i64 { return 1000000; }
+
+fn performance_chart_host_checkpoint(semantics: SemanticsTree,
+    hits: HitTree) PerformanceChartHostCheckpoint {
+    return PerformanceChartHostCheckpoint{
+        .semantics = semantics_tree_checkpoint(semantics),
+        .hit_length = hits.nodes.len,
+        .hit_revision = hits.revision,
+        .hit_last_error = hits.last_error,
+        .hit_error_node = hits.error_node,
+    };
+}
+
+fn performance_chart_host_rollback(semantics: *SemanticsTree,
+    hits: *HitTree,
+    checkpoint: PerformanceChartHostCheckpoint) void {
+    _ = semantics_tree_rollback(semantics, checkpoint.semantics);
+    hits.*.nodes.len = checkpoint.hit_length;
+    hits.*.revision = checkpoint.hit_revision;
+    hits.*.last_error = checkpoint.hit_last_error;
+    hits.*.error_node = checkpoint.hit_error_node;
+}
+
+fn performance_chart_host_semantic_spec(node: SemanticsNode) SemanticsSpec {
+    return SemanticsSpec{
+        .id = node.id,
+        .parent = node.parent,
+        .role = node.role,
+        .name = node.name.data[0..node.name.len],
+        .description = node.description.data[0..node.description.len],
+        .value = node.value.data[0..node.value.len],
+        .action_mask = node.action_mask,
+        .focus_order = node.focus_order,
+        .disabled = node.disabled,
+        .selected = node.selected,
+        .hidden = node.hidden,
+        .live_region = node.live_region,
+        .has_range = node.has_range,
+        .range_min = node.range_min,
+        .range_max = node.range_max,
+        .range_value = node.range_value,
+        .range_step = node.range_step,
+        .text_length = node.text_length,
+        .selection_start = node.selection_start,
+        .selection_end = node.selection_end,
+        .has_bounds = node.has_bounds,
+        .bounds = node.bounds,
+        .labelled_by = node.labelled_by,
+        .described_by = node.described_by,
+        .controls = node.controls,
+        .row_count = node.row_count,
+        .column_count = node.column_count,
+        .row_index = node.row_index,
+        .column_index = node.column_index,
+        .row_span = node.row_span,
+        .column_span = node.column_span,
+        .level = node.level,
+        .set_size = node.set_size,
+        .position_in_set = node.position_in_set,
+        .expanded = node.expanded,
+    };
+}
+
+fn performance_chart_host_artifact_valid(
+    artifact: PerformanceChartArtifact) i32 {
+    let semantic_root: i32 = semantics_find_index(
+        artifact.semantics, artifact.canvas.key);
+    let hit_root: i32 = hit_tree_find_index(
+        artifact.hits, artifact.canvas.key);
+    if (artifact.error != PerformanceChartError.none ||
+        artifact.evidence_hash == 0 ||
+        artifact.evidence_hash != performance_chart_hash(artifact) ||
+        artifact.semantics.nodes.len <= 0 || artifact.hits.nodes.len <= 0 ||
+        artifact.hits.nodes.len != artifact.legend.len + 1) { return 0; }
+    if (semantic_root < 0 || hit_root < 0 ||
+        node_key_equal(artifact.semantics.nodes.data[semantic_root].parent,
+            semantic_root_key()) == 0 ||
+        node_key_equal(artifact.hits.nodes.data[hit_root].parent,
+            hit_root_key()) == 0) { return 0; }
+    let i: i32 = 0;
+    while (i < artifact.legend.len) {
+        let id: NodeKey = artifact.legend.data[i].id;
+        let semantic_index: i32 = semantics_find_index(
+            artifact.semantics, id);
+        let hit_index: i32 = hit_tree_find_index(artifact.hits, id);
+        if (semantic_index < 0 || hit_index < 0 ||
+            node_key_equal(artifact.semantics.nodes.data[semantic_index].parent,
+                performance_chart_legend_id(artifact.canvas.key)) == 0 ||
+            node_key_equal(artifact.hits.nodes.data[hit_index].parent,
+                artifact.canvas.key) == 0) { return 0; }
+        i = i + 1;
+    }
+    return 1;
+}
+
+fn performance_chart_host_resource_copy(resource: RenderResource) RenderResource {
+    return RenderResource{
+        .id = resource.id,
+        .kind = resource.kind,
+        .payload = render_resource_payload_copy(
+            resource.payload.data[0..resource.payload.len]),
+        .revision = resource.revision,
+        .format_tag = resource.format_tag,
+        .width = resource.width,
+        .height = resource.height,
+        .color_space = resource.color_space,
+        .content_hash = resource.content_hash,
+    };
+}
+
+fn performance_chart_host_stage_display(source: DisplayList)
+    PerformanceChartDisplayStage {
+    let staged: DisplayList = display_list_make_with_resource_limits(
+        source.resources.max_resources, source.resources.max_total_bytes,
+        source.resources.max_payload_bytes);
+    let result: PerformanceChartDisplayStage = PerformanceChartDisplayStage{
+        .display = staged,
+        .valid = 0,
+    };
+    if (source.sealed != 0 || source.resources.sealed != 0 ||
+        source.last_error != DisplayError.none ||
+        source.resources.last_error != RenderResourceError.none ||
+        source.error_index != 0 - 1 || source.resources.error_id != 0 ||
+        render_resource_store_configuration_valid(source.resources) == 0 ||
+        source.stack_depth < 0 || source.layer_depth < 0) { return result; }
+    let total: i64 = 0;
+    let resource_index: i32 = 0;
+    while (resource_index < source.resources.resources.len) {
+        let resource: RenderResource = source.resources.resources.data[resource_index];
+        if (resource.id <= 0 || resource.payload.len <= 0 ||
+            render_resource_hash(resource) != resource.content_hash ||
+            (resource_index > 0 && source.resources.resources.data[
+                resource_index - 1].id >= resource.id)) { return result; }
+        push[RenderResource](&result.display.resources.resources,
+            performance_chart_host_resource_copy(resource));
+        total = total + resource.payload.len as i64;
+        resource_index = resource_index + 1;
+    }
+    if (total != source.resources.total_bytes ||
+        render_resource_store_hash(source.resources) !=
+            source.resources.content_hash) { return result; }
+    result.display.resources.total_bytes = source.resources.total_bytes;
+    result.display.resources.revision = source.resources.revision;
+    result.display.resources.content_hash = source.resources.content_hash;
+    result.display.resources.last_error = RenderResourceError.none;
+    result.display.resources.error_id = 0;
+    result.display.content_hash = display_mix(17,
+        result.display.resources.content_hash);
+    result.display.revision = result.display.resources.revision;
+    let operation_index: i32 = 0;
+    while (operation_index < source.ops.len) {
+        if (display_list_push(&result.display,
+            source.ops.data[operation_index]) != DisplayError.none) { return result; }
+        operation_index = operation_index + 1;
+    }
+    if (result.display.stack_depth != source.stack_depth ||
+        result.display.layer_depth != source.layer_depth ||
+        result.display.revision != source.revision ||
+        result.display.content_hash != source.content_hash ||
+        display_list_calculate_hash(result.display) != source.content_hash) {
+        return result;
+    }
+    result.valid = 1;
+    return result;
+}
+
+fn performance_chart_host_semantics_preflight(
+    artifact: PerformanceChartArtifact,
+    host: PerformanceChartHostSpec,
+    destination: SemanticsTree) PerformanceChartHostError {
+    if (node_key_equal(host.semantic_parent, semantic_root_key()) == 0 &&
+        semantics_find_index(destination, host.semantic_parent) < 0) {
+        return PerformanceChartHostError.missing_semantic_parent;
+    }
+    let i: i32 = 0;
+    while (i < artifact.semantics.nodes.len) {
+        let source: SemanticsNode = artifact.semantics.nodes.data[i];
+        if (semantics_find_index(destination, source.id) >= 0) {
+            return PerformanceChartHostError.duplicate_semantic_id;
+        }
+        if (source.focus_order > 0) {
+            if (source.focus_order > performance_chart_host_focus_order_limit() -
+                host.focus_order_offset) {
+                return PerformanceChartHostError.invalid_focus_offset;
+            }
+            let hosted_order: i64 = source.focus_order + host.focus_order_offset;
+            let existing: i32 = 0;
+            while (existing < destination.nodes.len) {
+                if (destination.nodes.data[existing].focus_order == hosted_order) {
+                    return PerformanceChartHostError.focus_order_collision;
+                }
+                existing = existing + 1;
+            }
+        }
+        i = i + 1;
+    }
+    return PerformanceChartHostError.none;
+}
+
+fn performance_chart_host_hits_preflight(
+    artifact: PerformanceChartArtifact,
+    host: PerformanceChartHostSpec,
+    destination: HitTree) PerformanceChartHostError {
+    if (node_key_equal(host.hit_parent, hit_root_key()) == 0 &&
+        hit_tree_find_index(destination, host.hit_parent) < 0) {
+        return PerformanceChartHostError.missing_hit_parent;
+    }
+    let i: i32 = 0;
+    while (i < artifact.hits.nodes.len) {
+        if (hit_tree_find_index(destination,
+            artifact.hits.nodes.data[i].id) >= 0) {
+            return PerformanceChartHostError.duplicate_hit_id;
+        }
+        i = i + 1;
+    }
+    return PerformanceChartHostError.none;
+}
+
+fn performance_chart_host_add_semantics(
+    artifact: PerformanceChartArtifact,
+    host: PerformanceChartHostSpec,
+    destination: *SemanticsTree) SemanticsError {
+    let i: i32 = 0;
+    while (i < artifact.semantics.nodes.len) {
+        let source: SemanticsNode = artifact.semantics.nodes.data[i];
+        let spec: SemanticsSpec = performance_chart_host_semantic_spec(source);
+        if (node_key_equal(source.id, artifact.canvas.key) != 0) {
+            if (node_key_equal(source.parent, semantic_root_key()) == 0) {
+                return SemanticsError.missing_parent;
+            }
+            spec.parent = host.semantic_parent;
+        }
+        if (spec.focus_order > 0) {
+            spec.focus_order = spec.focus_order + host.focus_order_offset;
+        }
+        let error: SemanticsError = semantics_add(destination, spec);
+        if (error != SemanticsError.none) { return error; }
+        i = i + 1;
+    }
+    return SemanticsError.none;
+}
+
+fn performance_chart_host_add_hits(
+    artifact: PerformanceChartArtifact,
+    host: PerformanceChartHostSpec,
+    destination: *HitTree) HitTreeError {
+    let i: i32 = 0;
+    while (i < artifact.hits.nodes.len) {
+        let source: HitNode = artifact.hits.nodes.data[i];
+        if (node_key_equal(source.id, artifact.canvas.key) != 0) {
+            if (node_key_equal(source.parent, hit_root_key()) == 0) {
+                return HitTreeError.missing_parent;
+            }
+            source.parent = host.hit_parent;
+        }
+        let error: HitTreeError = hit_tree_add(destination, source);
+        if (error != HitTreeError.none) { return error; }
+        i = i + 1;
+    }
+    return HitTreeError.none;
+}
+
+// Atomically hosts one already-built chart beneath caller-owned semantic and
+// hit parents. Only the chart root is reparented. Child IDs and parent links are
+// preserved, while non-zero focus orders are shifted by the explicit offset.
+fn performance_chart_contribute_hosted(
+    artifact: *PerformanceChartArtifact,
+    host: PerformanceChartHostSpec,
+    display: *DisplayList,
+    semantics: *SemanticsTree,
+    hits: *HitTree) PerformanceChartHostResult {
+    let result: PerformanceChartHostResult = performance_chart_host_empty_result();
+    if (performance_chart_host_artifact_valid(artifact.*) == 0 ||
+        canvas_verify(&artifact.*.canvas) != CanvasError.none) {
+        result.error = PerformanceChartHostError.invalid_artifact; return result;
+    }
+    if (host.focus_order_offset < 0 || host.focus_order_offset >
+        performance_chart_host_focus_order_limit()) {
+        result.error = PerformanceChartHostError.invalid_focus_offset; return result;
+    }
+    let semantic_preflight: PerformanceChartHostError =
+        performance_chart_host_semantics_preflight(artifact.*, host, semantics.*);
+    if (semantic_preflight != PerformanceChartHostError.none) {
+        result.error = semantic_preflight; return result;
+    }
+    let hit_preflight: PerformanceChartHostError =
+        performance_chart_host_hits_preflight(artifact.*, host, hits.*);
+    if (hit_preflight != PerformanceChartHostError.none) {
+        result.error = hit_preflight; return result;
+    }
+    let display_preflight: CanvasError = canvas_destination_preflight(
+        artifact.*.canvas, display.*);
+    if (display_preflight != CanvasError.none) {
+        result.error = PerformanceChartHostError.invalid_destination;
+        result.canvas_error = display_preflight; return result;
+    }
+    let staged: PerformanceChartDisplayStage =
+        performance_chart_host_stage_display(display.*);
+    if (staged.valid == 0) {
+        display_list_free(&staged.display);
+        result.error = PerformanceChartHostError.invalid_destination;
+        return result;
+    }
+    let display_ops_before: i32 = staged.display.ops.len;
+    let display_resources_before: i32 = staged.display.resources.resources.len;
+    // Canvas reports contribution failures through scalar diagnostic fields.
+    // Keep those writes local so a failed hosted transaction cannot invalidate
+    // the reusable caller-owned artifact.
+    let staged_canvas: Canvas = artifact.*.canvas;
+    let contributed: CanvasError = canvas_contribute_display(
+        &staged_canvas, &staged.display);
+    if (contributed != CanvasError.none) {
+        result.error = PerformanceChartHostError.display_error;
+        result.canvas_error = contributed;
+        result.display_error = staged.display.last_error;
+        display_list_free(&staged.display); return result;
+    }
+
+    let checkpoint: PerformanceChartHostCheckpoint =
+        performance_chart_host_checkpoint(semantics.*, hits.*);
+    let semantic_error: SemanticsError = performance_chart_host_add_semantics(
+        artifact.*, host, semantics);
+    if (semantic_error != SemanticsError.none) {
+        performance_chart_host_rollback(semantics, hits, checkpoint);
+        display_list_free(&staged.display);
+        result.error = PerformanceChartHostError.semantics_error;
+        result.semantics_error = semantic_error; return result;
+    }
+    let hit_error: HitTreeError = performance_chart_host_add_hits(
+        artifact.*, host, hits);
+    if (hit_error != HitTreeError.none) {
+        performance_chart_host_rollback(semantics, hits, checkpoint);
+        display_list_free(&staged.display);
+        result.error = PerformanceChartHostError.hit_error;
+        result.hit_error = hit_error; return result;
+    }
+
+    let previous: DisplayList = display.*;
+    display.* = staged.display;
+    display_list_free(&previous);
+    result.display_operations_added = display.*.ops.len - display_ops_before;
+    result.display_resources_added = display.*.resources.resources.len -
+        display_resources_before;
+    result.semantic_nodes_added = semantics.*.nodes.len - checkpoint.semantics.length;
+    result.hit_nodes_added = hits.*.nodes.len - checkpoint.hit_length;
+    return result;
 }

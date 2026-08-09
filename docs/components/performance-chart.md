@@ -83,6 +83,46 @@ focus ring—not evidence that a native integration rendered the Text children.
 The component remains experimental until a Text-composed showcase and native
 accessibility execution cover this boundary.
 
+## Hosted composition
+
+`performance_chart_contribute_hosted` atomically contributes an already-built
+`PerformanceChartArtifact` into caller-owned `DisplayList`, `SemanticsTree`, and
+`HitTree` destinations. `PerformanceChartHostSpec` requires three explicit
+values:
+
+- `semantic_parent`, which must be the semantic root or an ID already present in
+  the destination semantic tree;
+- `hit_parent`, which must be the hit root or an ID already present in the
+  destination hit tree; and
+- `focus_order_offset`, a non-negative integer whose shifted chart focus orders
+  must be no greater than one million and must not collide with any destination
+  focus order.
+
+The chart's Canvas group is the only semantic and hit node reparented. Title,
+axis, tick, reference, legend, series, row, cell, and table IDs stay unchanged,
+and every child retains its existing chart-local parent. Non-zero legend focus
+orders become `source order + focus_order_offset`; zero remains zero. The API
+never searches for an unused focus range or silently renumbers the host.
+
+The caller must provide an unsealed, internally consistent display list with
+enough operation/resource capacity and no resource IDs used by the chart. All
+chart semantic and hit IDs must also be absent. Missing parents, duplicate IDs,
+resource collisions, invalid offsets, and focus collisions fail closed.
+
+Display contribution is staged in a deep owned clone. The caller's original
+display list is replaced only after Canvas, semantics, and hit contribution all
+succeed. Semantic mutation uses `SemanticsCheckpoint`; hit mutation uses an
+exact length/revision/error checkpoint. Any contribution error restores the
+semantic and hit destinations and discards the staged display, so a result with
+an error never represents partial chart attachment.
+
+Successful hosted contribution still does not render typography. Before sealing
+the destination display list, the host must render every owned `text_slots`
+entry through Zagkit Text using its exact ID, bounds, type token, color token,
+and text. The host owns any wider transaction that combines chart attachment
+with those subsequent Text children. It must keep the artifact alive while
+reading slots and call `performance_chart_free` when finished.
+
 ## Semantics and data equivalence
 
 The Canvas contributes one named group. Its children provide:
@@ -120,10 +160,13 @@ Run:
 ./tools/test-performance-chart.sh
 ```
 
-The contract builds the same chart twice, verifies sealed Canvas identity,
-Flex-derived geometry, token roles, complete text slots, semantic table
+The root-owned contract builds the same chart twice, verifies sealed Canvas
+identity, Flex-derived geometry, token roles, complete text slots, semantic table
 coordinates, stable-ID Talkback actions, fail-closed duplicate IDs, and
-pixel-identical CPU output.
+pixel-identical CPU output. The hosted contract additionally verifies explicit
+parents, exact contribution counts, root-only reparenting, stable child IDs,
+focus-offset collision policy, atomic duplicate/missing-parent failures, and
+deterministic caller-owned display content.
 
 This slice does not provide arbitrary chart types, logarithmic/time scales,
 locale formatting, axis collision avoidance, zoom, pan, tooltip interaction,

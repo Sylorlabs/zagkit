@@ -10,9 +10,13 @@ if [ ! -x "$znc" ]; then
 fi
 
 binary=$(mktemp /tmp/zagkit-test-performance-chart.XXXXXX)
-cleanup() { rm -f -- "$binary"; }
+host_binary=$(mktemp /tmp/zagkit-test-performance-chart-host.XXXXXX)
+cleanup() { rm -f -- "$binary" "$host_binary"; }
 trap cleanup EXIT
 
 "$znc" "$root/tests/performance_chart_contract.zag" --no-zagd \
     --analyze-strict --no-foreground-cache -o "$binary"
 "$binary"
+"$znc" "$root/tests/performance_chart_host_contract.zag" --no-zagd \
+    --analyze-strict --no-foreground-cache -o "$host_binary"
+"$host_binary"
