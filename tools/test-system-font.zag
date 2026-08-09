@@ -1,0 +1,47 @@
+@import("../src/text/unicode.zag")
+@import("../src/text/opentype.zag")
+
+fn main() i32 {
+    if (_zag_argc() != 2) {
+        _zag_eprintln("usage: test-system-font <font.ttf-or-otf>");
+        return 2;
+    }
+    let bytes: []u8 = _zag_read_file(_zag_arg(1));
+    if (bytes.len <= 0) {
+        if (bytes.len >= 0) { _zag_free(_zag_slice_ptr(bytes)); }
+        _zag_eprintln("system font smoke: font bytes unavailable");
+        return 3;
+    }
+    let face: OpenTypeFace = opentype_parse(bytes);
+    _zag_free(_zag_slice_ptr(bytes));
+    if (face.error != OpenTypeError.none) {
+        opentype_face_free(&face);
+        _zag_eprintln("system font smoke: OpenType parse failed");
+        return 4;
+    }
+    let text: Utf8DecodeResult = utf8_decode("Zagkit");
+    if (text.error != Utf8Error.none) {
+        utf8_decode_free(&text); opentype_face_free(&face);
+        return 5;
+    }
+    let index: i32 = 0;
+    while (index < text.scalars.len) {
+        let glyph: GlyphLookup = opentype_glyph_for_scalar(
+            face, text.scalars.data[index].value);
+        if (glyph.error != OpenTypeError.none || glyph.glyph_id == 0) {
+            utf8_decode_free(&text); opentype_face_free(&face);
+            _zag_eprintln("system font smoke: required Latin glyph is unavailable");
+            return 6;
+        }
+        index = index + 1;
+    }
+    _zag_print("system font smoke: unitsPerEm=");
+    _zag_print_i64(face.units_per_em as i64);
+    _zag_print(" glyphs=");
+    _zag_print_i64(face.glyph_count as i64);
+    _zag_print(" mapped_scalars=");
+    _zag_print_i64(text.scalars.len as i64);
+    _zag_println("");
+    utf8_decode_free(&text); opentype_face_free(&face);
+    return 0;
+}

@@ -1,0 +1,122 @@
+@import("std:list")
+
+// Unicode scalar decoding is owned by Zagkit. The decoder is strict: malformed
+// UTF-8 never becomes silently substituted UI text, and the exact offending
+// byte remains available to editing, diagnostics, fuzzing, and replay.
+
+enum Utf8Error {
+    none,
+    input_too_large,
+    truncated,
+    invalid_lead,
+    invalid_continuation,
+    overlong,
+    surrogate,
+    out_of_range,
+}
+
+struct UnicodeScalar {
+    value: i64,
+    byte_start: i64,
+    byte_length: i32,
+}
+
+struct Utf8DecodeResult {
+    scalars: ArrayList[UnicodeScalar],
+    error: Utf8Error,
+    error_offset: i64,
+}
+
+fn unicode_scalar(value: i64, start: i64, length: i32) UnicodeScalar {
+    return UnicodeScalar{
+        .value = value,
+        .byte_start = start,
+        .byte_length = length,
+    };
+}
+
+fn utf8_result() Utf8DecodeResult {
+    return Utf8DecodeResult{
+        .scalars = make[UnicodeScalar](16),
+        .error = Utf8Error.none,
+        .error_offset = 0,
+    };
+}
+
+fn utf8_fail(result: *Utf8DecodeResult, error: Utf8Error, offset: i64) void {
+    result.*.error = error;
+    result.*.error_offset = offset;
+}
+
+fn utf8_continuation(byte: i32) i32 {
+    return ((byte & 192) == 128) as i32;
+}
+
+fn utf8_decode(bytes: []u8) Utf8DecodeResult {
+    let result: Utf8DecodeResult = utf8_result();
+    if (bytes.len > 1048576) {
+        utf8_fail(&result, Utf8Error.input_too_large, bytes.len as i64);
+        return result;
+    }
+    let offset: i32 = 0;
+    while (offset < bytes.len) {
+        let lead: i32 = bytes[offset] as i32;
+        let length: i32 = 0;
+        let value: i64 = 0;
+        let minimum: i64 = 0;
+        if (lead < 128) {
+            length = 1;
+            value = lead as i64;
+        } else if (lead >= 194 && lead <= 223) {
+            length = 2;
+            value = (lead & 31) as i64;
+            minimum = 128;
+        } else if (lead >= 224 && lead <= 239) {
+            length = 3;
+            value = (lead & 15) as i64;
+            minimum = 2048;
+        } else if (lead >= 240 && lead <= 244) {
+            length = 4;
+            value = (lead & 7) as i64;
+            minimum = 65536;
+        } else {
+            utf8_fail(&result, Utf8Error.invalid_lead, offset as i64);
+            return result;
+        }
+        if (offset + length > bytes.len) {
+            utf8_fail(&result, Utf8Error.truncated, offset as i64);
+            return result;
+        }
+        let continuation_index: i32 = 1;
+        while (continuation_index < length) {
+            let continuation: i32 = bytes[offset + continuation_index] as i32;
+            if (utf8_continuation(continuation) == 0) {
+                utf8_fail(&result, Utf8Error.invalid_continuation,
+                    (offset + continuation_index) as i64);
+                return result;
+            }
+            value = (value << 6) | ((continuation & 63) as i64);
+            continuation_index = continuation_index + 1;
+        }
+        if (length > 1 && value < minimum) {
+            utf8_fail(&result, Utf8Error.overlong, offset as i64);
+            return result;
+        }
+        if (value >= 55296 && value <= 57343) {
+            utf8_fail(&result, Utf8Error.surrogate, offset as i64);
+            return result;
+        }
+        if (value > 1114111) {
+            utf8_fail(&result, Utf8Error.out_of_range, offset as i64);
+            return result;
+        }
+        push[UnicodeScalar](&result.scalars,
+            unicode_scalar(value, offset as i64, length));
+        offset = offset + length;
+    }
+    return result;
+}
+
+fn utf8_decode_free(result: *Utf8DecodeResult) void {
+    free[UnicodeScalar](&result.*.scalars);
+}

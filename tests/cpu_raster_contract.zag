@@ -98,6 +98,24 @@ fn exact_fill_contract(state: *TestState) void {
     display_list_free(&list);
 }
 
+fn rounded_fill_contract(state: *TestState) void {
+    let list: DisplayList = display_list_make();
+    let rounded: DisplayOp = display_op(DisplayOpKind.fill_rounded_rect, node_key(2));
+    rounded.bounds = rect(0, 0, 6 * unit_scale(), 6 * unit_scale());
+    rounded.parameter = 3 * unit_scale();
+    rounded.paint = paint_rgba16(0, 65535, 65535, 65535);
+    _ = display_list_push(&list, rounded);
+    _ = display_list_seal(&list);
+    let result: CpuRasterResult = cpu_rasterize(list, 6, 6);
+    expect(state, result.error == CpuRasterError.none && result.rendered_ops == 1,
+        "analytic rounded rectangles rasterize as an explicit CPU operation");
+    expect(state, pixel(result.surface, 0, 0, 3) < 255 &&
+        pixel(result.surface, 3, 3, 1) == 255,
+        "rounded corners are anti-aliased while the center remains opaque");
+    cpu_raster_free(&result);
+    display_list_free(&list);
+}
+
 fn coverage_and_blend_contract(state: *TestState) void {
     let half: DisplayList = fill_scene(rect(unit_scale() / 2, 0, unit_scale(), unit_scale()), paint_rgba16(65535, 0, 0, 65535));
     let edge: CpuRasterResult = cpu_rasterize(half, 2, 1);
@@ -398,6 +416,7 @@ fn failure_contract(state: *TestState) void {
 fn main() i32 {
     let state: TestState = TestState{ .passed = 0, .failed = 0 };
     exact_fill_contract(&state);
+    rounded_fill_contract(&state);
     coverage_and_blend_contract(&state);
     clip_and_transform_contract(&state);
     deterministic_contract(&state);

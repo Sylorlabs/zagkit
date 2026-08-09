@@ -108,7 +108,7 @@ fn malformed_contract(state: *TestState) void {
     encoded.bytes.data[0] = saved;
 
     let saved_version: u8 = encoded.bytes.data[4];
-    encoded.bytes.data[4] = 3;
+    encoded.bytes.data[4] = 4;
     let bad_version: DisplayDecodeResult = display_list_decode(encoded.bytes);
     expect(state, bad_version.error == DisplayCodecError.unsupported_version && bad_version.error_offset == 4, "unsupported versions fail visibly");
     display_decode_free(&bad_version);

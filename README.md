@@ -239,12 +239,22 @@ You can also use the local CLI shim for the current headless-only phase:
 ```sh
 ./zagkit run --headless-only --show-ascii
 ./zagkit run --headless-only --open
+./zagkit run --linux-preview
 ./zagkit test
 ```
 
 `./zagkit run --open` writes the same PNG artifact and then asks the local desktop
 viewer to open `artifacts/launch/headless-reference.png` when a viewer command
 is available (`xdg-open`/`open`).
+
+`./zagkit run --linux-preview` compiles and launches the current native Linux
+X11 fallback. The window presents Zagkit's deterministic CPU surface through
+the public Xlib transport, handles close, expose, and live resize events, and
+prints the backend selected by `.auto`. It is experimental and does not claim
+Wayland, IME, AT-SPI, GPU, packaging, or Linux-polish completion.
+Use `./zagkit run --linux-preview --output <capture.png>` for the bounded native
+create/present/sync/capture/cleanup path used by conformance automation. See the
+[Linux shell contract](docs/architecture/linux-shell.md).
 
 `./zagkit build` and `./zagkit run` now support project paths for the bootstrap
 flow:

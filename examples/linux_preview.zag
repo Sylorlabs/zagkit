@@ -1,0 +1,89 @@
+@import("../src/platform/linux/x11.zag")
+@import("../src/showcase/linux_preview_scene.zag")
+@import("../src/render/png_encode.zag")
+
+fn preview_render(host: *LinuxX11Window, width: i32, height: i32,
+    capture_path: []u8) i32 {
+    let list: DisplayList = linux_preview_scene(width, height);
+    if (display_list_verify(list) != DisplayError.none) {
+        display_list_free(&list);
+        _zag_eprintln("zagkit: Linux preview display list verification failed");
+        return 0;
+    }
+    let raster: CpuRasterResult = cpu_rasterize(list, width, height);
+    if (raster.error != CpuRasterError.none) {
+        cpu_raster_free(&raster);
+        display_list_free(&list);
+        _zag_eprintln("zagkit: Linux preview CPU raster failed");
+        return 0;
+    }
+    let presented: i32 = linux_x11_present(host, raster.surface);
+    if (presented != 0 && capture_path.len > 0) {
+        let png: PngEncodeResult = png_encode_surface(raster.surface);
+        if (png.error == PngEncodeError.none) {
+            if (_zag_write_file(capture_path, png.bytes.data[0..png.bytes.len]) != 0) {
+                _zag_eprintln("zagkit: failed to write Linux preview capture");
+            }
+        }
+        png_encode_free(&png);
+    }
+    cpu_raster_free(&raster);
+    display_list_free(&list);
+    return presented;
+}
+
+fn preview_clamp_dimension(value: i32, minimum: i32, maximum: i32) i32 {
+    if (value < minimum) { return minimum; }
+    if (value > maximum) { return maximum; }
+    return value;
+}
+
+fn main() i32 {
+    let capture_once: i32 = 0;
+    let capture_path: []u8 = "";
+    if (_zag_argc() > 1 && _zag_strcmp(_zag_arg(1), "--capture-once") == 1) {
+        if (_zag_argc() != 3) {
+            _zag_eprintln("usage: linux-preview [--capture-once output.png]");
+            return 2;
+        }
+        capture_once = 1;
+        capture_path = _zag_arg(2);
+    }
+
+    let wayland_available: i32 = (_zag_getenv("WAYLAND_DISPLAY").len > 0) as i32;
+    let host: LinuxX11Window = linux_x11_open(1120, 720,
+        "Zagkit — Linux Preview", wayland_available);
+    _zag_print("zagkit: requested backend=auto active backend=");
+    _zag_println(platform_backend_name(host.capabilities.active));
+    if (host.capabilities.fallback_recorded != 0) {
+        _zag_print("zagkit: backend fallback: ");
+        _zag_println(host.capabilities.fallback_reason);
+    }
+    if (host.open == 0) {
+        _zag_eprintln("zagkit: native Linux window unavailable; capability report remains fail-closed");
+        linux_x11_close(&host);
+        return 3;
+    }
+    if (preview_render(&host, 1120, 720, capture_path) == 0) {
+        linux_x11_close(&host);
+        return 4;
+    }
+    if (capture_once != 0) {
+        linux_x11_close(&host);
+        return 0;
+    }
+
+    while (host.open != 0) {
+        let event: LinuxX11Event = linux_x11_next_event(&host);
+        if (event.kind == LinuxX11EventKind.close) { host.open = 0; }
+        else if (event.kind == LinuxX11EventKind.expose) {
+            _ = preview_render(&host, host.width, host.height, "");
+        } else if (event.kind == LinuxX11EventKind.resize) {
+            let next_width: i32 = preview_clamp_dimension(event.width, 480, 1920);
+            let next_height: i32 = preview_clamp_dimension(event.height, 320, 1200);
+            _ = preview_render(&host, next_width, next_height, "");
+        }
+    }
+    linux_x11_close(&host);
+    return 0;
+}

@@ -1,0 +1,32 @@
+{
+  "generated_at": "2026-08-06T23:05:47-07:00",
+  "goal": {
+    "total": 97,
+    "completed": 28,
+    "blocked": 69,
+    "blocked_ids": ["G0-VISUAL-DIRECTION","G1-LINUX-ARM64","G1-DARWIN","G1-WINDOWS","G1-IOS","G1-ANDROID","G1-OBJC","G1-COM","G1-JNI","G1-CALLBACKS","G1-AGGREGATES","G1-RESOURCES","G1-DYNAMIC-LOAD","G1-CONCURRENCY","G1-PACKAGES","G1-RELOAD","G1-SOURCE-FIRST","G3-UNICODE","G3-OPENTYPE","G3-EDITING","G3-FONTS","G3-COLOR","G3-SVG","G3-PNG","G3-SHADOWS","G3-LIGHTING","G3-GLASS","G3-MOTION","G3-REDUCED-MOTION","G3-ASSET-PIPELINE","G4-INPUT","G4-GESTURES","G4-ACCESSIBILITY","G4-CLI","G4-PREVIEW","G4-INSPECTORS","G4-GALLERY","G5-WAYLAND","G5-X11","G5-ATSPI","G5-LINUX-CPU","G5-LINUX-GPU","G5-LINUX-POLISH","G5-LINUX-FIDELITY","G5-LINUX-PACKAGE","G6-INVENTORY","G6-DESIGN","G6-SHELL","G6-WORKFLOWS","G6-VIEWPORT","G6-DENSE-UI","G6-MATERIALS","G6-ASSETS","G6-AUTOMATION","G6-ACCESSIBILITY","G6-SCREENSHOTS","G6-PERFORMANCE","G6-POLISH","G7-MACOS","G7-WINDOWS","G7-IOS","G7-ANDROID","G7-MOBILE-REFERENCE","G7-COMPONENT-PARITY","G7-TEXT-PARITY","G7-RECOVERY","G7-PERFORMANCE","G7-PACKAGING","G7-ONE-POINT-ZERO"]
+  },
+  "contracts": {
+    "upstream_total": 17,
+    "upstream_available": 2,
+    "upstream_partial": 7,
+    "upstream_missing": 8,
+    "platform_total": 45,
+    "platform_unavailable": 45
+  },
+  "artifacts": {
+    "visual_direction": {
+      "pilot_ok": true,
+      "full_ok": false,
+      "matrix_has_recommendation": true
+    }
+  },
+  "external_write": {
+    "zag": "writable",
+    "prismstudio": "writable"
+  },
+  "checks": {
+    "headless_ok": true,
+    "cli_smoke_ok": true
+  }
+}

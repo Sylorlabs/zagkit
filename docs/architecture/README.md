@@ -33,6 +33,7 @@ Detailed experimental contracts:
 - [motion scheduler and tracks](motion.md)
 - [canonical vector paths](paths.md)
 - [canonical images and bounded PNG ingestion](images.md)
+- [Unicode and OpenType text engine](text.md)
 - [deterministic PNG snapshot bytes](../quality/png-snapshots.md)
 
 The first experimental compiled slice now fixes the initial Zag shapes for
@@ -82,10 +83,11 @@ revisions, and verifies sealed byte-level identity. Display lists own the store.
 Path resources additionally require the bounded canonical
 [ZKPATH01 contract](paths.md) and are validated once before operation references
 seal. Canonical decoded [RGBA8 images](images.md) also have exact dimensional,
-schema, color-space, and payload-size validation. SVG, PNG, font, and glyph
-decoding remain unavailable.
+schema, color-space, and payload-size validation. SVG and visible glyph
+rendering remain unavailable. PNG ingestion is bounded and implemented; the
+first owned Unicode/OpenType mapping layer is documented in [text.md](text.md).
 
-Display-list replay uses the versioned little-endian `ZKDL` version 2 codec.
+Display-list replay uses the versioned little-endian `ZKDL` version 3 codec.
 Decoding is bounded to one million operations, reconstructs operations through the
 same validation path as live building, requires balanced seal state, verifies
 the stored content identity and revision, and rejects trailing bytes so one

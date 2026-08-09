@@ -57,6 +57,10 @@ fn build_scene(color: i64) DisplayList {
     fill.bounds = rect(0 - unit_scale(), 0, 80 * unit_scale(), 40 * unit_scale());
     fill.paint = paint_rgba16(color, 20000, 30000, 65535);
     _ = display_list_push(&list, fill);
+    let rounded: DisplayOp = display_op(DisplayOpKind.fill_rounded_rect, owner);
+    rounded.bounds = rect(unit_scale(), unit_scale(), 8 * unit_scale(), 8 * unit_scale());
+    rounded.parameter = 2 * unit_scale();
+    _ = display_list_push(&list, rounded);
 
     let path: DisplayOp = display_op(DisplayOpKind.draw_path, owner);
     path.resource_id = 101;
@@ -90,11 +94,11 @@ fn scene_contract(state: *TestState) void {
     let first: DisplayList = build_scene(10000);
     let second: DisplayList = build_scene(10000);
     let changed: DisplayList = build_scene(10001);
-    expect(state, first.ops.len == 11 && first.stack_depth == 0 && first.layer_depth == 0, "display list records a balanced scene");
-    expect(state, first.resources.resources.len == 4 && first.revision == 15,
+    expect(state, first.ops.len == 12 && first.stack_depth == 0 && first.layer_depth == 0, "display list records a balanced scene");
+    expect(state, first.resources.resources.len == 4 && first.revision == 16,
         "display list owns every referenced resource and includes resource revisions");
-    expect(state, first.ops.data[4].kind == DisplayOpKind.draw_path && first.ops.data[5].kind == DisplayOpKind.draw_image && first.ops.data[6].kind == DisplayOpKind.draw_glyph_run, "paths, images, and glyph runs remain explicit operations");
-    expect(state, first.ops.data[7].kind == DisplayOpKind.begin_layer && first.ops.data[8].kind == DisplayOpKind.apply_effect, "layers and effects remain explicit operations");
+    expect(state, first.ops.data[4].kind == DisplayOpKind.fill_rounded_rect && first.ops.data[5].kind == DisplayOpKind.draw_path && first.ops.data[6].kind == DisplayOpKind.draw_image && first.ops.data[7].kind == DisplayOpKind.draw_glyph_run, "rounded geometry, paths, images, and glyph runs remain explicit operations");
+    expect(state, first.ops.data[8].kind == DisplayOpKind.begin_layer && first.ops.data[9].kind == DisplayOpKind.apply_effect, "layers and effects remain explicit operations");
     expect(state, first.content_hash == second.content_hash, "identical scenes produce the same deterministic content hash");
     expect(state, first.content_hash != changed.content_hash, "one paint-channel change alters content identity");
 

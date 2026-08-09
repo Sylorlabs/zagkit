@@ -14,6 +14,12 @@ cleanup() { rm -rf "$tmp"; }
 trap cleanup EXIT
 
 cd "$root"
+"$znc" tests/platform_capabilities_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/platform-capabilities-contract"
+"$tmp/platform-capabilities-contract"
+"$znc" tests/unicode_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/unicode-contract"
+"$tmp/unicode-contract"
+"$znc" tests/opentype_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/opentype-contract"
+"$tmp/opentype-contract"
 "$znc" tests/flex_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/flex-contract"
 "$tmp/flex-contract"
 "$znc" tests/flex_adaptive_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/flex-adaptive-contract"
@@ -55,6 +61,12 @@ cd "$root"
 [ "$(od -An -tx1 -N8 "$tmp/reference-first.png" | tr -d ' \n')" = "89504e470d0a1a0a" ]
 cmp -s "$tmp/reference-first.png" "$tmp/reference-second.png"
 printf 'Reference snapshot contract: pass=3 fail=0\n'
+"$znc" tools/render-linux-preview-reference.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/render-linux-preview-reference"
+"$tmp/render-linux-preview-reference" "$tmp/linux-preview-first.png"
+"$tmp/render-linux-preview-reference" "$tmp/linux-preview-second.png"
+[ "$(od -An -tx1 -N8 "$tmp/linux-preview-first.png" | tr -d ' \n')" = "89504e470d0a1a0a" ]
+cmp -s "$tmp/linux-preview-first.png" "$tmp/linux-preview-second.png"
+printf 'Linux preview CPU snapshot contract: pass=2 fail=0\n'
 "$znc" tests/display_list_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/display-list-contract"
 "$tmp/display-list-contract"
 "$znc" tests/display_list_codec_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/display-list-codec-contract"
@@ -68,4 +80,4 @@ printf 'Reference snapshot contract: pass=3 fail=0\n'
 "$znc" tests/motion_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/motion-contract"
 "$tmp/motion-contract"
 
-printf 'headless test: PASS (state, reconciliation, intrinsic measurement, constraints, Flex, Grid, Overlay, scroll, virtual list, Table, Tree, recycling, collection semantics, Talkback, owned render resources, canonical paths and images, bounded PNG decode, display lists, CPU shape and image raster, deterministic PNG snapshots, input, replay, and motion)\n'
+printf 'headless test: PASS (backend truth, state, reconciliation, intrinsic measurement, constraints, Flex, Grid, Overlay, scroll, virtual list, Table, Tree, recycling, collection semantics, Talkback, owned render resources, canonical paths and images, bounded PNG decode, display lists, analytic rounded geometry, CPU shape and image raster, deterministic PNG snapshots, input, replay, and motion)\n'

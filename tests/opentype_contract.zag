@@ -1,0 +1,137 @@
+@import("../src/text/opentype.zag")
+
+struct TestState { passed: i32, failed: i32 }
+
+fn expect(state: *TestState, condition: i32, name: []u8) void {
+    if (condition != 0) {
+        state.*.passed = state.*.passed + 1;
+        _zag_print("ok  "); _zag_println(name);
+    } else {
+        state.*.failed = state.*.failed + 1;
+        _zag_print("FAIL "); _zag_println(name);
+    }
+}
+
+fn fixture_u16(bytes: *ArrayList[u8], offset: i32, value: i32) void {
+    bytes.*.data[offset] = ((value >> 8) & 255) as u8;
+    bytes.*.data[offset + 1] = (value & 255) as u8;
+}
+
+fn fixture_u32(bytes: *ArrayList[u8], offset: i32, value: i64) void {
+    bytes.*.data[offset] = ((value >> 24) & 255) as u8;
+    bytes.*.data[offset + 1] = ((value >> 16) & 255) as u8;
+    bytes.*.data[offset + 2] = ((value >> 8) & 255) as u8;
+    bytes.*.data[offset + 3] = (value & 255) as u8;
+}
+
+fn fixture_tag(bytes: *ArrayList[u8], offset: i32, tag: []u8) void {
+    let i: i32 = 0;
+    while (i < 4) { bytes.*.data[offset + i] = tag[i]; i = i + 1; }
+}
+
+fn fixture_font() ArrayList[u8] {
+    let bytes: ArrayList[u8] = make[u8](136);
+    let i: i32 = 0;
+    while (i < 136) { push[u8](&bytes, 0); i = i + 1; }
+    fixture_u32(&bytes, 0, 65536); fixture_u16(&bytes, 4, 3);
+    fixture_tag(&bytes, 12, "cmap"); fixture_u32(&bytes, 20, 60); fixture_u32(&bytes, 24, 44);
+    fixture_tag(&bytes, 28, "head"); fixture_u32(&bytes, 36, 104); fixture_u32(&bytes, 40, 20);
+    fixture_tag(&bytes, 44, "maxp"); fixture_u32(&bytes, 52, 124); fixture_u32(&bytes, 56, 6);
+    fixture_u16(&bytes, 60, 0); fixture_u16(&bytes, 62, 1);
+    fixture_u16(&bytes, 64, 3); fixture_u16(&bytes, 66, 1); fixture_u32(&bytes, 68, 12);
+    fixture_u16(&bytes, 72, 4); fixture_u16(&bytes, 74, 32);
+    fixture_u16(&bytes, 76, 0); fixture_u16(&bytes, 78, 4);
+    fixture_u16(&bytes, 80, 4); fixture_u16(&bytes, 82, 1); fixture_u16(&bytes, 84, 0);
+    fixture_u16(&bytes, 86, 65); fixture_u16(&bytes, 88, 65535); fixture_u16(&bytes, 90, 0);
+    fixture_u16(&bytes, 92, 65); fixture_u16(&bytes, 94, 65535);
+    fixture_u16(&bytes, 96, 65474); fixture_u16(&bytes, 98, 1);
+    fixture_u16(&bytes, 100, 0); fixture_u16(&bytes, 102, 0);
+    fixture_u16(&bytes, 122, 1000);
+    fixture_u32(&bytes, 124, 65536); fixture_u16(&bytes, 128, 10);
+    return bytes;
+}
+
+fn fixture_font_format12() ArrayList[u8] {
+    let bytes: ArrayList[u8] = fixture_font();
+    fixture_u16(&bytes, 66, 10);
+    fixture_u16(&bytes, 72, 12); fixture_u16(&bytes, 74, 0);
+    fixture_u32(&bytes, 76, 28); fixture_u32(&bytes, 80, 0);
+    fixture_u32(&bytes, 84, 1);
+    fixture_u32(&bytes, 88, 128512); fixture_u32(&bytes, 92, 128512);
+    fixture_u32(&bytes, 96, 4);
+    return bytes;
+}
+
+fn parse_contract(state: *TestState) void {
+    let bytes: ArrayList[u8] = fixture_font();
+    let face: OpenTypeFace = opentype_parse(bytes.data[0..bytes.len]);
+    expect(state, face.error == OpenTypeError.none,
+        "bounded SFNT directory and required tables parse");
+    expect(state, face.units_per_em == 1000 && face.glyph_count == 10 &&
+        face.cmap_format == 4,
+        "font metrics and selected cmap format remain explicit");
+    let mapped: GlyphLookup = opentype_glyph_for_scalar(face, 65);
+    let missing: GlyphLookup = opentype_glyph_for_scalar(face, 66);
+    expect(state, mapped.error == OpenTypeError.none && mapped.glyph_id == 3,
+        "format 4 maps a Unicode scalar to the exact glyph ID");
+    expect(state, missing.error == OpenTypeError.none && missing.glyph_id == 0,
+        "missing scalars resolve to glyph zero without fabricated fallback");
+    let invalid: GlyphLookup = opentype_glyph_for_scalar(face, 55296);
+    expect(state, invalid.error == OpenTypeError.invalid_codepoint,
+        "surrogate lookup fails before cmap access");
+    opentype_face_free(&face); free[u8](&bytes);
+
+    let format12_bytes: ArrayList[u8] = fixture_font_format12();
+    let format12_face: OpenTypeFace = opentype_parse(
+        format12_bytes.data[0..format12_bytes.len]);
+    let emoji: GlyphLookup = opentype_glyph_for_scalar(format12_face, 128512);
+    expect(state, format12_face.error == OpenTypeError.none &&
+        format12_face.cmap_format == 12 && emoji.error == OpenTypeError.none &&
+        emoji.glyph_id == 4,
+        "format 12 maps supplementary-plane Unicode scalars");
+    opentype_face_free(&format12_face); free[u8](&format12_bytes);
+}
+
+fn malformed_contract(state: *TestState) void {
+    let short_face: OpenTypeFace = opentype_parse("font");
+    expect(state, short_face.error == OpenTypeError.truncated,
+        "truncated SFNT headers fail with owned cleanup");
+    opentype_face_free(&short_face);
+
+    let bad_signature_bytes: ArrayList[u8] = fixture_font();
+    bad_signature_bytes.data[1] = 0;
+    let bad_signature: OpenTypeFace = opentype_parse(
+        bad_signature_bytes.data[0..bad_signature_bytes.len]);
+    expect(state, bad_signature.error == OpenTypeError.unsupported_signature,
+        "unknown SFNT signatures fail closed");
+    opentype_face_free(&bad_signature); free[u8](&bad_signature_bytes);
+
+    let bad_bounds_bytes: ArrayList[u8] = fixture_font();
+    fixture_u32(&bad_bounds_bytes, 20, 1000);
+    let bad_bounds: OpenTypeFace = opentype_parse(
+        bad_bounds_bytes.data[0..bad_bounds_bytes.len]);
+    expect(state, bad_bounds.error == OpenTypeError.invalid_table_bounds &&
+        bad_bounds.error_offset == 20,
+        "table offsets cannot escape owned font bytes");
+    opentype_face_free(&bad_bounds); free[u8](&bad_bounds_bytes);
+
+    let duplicate_bytes: ArrayList[u8] = fixture_font();
+    fixture_tag(&duplicate_bytes, 28, "cmap");
+    let duplicate: OpenTypeFace = opentype_parse(
+        duplicate_bytes.data[0..duplicate_bytes.len]);
+    expect(state, duplicate.error == OpenTypeError.duplicate_required_table,
+        "duplicate required tables fail before ambiguous selection");
+    opentype_face_free(&duplicate); free[u8](&duplicate_bytes);
+}
+
+fn main() i32 {
+    let state: TestState = TestState{ .passed = 0, .failed = 0 };
+    parse_contract(&state); malformed_contract(&state);
+    let passed_text: []u8 = _zag_i64_to_str(state.passed as i64);
+    let failed_text: []u8 = _zag_i64_to_str(state.failed as i64);
+    _zag_print("OpenType contract: pass="); _zag_print(passed_text);
+    _zag_print(" fail="); _zag_println(failed_text);
+    _zag_str_free(passed_text); _zag_str_free(failed_text);
+    if (state.failed == 0) { return 0; }
+    return 1;
+}

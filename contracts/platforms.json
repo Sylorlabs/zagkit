@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generated_for": "0.1.0-experimental.0",
-  "generated_on": "2026-08-06",
+  "generated_on": "2026-08-08",
   "status_vocabulary": ["supported", "experimental", "unavailable"],
   "required_capabilities": [
     "platform_shell",
@@ -23,15 +23,15 @@
       "toolchain_state": "Pinned Zag supports x86-64 Linux and marks ARM64 Linux experimental with qemu-user execution evidence; physical ARM64 target proof is not recorded.",
       "public_channel": "experimental",
       "capabilities": [
-        {"id":"platform_shell","state":"unavailable","reason":"Wayland and X11 shells are not implemented.","evidence":[]},
-        {"id":"cpu_renderer","state":"unavailable","reason":"A headless rectangle CPU-oracle subset exists, but full display-list coverage and Linux surface presentation are not implemented.","evidence":["tests/cpu_raster_contract.zag","tests/replay_contract.zag"]},
+        {"id":"platform_shell","state":"experimental","reason":"A native X11 fallback creates, resizes, presents, synchronizes, and cleans up one window; Wayland and production lifecycle coverage remain unavailable.","evidence":["src/platform/linux/x11.zag","tools/test-linux-preview.sh","artifacts/evidence/linux-x11-window-2026-08-08.png"]},
+        {"id":"cpu_renderer","state":"experimental","reason":"The deterministic CPU oracle covers the current retained display-list subset, including analytic rounded rectangles, and presents byte-identical output through X11; complete text, effects, and operation coverage remain unfinished.","evidence":["tests/cpu_raster_contract.zag","tests/replay_contract.zag","tools/render-linux-preview-reference.zag","artifacts/launch/linux-preview-native.png"]},
         {"id":"gpu_transport","state":"unavailable","reason":"No Zagkit Linux GPU transport exists or has device evidence.","evidence":[]},
         {"id":"text_input","state":"unavailable","reason":"No Linux IME bridge or editing engine exists.","evidence":[]},
         {"id":"accessibility","state":"unavailable","reason":"No AT-SPI adapter exists or has assistive technology evidence.","evidence":[]},
         {"id":"clipboard_drag_drop","state":"unavailable","reason":"Clipboard and drag and drop seams are not implemented.","evidence":[]},
         {"id":"multi_window","state":"unavailable","reason":"Window, monitor, and scale lifecycle support is not implemented.","evidence":[]},
         {"id":"packaging","state":"unavailable","reason":"No installable Linux artifact or packaging gate exists.","evidence":[]},
-        {"id":"auto_backend_selection","state":"unavailable","reason":"There are no eligible Zagkit backends for .auto to select.","evidence":[]}
+        {"id":"auto_backend_selection","state":"experimental","reason":"Linux .auto records X11 as the active fallback with an observable reason when Wayland is unavailable; Wayland selection and runtime device fallback are unfinished.","evidence":["src/platform/capabilities.zag","tests/platform_capabilities_contract.zag"]}
       ]
     },
     {

@@ -127,7 +127,12 @@ jq -e '
     )
   ) and
   (.one_point_zero.blocked == true) and
-  all(.platforms[].capabilities[]; .state == "unavailable")
+  all(.platforms[].capabilities[]; .state != "supported") and
+  ([(.platforms[] | select(.id == "linux") | .capabilities[] |
+      select(.state == "experimental") | .id)] | sort) ==
+    ["auto_backend_selection", "cpu_renderer", "platform_shell"] and
+  all(.platforms[] | select(.id != "linux");
+    all(.capabilities[]; .state == "unavailable"))
 ' contracts/platforms.json >/dev/null || fail "platform capability truth is incomplete or inflated"
 
 ledger_commit=$(jq -r '.audited_commit' contracts/upstream-zag.json)

@@ -29,7 +29,7 @@ struct DisplayDecodeResult {
     error_offset: i64,
 }
 
-fn display_codec_version() i64 { return 2; }
+fn display_codec_version() i64 { return 3; }
 fn display_codec_header_size() i64 { return 76; }
 fn display_codec_resource_header_size() i64 { return 64; }
 fn display_codec_op_size() i64 { return 160; }
@@ -256,7 +256,7 @@ fn display_list_decode(bytes: ArrayList[u8]) DisplayDecodeResult {
     let i: i64 = 0;
     while (i < count) {
         let kind_code: i64 = display_read_i64(bytes, offset);
-        if (kind_code < 0 || kind_code > 11) {
+        if (kind_code < 0 || kind_code > 12) {
             return display_decode_fail(list, DisplayCodecError.invalid_kind, offset);
         }
         let op: DisplayOp = display_op(kind_code as DisplayOpKind, node_key_scoped(

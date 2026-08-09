@@ -1,0 +1,309 @@
+@import("std:list")
+
+// Bounded, owned SFNT/OpenType parsing. This is the first font-engine seam:
+// callers receive validated metrics and deterministic Unicode-to-glyph lookup
+// without a runtime dependency on FreeType, HarfBuzz, Skia, or an OS text API.
+
+enum OpenTypeError {
+    none,
+    empty,
+    too_large,
+    truncated,
+    unsupported_signature,
+    invalid_table_count,
+    invalid_table_bounds,
+    duplicate_required_table,
+    missing_cmap,
+    missing_head,
+    missing_maxp,
+    invalid_metrics,
+    unsupported_cmap,
+    invalid_cmap,
+    invalid_codepoint,
+    invalid_glyph,
+}
+
+struct OpenTypeFace {
+    bytes: ArrayList[u8],
+    units_per_em: i32,
+    glyph_count: i32,
+    cmap_offset: i32,
+    cmap_length: i32,
+    cmap_format: i32,
+    error: OpenTypeError,
+    error_offset: i64,
+}
+
+struct GlyphLookup {
+    glyph_id: i32,
+    error: OpenTypeError,
+}
+
+fn opentype_u16(bytes: []u8, offset: i32) i32 {
+    return ((bytes[offset] as i32) << 8) | (bytes[offset + 1] as i32);
+}
+
+fn opentype_u32(bytes: []u8, offset: i32) i64 {
+    return ((bytes[offset] as i64) << 24) |
+        ((bytes[offset + 1] as i64) << 16) |
+        ((bytes[offset + 2] as i64) << 8) |
+        (bytes[offset + 3] as i64);
+}
+
+fn opentype_face_empty() OpenTypeFace {
+    return OpenTypeFace{
+        .bytes = make[u8](1),
+        .units_per_em = 0,
+        .glyph_count = 0,
+        .cmap_offset = 0,
+        .cmap_length = 0,
+        .cmap_format = 0,
+        .error = OpenTypeError.none,
+        .error_offset = 0,
+    };
+}
+
+fn opentype_fail(face: *OpenTypeFace, error: OpenTypeError, offset: i64) void {
+    face.*.error = error;
+    face.*.error_offset = offset;
+}
+
+fn opentype_tag(bytes: []u8, offset: i32, a: i32, b: i32,
+    c: i32, d: i32) i32 {
+    return (bytes[offset] as i32 == a && bytes[offset + 1] as i32 == b &&
+        bytes[offset + 2] as i32 == c && bytes[offset + 3] as i32 == d) as i32;
+}
+
+fn opentype_signature_supported(bytes: []u8) i32 {
+    let signature: i64 = opentype_u32(bytes, 0);
+    if (signature == 65536) { return 1; }
+    return (opentype_tag(bytes, 0, 79, 84, 84, 79) != 0 ||
+        opentype_tag(bytes, 0, 116, 114, 117, 101) != 0) as i32;
+}
+
+fn opentype_table_valid(file_length: i32, offset: i64, length: i64) i32 {
+    if (offset < 0 || length < 0 || offset > file_length as i64) { return 0; }
+    if (length > (file_length as i64) - offset) { return 0; }
+    return 1;
+}
+
+fn opentype_parse(data: []u8) OpenTypeFace {
+    let face: OpenTypeFace = opentype_face_empty();
+    if (data.len == 0) { opentype_fail(&face, OpenTypeError.empty, 0); return face; }
+    if (data.len > 67108864) {
+        opentype_fail(&face, OpenTypeError.too_large, data.len as i64); return face;
+    }
+    let copy_index: i32 = 0;
+    while (copy_index < data.len) {
+        push[u8](&face.bytes, data[copy_index]);
+        copy_index = copy_index + 1;
+    }
+    let bytes: []u8 = face.bytes.data[0..face.bytes.len];
+    if (bytes.len < 12) { opentype_fail(&face, OpenTypeError.truncated, bytes.len as i64); return face; }
+    if (opentype_signature_supported(bytes) == 0) {
+        opentype_fail(&face, OpenTypeError.unsupported_signature, 0); return face;
+    }
+    let table_count: i32 = opentype_u16(bytes, 4);
+    if (table_count <= 0 || table_count > 4096) {
+        opentype_fail(&face, OpenTypeError.invalid_table_count, 4); return face;
+    }
+    let directory_bytes: i64 = 12 + (table_count as i64) * 16;
+    if (directory_bytes > bytes.len as i64) {
+        opentype_fail(&face, OpenTypeError.truncated, bytes.len as i64); return face;
+    }
+    let cmap_table_offset: i32 = 0;
+    let cmap_table_length: i32 = 0;
+    let head_offset: i32 = 0;
+    let head_length: i32 = 0;
+    let maxp_offset: i32 = 0;
+    let maxp_length: i32 = 0;
+    let table_index: i32 = 0;
+    while (table_index < table_count) {
+        let record: i32 = 12 + table_index * 16;
+        let offset64: i64 = opentype_u32(bytes, record + 8);
+        let length64: i64 = opentype_u32(bytes, record + 12);
+        if (opentype_table_valid(bytes.len, offset64, length64) == 0) {
+            opentype_fail(&face, OpenTypeError.invalid_table_bounds, record + 8);
+            return face;
+        }
+        if (opentype_tag(bytes, record, 99, 109, 97, 112) != 0) {
+            if (cmap_table_length != 0) {
+                opentype_fail(&face, OpenTypeError.duplicate_required_table, record);
+                return face;
+            }
+            cmap_table_offset = offset64 as i32; cmap_table_length = length64 as i32;
+        } else if (opentype_tag(bytes, record, 104, 101, 97, 100) != 0) {
+            if (head_length != 0) {
+                opentype_fail(&face, OpenTypeError.duplicate_required_table, record);
+                return face;
+            }
+            head_offset = offset64 as i32; head_length = length64 as i32;
+        } else if (opentype_tag(bytes, record, 109, 97, 120, 112) != 0) {
+            if (maxp_length != 0) {
+                opentype_fail(&face, OpenTypeError.duplicate_required_table, record);
+                return face;
+            }
+            maxp_offset = offset64 as i32; maxp_length = length64 as i32;
+        }
+        table_index = table_index + 1;
+    }
+    if (cmap_table_length == 0) { opentype_fail(&face, OpenTypeError.missing_cmap, 12); return face; }
+    if (head_length == 0) { opentype_fail(&face, OpenTypeError.missing_head, 12); return face; }
+    if (maxp_length == 0) { opentype_fail(&face, OpenTypeError.missing_maxp, 12); return face; }
+    if (head_length < 20 || maxp_length < 6 || cmap_table_length < 4) {
+        opentype_fail(&face, OpenTypeError.invalid_metrics, 12); return face;
+    }
+    face.units_per_em = opentype_u16(bytes, head_offset + 18);
+    face.glyph_count = opentype_u16(bytes, maxp_offset + 4);
+    if (face.units_per_em < 16 || face.units_per_em > 16384 || face.glyph_count <= 0) {
+        opentype_fail(&face, OpenTypeError.invalid_metrics, head_offset + 18);
+        return face;
+    }
+    let cmap_count: i32 = opentype_u16(bytes, cmap_table_offset + 2);
+    if (cmap_count <= 0 || cmap_count > 4096 ||
+        4 + (cmap_count as i64) * 8 > cmap_table_length as i64) {
+        opentype_fail(&face, OpenTypeError.invalid_cmap, cmap_table_offset + 2);
+        return face;
+    }
+    let best_score: i32 = 0;
+    let best_offset: i32 = 0;
+    let best_length: i32 = 0;
+    let best_format: i32 = 0;
+    let encoding_index: i32 = 0;
+    while (encoding_index < cmap_count) {
+        let record: i32 = cmap_table_offset + 4 + encoding_index * 8;
+        let platform: i32 = opentype_u16(bytes, record);
+        let encoding: i32 = opentype_u16(bytes, record + 2);
+        let relative64: i64 = opentype_u32(bytes, record + 4);
+        if (relative64 >= 0 && relative64 + 2 <= cmap_table_length as i64) {
+            let subtable: i32 = cmap_table_offset + relative64 as i32;
+            let format: i32 = opentype_u16(bytes, subtable);
+            let length64: i64 = 0;
+            if (format == 4 && relative64 + 4 <= cmap_table_length as i64) {
+                length64 = opentype_u16(bytes, subtable + 2) as i64;
+            } else if (format == 12 && relative64 + 8 <= cmap_table_length as i64) {
+                length64 = opentype_u32(bytes, subtable + 4);
+            }
+            let score: i32 = 0;
+            if (format == 12 && platform == 3 && encoding == 10) { score = 40; }
+            else if (format == 12 && platform == 0) { score = 35; }
+            else if (format == 4 && platform == 3 && (encoding == 1 || encoding == 0)) { score = 30; }
+            else if (format == 4 && platform == 0) { score = 25; }
+            if (score > best_score && length64 >= 16 &&
+                relative64 + length64 <= cmap_table_length as i64) {
+                best_score = score; best_offset = subtable;
+                best_length = length64 as i32; best_format = format;
+            }
+        }
+        encoding_index = encoding_index + 1;
+    }
+    if (best_score == 0) {
+        opentype_fail(&face, OpenTypeError.unsupported_cmap, cmap_table_offset);
+        return face;
+    }
+    face.cmap_offset = best_offset;
+    face.cmap_length = best_length;
+    face.cmap_format = best_format;
+    return face;
+}
+
+fn opentype_lookup_fail(error: OpenTypeError) GlyphLookup {
+    return GlyphLookup{ .glyph_id = 0, .error = error };
+}
+
+fn opentype_lookup_format12(face: OpenTypeFace, codepoint: i64) GlyphLookup {
+    let bytes: []u8 = face.bytes.data[0..face.bytes.len];
+    if (face.cmap_length < 16) { return opentype_lookup_fail(OpenTypeError.invalid_cmap); }
+    let group_count64: i64 = opentype_u32(bytes, face.cmap_offset + 12);
+    if (group_count64 > 1048576 || 16 + group_count64 * 12 > face.cmap_length as i64) {
+        return opentype_lookup_fail(OpenTypeError.invalid_cmap);
+    }
+    let low: i64 = 0;
+    let high: i64 = group_count64;
+    while (low < high) {
+        let middle: i64 = low + (high - low) / 2;
+        let group: i32 = face.cmap_offset + 16 + (middle as i32) * 12;
+        let start: i64 = opentype_u32(bytes, group);
+        let end: i64 = opentype_u32(bytes, group + 4);
+        if (end < start) { return opentype_lookup_fail(OpenTypeError.invalid_cmap); }
+        if (codepoint < start) { high = middle; }
+        else if (codepoint > end) { low = middle + 1; }
+        else {
+            let glyph: i64 = opentype_u32(bytes, group + 8) + (codepoint - start);
+            if (glyph < 0 || glyph >= face.glyph_count as i64) {
+                return opentype_lookup_fail(OpenTypeError.invalid_glyph);
+            }
+            return GlyphLookup{ .glyph_id = glyph as i32, .error = OpenTypeError.none };
+        }
+    }
+    return GlyphLookup{ .glyph_id = 0, .error = OpenTypeError.none };
+}
+
+fn opentype_lookup_format4(face: OpenTypeFace, codepoint: i64) GlyphLookup {
+    if (codepoint > 65535) { return GlyphLookup{ .glyph_id = 0, .error = OpenTypeError.none }; }
+    let bytes: []u8 = face.bytes.data[0..face.bytes.len];
+    if (face.cmap_length < 16) { return opentype_lookup_fail(OpenTypeError.invalid_cmap); }
+    let segment_count: i32 = opentype_u16(bytes, face.cmap_offset + 6) / 2;
+    if (segment_count <= 0 || segment_count > 32768) {
+        return opentype_lookup_fail(OpenTypeError.invalid_cmap);
+    }
+    let end_base: i32 = face.cmap_offset + 14;
+    let start_base: i32 = end_base + segment_count * 2 + 2;
+    let delta_base: i32 = start_base + segment_count * 2;
+    let range_base: i32 = delta_base + segment_count * 2;
+    if (range_base + segment_count * 2 > face.cmap_offset + face.cmap_length) {
+        return opentype_lookup_fail(OpenTypeError.invalid_cmap);
+    }
+    let segment: i32 = 0;
+    while (segment < segment_count) {
+        let end: i32 = opentype_u16(bytes, end_base + segment * 2);
+        if (codepoint <= end as i64) {
+            let start: i32 = opentype_u16(bytes, start_base + segment * 2);
+            if (codepoint < start as i64) {
+                return GlyphLookup{ .glyph_id = 0, .error = OpenTypeError.none };
+            }
+            let delta_raw: i32 = opentype_u16(bytes, delta_base + segment * 2);
+            let delta: i32 = delta_raw;
+            if (delta >= 32768) { delta = delta - 65536; }
+            let range: i32 = opentype_u16(bytes, range_base + segment * 2);
+            let glyph: i32 = 0;
+            if (range == 0) {
+                glyph = ((codepoint as i32) + delta) % 65536;
+                if (glyph < 0) { glyph = glyph + 65536; }
+            } else {
+                let glyph_offset: i32 = range_base + segment * 2 + range +
+                    ((codepoint as i32) - start) * 2;
+                if (glyph_offset < face.cmap_offset ||
+                    glyph_offset + 2 > face.cmap_offset + face.cmap_length) {
+                    return opentype_lookup_fail(OpenTypeError.invalid_cmap);
+                }
+                glyph = opentype_u16(bytes, glyph_offset);
+                if (glyph != 0) {
+                    glyph = (glyph + delta) % 65536;
+                    if (glyph < 0) { glyph = glyph + 65536; }
+                }
+            }
+            if (glyph >= face.glyph_count) {
+                return opentype_lookup_fail(OpenTypeError.invalid_glyph);
+            }
+            return GlyphLookup{ .glyph_id = glyph, .error = OpenTypeError.none };
+        }
+        segment = segment + 1;
+    }
+    return GlyphLookup{ .glyph_id = 0, .error = OpenTypeError.none };
+}
+
+fn opentype_glyph_for_scalar(face: OpenTypeFace, codepoint: i64) GlyphLookup {
+    if (face.error != OpenTypeError.none) { return opentype_lookup_fail(face.error); }
+    if (codepoint < 0 || codepoint > 1114111 ||
+        (codepoint >= 55296 && codepoint <= 57343)) {
+        return opentype_lookup_fail(OpenTypeError.invalid_codepoint);
+    }
+    if (face.cmap_format == 12) { return opentype_lookup_format12(face, codepoint); }
+    if (face.cmap_format == 4) { return opentype_lookup_format4(face, codepoint); }
+    return opentype_lookup_fail(OpenTypeError.unsupported_cmap);
+}
+
+fn opentype_face_free(face: *OpenTypeFace) void {
+    free[u8](&face.*.bytes);
+}

@@ -15,12 +15,12 @@ usage() {
 Usage:
   ./zagkit init [path]
   ./zagkit build [--path <path>] [--output <binary>]
-  ./zagkit run [--project <path>] [--binary <binary>] [--output <png>] [--headless-only] [--show-ascii] [--open]
+  ./zagkit run [--linux-preview] [--project <path>] [--binary <binary>] [--output <png>] [--headless-only] [--show-ascii] [--open]
   ./zagkit test
 
-Current status: this command only exposes the headless reference and contract
-test surface. It does not launch a native desktop, Wayland, macOS,
-Windows, iOS, or Android shell yet.
+Current status: this command exposes the deterministic headless reference and
+an experimental native Linux X11 fallback preview. Wayland, accessibility,
+GPU presentation, macOS, Windows, iOS, and Android remain unavailable.
 
 Automation naming note: native automation is called "Zagkit Talkback"
 and is distinct from Android TalkBack. This distinction is documented in
@@ -182,8 +182,10 @@ cmd_run() {
   local project_root=""
   local explicit_binary=0
   local headless_only=1
+  local linux_preview=0
   local show_ascii=0
   local open_output=0
+  local explicit_output=0
   local source_file=""
   local run_source_file="$HEADLESS_REFERENCE"
   local compile_reference=1
@@ -201,9 +203,12 @@ cmd_run() {
         binary="$1"; shift;;
       --output)
         [ $# -ge 1 ] || { printf "zagkit run: --output needs a path\n" >&2; exit 2; }
-        output="$1"; shift;;
+        output="$1"; explicit_output=1; shift;;
       --headless-only)
         headless_only=1;;
+      --linux-preview)
+        linux_preview=1
+        headless_only=0;;
       --show-ascii)
         show_ascii=1;;
       --open)
@@ -214,6 +219,17 @@ cmd_run() {
         exit 2;;
     esac
   done
+
+  if [ "$linux_preview" -eq 1 ]; then
+    if [ -n "$project_root" ] || [ "$explicit_binary" -eq 1 ] || [ "$show_ascii" -eq 1 ] || [ "$open_output" -eq 1 ]; then
+      printf 'zagkit run: --linux-preview cannot be combined with project, binary, ascii, or opener flags\n' >&2
+      exit 2
+    fi
+    if [ "$explicit_output" -eq 1 ]; then
+      exec "$ROOT_DIR/tools/run-linux-preview.sh" --capture-once "$output"
+    fi
+    exec "$ROOT_DIR/tools/run-linux-preview.sh"
+  fi
 
   if [ "$headless_only" -eq 1 ]; then
     if [ -n "$project_root" ]; then
@@ -278,7 +294,7 @@ PY
     exit 0
   fi
 
-  printf 'zagkit: only --headless-only is currently implemented\n' >&2
+  printf 'zagkit: select --headless-only or --linux-preview\n' >&2
   exit 2
 }
 

@@ -40,7 +40,7 @@
   - Evidence (this run): [check-contracts latest3 live](check-contracts-latest3-live.log), [check-contracts now4](check-contracts-2026-08-07-now4.log)
 - PrismStudio migration inventory:
   - `./tools/generate-prismstudio-migration-map.sh`
-  - Evidence: [inventory json](../../contracts/prismstudio-migration-inventory.json), [inventory markdown](prismstudio-migration-inventory-2026-08-06.md), [migration evidence log now](prismstudio-migration-inventory-2026-08-07-now.log), [migration evidence log latest](prismstudio-migration-inventory-2026-08-07-latest.log)
+  - Evidence: [inventory json](../../contracts/prismstudio-migration-inventory.json), [inventory markdown](prismstudio-migration-inventory-2026-08-07.md), [migration evidence log now](prismstudio-migration-inventory-2026-08-07-now.log), [migration evidence log latest](prismstudio-migration-inventory-2026-08-07-latest.log)
   - Evidence (this run): [migration evidence now3](prismstudio-migration-inventory-2026-08-07-now3.log)
 - Visual-direction generation behavior:
   - `./tools/generate-visual-direction-pilot.sh` (324 placeholders rendered)
