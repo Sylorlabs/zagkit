@@ -30,44 +30,55 @@ fn fixture_tag(bytes: *ArrayList[u8], offset: i32, tag: []u8) void {
 }
 
 fn fixture_font() ArrayList[u8] {
-    let bytes: ArrayList[u8] = make[u8](248);
+    let bytes: ArrayList[u8] = make[u8](360);
     let i: i32 = 0;
-    while (i < 248) { push[u8](&bytes, 0); i = i + 1; }
-    fixture_u32(&bytes, 0, 65536); fixture_u16(&bytes, 4, 5);
-    fixture_tag(&bytes, 12, "cmap"); fixture_u32(&bytes, 20, 96); fixture_u32(&bytes, 24, 44);
-    fixture_tag(&bytes, 28, "head"); fixture_u32(&bytes, 36, 144); fixture_u32(&bytes, 40, 20);
-    fixture_tag(&bytes, 44, "maxp"); fixture_u32(&bytes, 52, 164); fixture_u32(&bytes, 56, 6);
-    fixture_tag(&bytes, 60, "hhea"); fixture_u32(&bytes, 68, 172); fixture_u32(&bytes, 72, 36);
-    fixture_tag(&bytes, 76, "hmtx"); fixture_u32(&bytes, 84, 208); fixture_u32(&bytes, 88, 40);
-    fixture_u16(&bytes, 96, 0); fixture_u16(&bytes, 98, 1);
-    fixture_u16(&bytes, 100, 3); fixture_u16(&bytes, 102, 1); fixture_u32(&bytes, 104, 12);
-    fixture_u16(&bytes, 108, 4); fixture_u16(&bytes, 110, 32);
-    fixture_u16(&bytes, 112, 0); fixture_u16(&bytes, 114, 4);
-    fixture_u16(&bytes, 116, 4); fixture_u16(&bytes, 118, 1); fixture_u16(&bytes, 120, 0);
-    fixture_u16(&bytes, 122, 65); fixture_u16(&bytes, 124, 65535); fixture_u16(&bytes, 126, 0);
-    fixture_u16(&bytes, 128, 65); fixture_u16(&bytes, 130, 65535);
-    fixture_u16(&bytes, 132, 65474); fixture_u16(&bytes, 134, 1);
-    fixture_u16(&bytes, 136, 0); fixture_u16(&bytes, 138, 0);
-    fixture_u16(&bytes, 162, 1000);
-    fixture_u32(&bytes, 164, 65536); fixture_u16(&bytes, 168, 10);
-    fixture_u16(&bytes, 206, 10);
+    while (i < 360) { push[u8](&bytes, 0); i = i + 1; }
+    fixture_u32(&bytes, 0, 65536); fixture_u16(&bytes, 4, 7);
+    fixture_tag(&bytes, 12, "cmap"); fixture_u32(&bytes, 20, 128); fixture_u32(&bytes, 24, 44);
+    fixture_tag(&bytes, 28, "head"); fixture_u32(&bytes, 36, 176); fixture_u32(&bytes, 40, 54);
+    fixture_tag(&bytes, 44, "maxp"); fixture_u32(&bytes, 52, 232); fixture_u32(&bytes, 56, 6);
+    fixture_tag(&bytes, 60, "hhea"); fixture_u32(&bytes, 68, 240); fixture_u32(&bytes, 72, 36);
+    fixture_tag(&bytes, 76, "hmtx"); fixture_u32(&bytes, 84, 276); fixture_u32(&bytes, 88, 40);
+    fixture_tag(&bytes, 92, "loca"); fixture_u32(&bytes, 100, 316); fixture_u32(&bytes, 104, 22);
+    fixture_tag(&bytes, 108, "glyf"); fixture_u32(&bytes, 116, 340); fixture_u32(&bytes, 120, 20);
+    fixture_u16(&bytes, 128, 0); fixture_u16(&bytes, 130, 1);
+    fixture_u16(&bytes, 132, 3); fixture_u16(&bytes, 134, 1); fixture_u32(&bytes, 136, 12);
+    fixture_u16(&bytes, 140, 4); fixture_u16(&bytes, 142, 32);
+    fixture_u16(&bytes, 144, 0); fixture_u16(&bytes, 146, 4);
+    fixture_u16(&bytes, 148, 4); fixture_u16(&bytes, 150, 1); fixture_u16(&bytes, 152, 0);
+    fixture_u16(&bytes, 154, 65); fixture_u16(&bytes, 156, 65535); fixture_u16(&bytes, 158, 0);
+    fixture_u16(&bytes, 160, 65); fixture_u16(&bytes, 162, 65535);
+    fixture_u16(&bytes, 164, 65474); fixture_u16(&bytes, 166, 1);
+    fixture_u16(&bytes, 168, 0); fixture_u16(&bytes, 170, 0);
+    fixture_u16(&bytes, 194, 1000);
+    fixture_u16(&bytes, 226, 0);
+    fixture_u32(&bytes, 232, 65536); fixture_u16(&bytes, 236, 10);
+    fixture_u16(&bytes, 274, 10);
     let metric: i32 = 0;
     while (metric < 10) {
-        fixture_u16(&bytes, 208 + metric * 4, 500 + metric * 10);
-        fixture_u16(&bytes, 210 + metric * 4, 0);
+        fixture_u16(&bytes, 276 + metric * 4, 500 + metric * 10);
+        fixture_u16(&bytes, 278 + metric * 4, 0);
         metric = metric + 1;
     }
+    let location: i32 = 4;
+    while (location <= 10) { fixture_u16(&bytes, 316 + location * 2, 10); location = location + 1; }
+    fixture_u16(&bytes, 340, 1);
+    fixture_u16(&bytes, 342, 0); fixture_u16(&bytes, 344, 0);
+    fixture_u16(&bytes, 346, 100); fixture_u16(&bytes, 348, 100);
+    fixture_u16(&bytes, 350, 2); fixture_u16(&bytes, 352, 0);
+    bytes.data[354] = 49; bytes.data[355] = 51; bytes.data[356] = 39;
+    bytes.data[357] = 100; bytes.data[358] = 100; bytes.data[359] = 100;
     return bytes;
 }
 
 fn fixture_font_format12() ArrayList[u8] {
     let bytes: ArrayList[u8] = fixture_font();
-    fixture_u16(&bytes, 102, 10);
-    fixture_u16(&bytes, 108, 12); fixture_u16(&bytes, 110, 0);
-    fixture_u32(&bytes, 112, 28); fixture_u32(&bytes, 116, 0);
-    fixture_u32(&bytes, 120, 1);
-    fixture_u32(&bytes, 124, 128512); fixture_u32(&bytes, 128, 128512);
-    fixture_u32(&bytes, 132, 4);
+    fixture_u16(&bytes, 134, 10);
+    fixture_u16(&bytes, 140, 12); fixture_u16(&bytes, 142, 0);
+    fixture_u32(&bytes, 144, 28); fixture_u32(&bytes, 148, 0);
+    fixture_u32(&bytes, 152, 1);
+    fixture_u32(&bytes, 156, 128512); fixture_u32(&bytes, 160, 128512);
+    fixture_u32(&bytes, 164, 4);
     return bytes;
 }
 
@@ -92,6 +103,14 @@ fn parse_contract(state: *TestState) void {
     expect(state, horizontal.error == OpenTypeError.none &&
         horizontal.advance_width == 530,
         "glyph advance widths come from the owned hmtx table");
+    let outline: GlyphOutline = opentype_glyph_outline(face, 3);
+    expect(state, outline.error == OpenTypeError.none && outline.points.len == 3 &&
+        outline.contour_ends.len == 1 && outline.contour_ends.data[0] == 2 &&
+        outline.points.data[0].x == 0 && outline.points.data[0].y == 0 &&
+        outline.points.data[1].x == 100 && outline.points.data[1].y == 0 &&
+        outline.points.data[2].x == 0 && outline.points.data[2].y == 100,
+        "simple glyf contours decode exact on-curve font-unit points");
+    opentype_glyph_outline_free(&outline);
     opentype_face_free(&face); free[u8](&bytes);
 
     let format12_bytes: ArrayList[u8] = fixture_font_format12();
@@ -135,6 +154,26 @@ fn malformed_contract(state: *TestState) void {
     expect(state, duplicate.error == OpenTypeError.duplicate_required_table,
         "duplicate required tables fail before ambiguous selection");
     opentype_face_free(&duplicate); free[u8](&duplicate_bytes);
+
+    let escaped_loca_bytes: ArrayList[u8] = fixture_font();
+    fixture_u16(&escaped_loca_bytes, 324, 100);
+    let escaped_loca_face: OpenTypeFace = opentype_parse(
+        escaped_loca_bytes.data[0..escaped_loca_bytes.len]);
+    let escaped_outline: GlyphOutline = opentype_glyph_outline(escaped_loca_face, 3);
+    expect(state, escaped_outline.error == OpenTypeError.invalid_outline,
+        "loca entries cannot escape the owned glyf table");
+    opentype_glyph_outline_free(&escaped_outline);
+    opentype_face_free(&escaped_loca_face); free[u8](&escaped_loca_bytes);
+
+    let composite_bytes: ArrayList[u8] = fixture_font();
+    fixture_u16(&composite_bytes, 340, 65535);
+    let composite_face: OpenTypeFace = opentype_parse(
+        composite_bytes.data[0..composite_bytes.len]);
+    let composite_outline: GlyphOutline = opentype_glyph_outline(composite_face, 3);
+    expect(state, composite_outline.error == OpenTypeError.unsupported_outline,
+        "composite glyphs remain explicitly unsupported until owned decoding exists");
+    opentype_glyph_outline_free(&composite_outline);
+    opentype_face_free(&composite_face); free[u8](&composite_bytes);
 }
 
 fn main() i32 {

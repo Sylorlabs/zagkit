@@ -16,6 +16,11 @@ native widget text engines are not runtime dependencies.
 - `src/text/opentype.zag` copies and owns bounded SFNT/OpenType bytes, validates
   the table directory and required `cmap`, `head`, `maxp`, `hhea`, and `hmtx`
   tables, and exposes `unitsPerEm`, glyph-count, and horizontal-advance truth.
+- TrueType `loca` and simple `glyf` contours decode into bounded, exact
+  font-unit points with explicit on-curve flags and contour ends. Empty glyphs
+  are valid; malformed locations, flags, coordinates, and bounds fail closed.
+- Composite TrueType glyphs and CFF/CFF2 outlines remain explicitly
+  unsupported rather than being flattened incorrectly.
 - Unicode-to-glyph lookup supports bounded `cmap` format 4 and format 12
   subtables. A missing mapping returns glyph zero; it does not invent fallback.
 - The parser rejects table escapes, duplicate required tables, malformed
@@ -24,8 +29,8 @@ native widget text engines are not runtime dependencies.
 
 ## Required before text is visible
 
-1. Parse vertical metrics, `loca`/`glyf` outlines, CFF/CFF2,
-   variation axes, color-glyph tables, and font metadata.
+1. Parse vertical metrics, composite TrueType outlines, CFF/CFF2, variation
+   axes, color-glyph tables, and font metadata.
 2. Implement normalization, grapheme/word/sentence segmentation, script runs,
    bidi resolution, line breaking, fallback, and locale-aware shaping.
 3. Implement OpenType GSUB/GPOS and variation application with deterministic

@@ -25,6 +25,7 @@ fn main() i32 {
         return 5;
     }
     let index: i32 = 0;
+    let outline_points: i32 = 0;
     while (index < text.scalars.len) {
         let glyph: GlyphLookup = opentype_glyph_for_scalar(
             face, text.scalars.data[index].value);
@@ -32,6 +33,17 @@ fn main() i32 {
             utf8_decode_free(&text); opentype_face_free(&face);
             _zag_eprintln("system font smoke: required Latin glyph is unavailable");
             return 6;
+        }
+        if (index == 0) {
+            let outline: GlyphOutline = opentype_glyph_outline(face, glyph.glyph_id);
+            if (outline.error != OpenTypeError.none || outline.points.len == 0) {
+                opentype_glyph_outline_free(&outline);
+                utf8_decode_free(&text); opentype_face_free(&face);
+                _zag_eprintln("system font smoke: first Latin outline is unavailable");
+                return 7;
+            }
+            outline_points = outline.points.len;
+            opentype_glyph_outline_free(&outline);
         }
         index = index + 1;
     }
@@ -41,6 +53,8 @@ fn main() i32 {
     _zag_print_i64(face.glyph_count as i64);
     _zag_print(" mapped_scalars=");
     _zag_print_i64(text.scalars.len as i64);
+    _zag_print(" first_outline_points=");
+    _zag_print_i64(outline_points as i64);
     _zag_println("");
     utf8_decode_free(&text); opentype_face_free(&face);
     return 0;
