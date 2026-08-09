@@ -1,6 +1,7 @@
 @import("std:list")
 @import("../core/view_contract.zag")
 @import("../core/geometry.zag")
+@import("../text/unicode.zag")
 
 enum SemanticRole {
     application,
@@ -53,6 +54,7 @@ enum SemanticsError {
     duplicate_focus_order,
     invalid_range,
     invalid_text_selection,
+    invalid_text,
     invalid_bounds,
     invalid_relationship,
     invalid_collection,
@@ -254,6 +256,15 @@ fn semantic_text_equal(actual: ArrayList[u8], expected: []u8) i32 {
     return 1;
 }
 
+fn semantic_text_input_valid(text: []u8) i32 {
+    let i: i32 = 0;
+    while (i < text.len) {
+        if (text[i] == 0) { return 0; }
+        i = i + 1;
+    }
+    return (utf8_validate(text).error == Utf8Error.none) as i32;
+}
+
 fn semantic_evidence_mix(hash: i64, value: i64) i64 {
     return (hash * 1099511628211) ^ value;
 }
@@ -385,6 +396,11 @@ fn semantics_add(tree: *SemanticsTree, spec: SemanticsSpec) SemanticsError {
     }
     if (semantics_find_index(tree.*, spec.id) >= 0) {
         return semantics_fail(tree, SemanticsError.duplicate_id, spec.id);
+    }
+    if (semantic_text_input_valid(spec.name) == 0 ||
+        semantic_text_input_valid(spec.description) == 0 ||
+        semantic_text_input_valid(spec.value) == 0) {
+        return semantics_fail(tree, SemanticsError.invalid_text, spec.id);
     }
     if (node_key_equal(spec.parent, semantic_root_key()) == 0 &&
         semantics_find_index(tree.*, spec.parent) < 0) {

@@ -28,6 +28,8 @@ Normative decisions:
 
 Detailed experimental contracts:
 
+- [shared Button identity, state, measurement, semantics, and Talkback](../components/button.md)
+- [retained Canvas immediate drawing escape hatch](canvas.md)
 - [intrinsic measurement and invalidation reasons](measurement.md)
 - [Flex placement and adaptive spacing](flex.md)
 - [motion scheduler and tracks](motion.md)
@@ -109,6 +111,22 @@ integer affine inversion for local coordinates, resolves local clips and
 z-order deterministically, and keeps pointer capture and focus explicit.
 Accepted, missed, captured, cancelled, and invalid events share one ordered
 evidence stream; platform input adaptation remains open.
+
+The first public component slice composes these trees rather than drawing a
+screen-local control. [Button](../components/button.md) atomically emits one
+stable ID into display, hit, and semantics builders; resolves its eight
+canonical states through semantic design tokens; measures through Flex;
+exposes exact caller-owned Text bounds; and executes by ID through Zagkit
+Talkback. Keyboard/gamepad adapters, declarative view reconciliation, public
+Text composition, high-contrast variants, and native accessibility bridges
+remain incomplete, so the inventory status is `implementing`, not conformant.
+
+The public [Canvas](canvas.md) escape hatch similarly keeps immediate CAD and
+custom drawing inside Zagkit truth: one retained key owns bounded commands and
+resources, transform/clip contribution, explicit semantic policy, hit-space
+conversion, cleanup, and deterministic replay identity. It is the viewport
+bridge PrismStudio needs, but it does not claim GPU submission, native
+accessibility, or a complete declarative Canvas view.
 
 The first deterministic replay executor consumes an immutable ordered tape of
 state revisions, pointer events, monotonic clock samples, backend activation,

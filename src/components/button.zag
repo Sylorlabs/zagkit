@@ -1,0 +1,589 @@
+@import("../core/geometry.zag")
+@import("../core/view_contract.zag")
+@import("../design/tokens.zag")
+@import("../input/hit_test.zag")
+@import("../layout/adaptive.zag")
+@import("../render/display_list.zag")
+@import("../semantics/semantics.zag")
+
+// Button is one retained component contract. Its stable NodeKey and geometry
+// are shared by rendering, hit testing, semantics, focus, and Talkback.
+// Text remains caller-owned content: this module emits chrome and returns the
+// exact content bounds and semantic text token for a Text child to render.
+
+enum ButtonVariant { primary, secondary, quiet, destructive }
+
+enum ButtonCanonicalState {
+    rest,
+    hover,
+    focus,
+    pressed,
+    selected,
+    disabled,
+    loading,
+    error,
+}
+
+enum ButtonEvent {
+    pointer_enter,
+    pointer_leave,
+    pointer_down,
+    pointer_up_inside,
+    pointer_cancel,
+    focus_gained,
+    focus_lost,
+    select,
+    deselect,
+    enable,
+    disable,
+    begin_loading,
+    finish_loading,
+    mark_error,
+    clear_error,
+}
+
+enum ButtonMeasureError { none, invalid_content, invalid_constraints }
+enum ButtonBuildError { none, invalid_spec, display_error, hit_error, semantics_error }
+
+struct ButtonInteraction {
+    hovered: i32,
+    focused: i32,
+    pressed: i32,
+    selected: i32,
+    enabled: i32,
+    loading: i32,
+    error: i32,
+}
+
+struct ButtonTransition {
+    interaction: ButtonInteraction,
+    activate: i32,
+    state_changed: i32,
+}
+
+struct ButtonMeasureResult {
+    size: Size,
+    minimum_target: i64,
+    horizontal_padding: i64,
+    vertical_padding: i64,
+    visual_extent: i64,
+    visual_gap: i64,
+    clipped: i32,
+    error: ButtonMeasureError,
+}
+
+struct ButtonResolvedStyle {
+    fill_token: SemanticColorToken,
+    border_token: SemanticColorToken,
+    text_token: SemanticColorToken,
+    focus_token: SemanticColorToken,
+    fill_alpha: i64,
+    border_alpha: i64,
+    radius: i64,
+    elevation: SemanticElevationToken,
+}
+
+struct ButtonSpec {
+    id: NodeKey,
+    parent: NodeKey,
+    bounds: Rect,
+    label: []u8,
+    description: []u8,
+    focus_order: i64,
+    z_order: i64,
+    variant: ButtonVariant,
+    density: FlexDensity,
+    interaction: ButtonInteraction,
+}
+
+struct ButtonArtifact {
+    id: NodeKey,
+    bounds: Rect,
+    content_bounds: Rect,
+    interaction: ButtonInteraction,
+    style: ButtonResolvedStyle,
+    effectively_enabled: i32,
+    content_visible: i32,
+    display_op_start: i32,
+    display_op_end: i32,
+    hit_node_index: i32,
+    semantics_node_index: i32,
+    evidence_hash: i64,
+}
+
+struct ButtonBuildResult {
+    artifact: ButtonArtifact,
+    error: ButtonBuildError,
+    display_error: DisplayError,
+    hit_error: HitTreeError,
+    semantics_error: SemanticsError,
+}
+
+struct ButtonBuildCheckpoint {
+    display_length: i32,
+    display_revision: i64,
+    display_hash: i64,
+    display_last_error: DisplayError,
+    display_error_index: i32,
+    hit_length: i32,
+    hit_revision: i64,
+    hit_last_error: HitTreeError,
+    hit_error_node: NodeKey,
+    semantics: SemanticsCheckpoint,
+}
+
+fn button_interaction() ButtonInteraction {
+    return ButtonInteraction{
+        .hovered = 0, .focused = 0, .pressed = 0, .selected = 0,
+        .enabled = 1, .loading = 0, .error = 0,
+    };
+}
+
+fn button_label_byte_limit() i32 { return 4096; }
+fn button_description_byte_limit() i32 { return 16384; }
+
+fn button_canonical_state(state: ButtonCanonicalState) ButtonInteraction {
+    let value: ButtonInteraction = button_interaction();
+    if (state == ButtonCanonicalState.hover) { value.hovered = 1; }
+    if (state == ButtonCanonicalState.focus) { value.focused = 1; }
+    if (state == ButtonCanonicalState.pressed) { value.pressed = 1; }
+    if (state == ButtonCanonicalState.selected) { value.selected = 1; }
+    if (state == ButtonCanonicalState.disabled) { value.enabled = 0; }
+    if (state == ButtonCanonicalState.loading) { value.loading = 1; }
+    if (state == ButtonCanonicalState.error) { value.error = 1; }
+    return value;
+}
+
+fn button_interaction_valid(value: ButtonInteraction) i32 {
+    if ((value.hovered != 0 && value.hovered != 1) ||
+        (value.focused != 0 && value.focused != 1) ||
+        (value.pressed != 0 && value.pressed != 1) ||
+        (value.selected != 0 && value.selected != 1) ||
+        (value.enabled != 0 && value.enabled != 1) ||
+        (value.loading != 0 && value.loading != 1) ||
+        (value.error != 0 && value.error != 1)) { return 0; }
+    if (value.enabled == 0 && value.pressed != 0) { return 0; }
+    if (value.loading != 0 && value.pressed != 0) { return 0; }
+    return 1;
+}
+
+fn button_effectively_enabled(value: ButtonInteraction) i32 {
+    return (value.enabled != 0 && value.loading == 0) as i32;
+}
+
+fn button_interaction_equal(left: ButtonInteraction, right: ButtonInteraction) i32 {
+    return (left.hovered == right.hovered && left.focused == right.focused &&
+        left.pressed == right.pressed && left.selected == right.selected &&
+        left.enabled == right.enabled && left.loading == right.loading &&
+        left.error == right.error) as i32;
+}
+
+fn button_reduce(current: ButtonInteraction, event: ButtonEvent) ButtonTransition {
+    let next: ButtonInteraction = current;
+    let activate: i32 = 0;
+    let available: i32 = button_effectively_enabled(current);
+    switch (event) {
+        .pointer_enter => { if (available != 0) { next.hovered = 1; } }
+        .pointer_leave => { next.hovered = 0; next.pressed = 0; }
+        .pointer_down => { if (available != 0) { next.pressed = 1; } }
+        .pointer_up_inside => {
+            if (available != 0 && current.pressed != 0) { activate = 1; }
+            next.pressed = 0;
+        }
+        .pointer_cancel => { next.pressed = 0; }
+        .focus_gained => { if (available != 0) { next.focused = 1; } }
+        .focus_lost => { next.focused = 0; next.pressed = 0; }
+        .select => { next.selected = 1; }
+        .deselect => { next.selected = 0; }
+        .enable => { next.enabled = 1; }
+        .disable => {
+            next.enabled = 0; next.hovered = 0; next.focused = 0;
+            next.pressed = 0;
+        }
+        .begin_loading => { next.loading = 1; next.pressed = 0; }
+        .finish_loading => { next.loading = 0; }
+        .mark_error => { next.error = 1; next.loading = 0; next.pressed = 0; }
+        .clear_error => { next.error = 0; }
+    }
+    return ButtonTransition{
+        .interaction = next,
+        .activate = activate,
+        .state_changed = (button_interaction_equal(current, next) == 0) as i32,
+    };
+}
+
+fn button_minimum_target(density: FlexDensity) i64 {
+    return switch (density) {
+        .compact => 32 * unit_scale(),
+        .standard => 40 * unit_scale(),
+        .touch => 48 * unit_scale(),
+    };
+}
+
+fn button_measure(label_size: Size, has_leading_visual: i32,
+    constraints: Constraints, density: FlexDensity) ButtonMeasureResult {
+    let result: ButtonMeasureResult = ButtonMeasureResult{
+        .size = size(0, 0), .minimum_target = button_minimum_target(density),
+        .horizontal_padding = flex_spacing(FlexSpacingToken.large, density),
+        .vertical_padding = flex_spacing(FlexSpacingToken.small, density),
+        .visual_extent = 18 * unit_scale(),
+        .visual_gap = flex_spacing(FlexSpacingToken.small, density),
+        .clipped = 0, .error = ButtonMeasureError.none,
+    };
+    if (label_size.width < 0 || label_size.height < 0 ||
+        label_size.width > unbounded_extent() / 4 ||
+        label_size.height > unbounded_extent() / 4 ||
+        (has_leading_visual != 0 && has_leading_visual != 1)) {
+        result.error = ButtonMeasureError.invalid_content;
+        return result;
+    }
+    let normalized: Constraints = normalize_constraints(constraints);
+    if (normalized.min_width > unbounded_extent() ||
+        normalized.max_width > unbounded_extent() ||
+        normalized.min_height > unbounded_extent() ||
+        normalized.max_height > unbounded_extent()) {
+        result.error = ButtonMeasureError.invalid_constraints;
+        return result;
+    }
+    let content_width: i64 = label_size.width;
+    if (has_leading_visual != 0) {
+        content_width = content_width + result.visual_extent;
+        if (label_size.width > 0) { content_width = content_width + result.visual_gap; }
+    }
+    let desired_width: i64 = content_width + result.horizontal_padding * 2;
+    let desired_height: i64 = label_size.height + result.vertical_padding * 2;
+    if (desired_width < result.minimum_target) { desired_width = result.minimum_target; }
+    if (desired_height < result.minimum_target) { desired_height = result.minimum_target; }
+    result.size = constrain_size(size(desired_width, desired_height), normalized);
+    result.clipped = (result.size.width < content_width + result.visual_gap * 2 ||
+        result.size.height < label_size.height + result.visual_gap * 2) as i32;
+    return result;
+}
+
+fn button_spec(id: NodeKey, parent: NodeKey, bounds: Rect,
+    label: []u8) ButtonSpec {
+    return ButtonSpec{
+        .id = id, .parent = parent, .bounds = bounds,
+        .label = label, .description = "", .focus_order = 0, .z_order = 0,
+        .variant = ButtonVariant.secondary, .density = FlexDensity.standard,
+        .interaction = button_interaction(),
+    };
+}
+
+fn button_style(spec: ButtonSpec) ButtonResolvedStyle {
+    let style: ButtonResolvedStyle = ButtonResolvedStyle{
+        .fill_token = SemanticColorToken.surface_interactive,
+        .border_token = SemanticColorToken.border_subtle,
+        .text_token = SemanticColorToken.text_primary,
+        .focus_token = SemanticColorToken.focus,
+        .fill_alpha = 56000,
+        .border_alpha = 18000,
+        .radius = semantic_radius(SemanticRadiusToken.control),
+        .elevation = SemanticElevationToken.panel,
+    };
+    if (spec.variant == ButtonVariant.primary) {
+        style.fill_token = SemanticColorToken.accent;
+        style.border_token = SemanticColorToken.edge_highlight;
+        style.fill_alpha = 62000;
+        style.border_alpha = 19000;
+        style.elevation = SemanticElevationToken.raised;
+    }
+    if (spec.variant == ButtonVariant.quiet) {
+        style.fill_token = SemanticColorToken.surface_base;
+        style.fill_alpha = 0;
+        style.border_alpha = 0;
+        style.elevation = SemanticElevationToken.base;
+    }
+    if (spec.variant == ButtonVariant.destructive) {
+        style.fill_token = SemanticColorToken.status_error;
+        style.border_token = SemanticColorToken.status_error;
+        style.fill_alpha = 50000;
+        style.border_alpha = 65535;
+        style.elevation = SemanticElevationToken.raised;
+    }
+    if (spec.interaction.hovered != 0) {
+        if (spec.variant == ButtonVariant.primary) {
+            style.fill_token = SemanticColorToken.accent_emphasis;
+        } else if (spec.variant != ButtonVariant.destructive) {
+            style.fill_token = SemanticColorToken.surface_selected;
+        }
+        style.fill_alpha = 61000;
+        style.border_alpha = 24000;
+    }
+    if (spec.interaction.selected != 0) {
+        style.fill_token = SemanticColorToken.surface_selected;
+        style.border_token = SemanticColorToken.accent;
+        style.fill_alpha = 61000;
+        style.border_alpha = 43000;
+    }
+    if (spec.interaction.pressed != 0) {
+        style.fill_token = SemanticColorToken.accent_emphasis;
+        style.fill_alpha = 65535;
+        style.elevation = SemanticElevationToken.base;
+    }
+    if (spec.interaction.error != 0) {
+        style.border_token = SemanticColorToken.status_error;
+        style.border_alpha = 65535;
+    }
+    if (spec.interaction.loading != 0) {
+        style.fill_token = SemanticColorToken.surface_interactive;
+        style.text_token = SemanticColorToken.text_secondary;
+        style.fill_alpha = 50000;
+        style.elevation = SemanticElevationToken.base;
+    }
+    if (spec.interaction.enabled == 0) {
+        style.fill_token = SemanticColorToken.surface_inset;
+        style.border_token = SemanticColorToken.border_subtle;
+        style.text_token = SemanticColorToken.text_disabled;
+        style.fill_alpha = 36000;
+        style.border_alpha = 9000;
+        style.elevation = SemanticElevationToken.base;
+    }
+    return style;
+}
+
+fn button_content_bounds(spec: ButtonSpec) Rect {
+    let horizontal: i64 = flex_spacing(FlexSpacingToken.large, spec.density);
+    let vertical: i64 = flex_spacing(FlexSpacingToken.small, spec.density);
+    let h: i64 = horizontal;
+    let v: i64 = vertical;
+    if (h * 2 >= spec.bounds.width) { h = (spec.bounds.width - unit_scale()) / 2; }
+    if (v * 2 >= spec.bounds.height) { v = (spec.bounds.height - unit_scale()) / 2; }
+    if (h < 0) { h = 0; }
+    if (v < 0) { v = 0; }
+    return rect(spec.bounds.x + h, spec.bounds.y + v,
+        spec.bounds.width - h * 2, spec.bounds.height - v * 2);
+}
+
+fn button_spec_valid(spec: ButtonSpec) i32 {
+    if (node_key_equal(spec.id, hit_root_key()) != 0 ||
+        node_key_equal(spec.id, semantic_none_key()) != 0 ||
+        spec.label.len <= 0 || spec.label.len > button_label_byte_limit() ||
+        spec.description.len > button_description_byte_limit() ||
+        semantic_text_input_valid(spec.label) == 0 ||
+        semantic_text_input_valid(spec.description) == 0 ||
+        spec.focus_order < 0 ||
+        spec.bounds.width < 16 * unit_scale() ||
+        spec.bounds.height < 16 * unit_scale() ||
+        hit_geometry_valid(spec.bounds) == 0 ||
+        button_interaction_valid(spec.interaction) == 0) { return 0; }
+    return 1;
+}
+
+fn button_state_value(spec: ButtonSpec) []u8 {
+    if (spec.interaction.loading != 0) { return "Loading"; }
+    if (spec.interaction.error != 0) { return "Error"; }
+    if (spec.interaction.selected != 0) { return "Selected"; }
+    return "";
+}
+
+fn button_hash_mix(hash: i64, value: i64) i64 {
+    return (hash * 1099511628211) ^ value;
+}
+
+fn button_artifact_hash(artifact: ButtonArtifact) i64 {
+    let hash: i64 = button_hash_mix(17, artifact.id.value);
+    hash = button_hash_mix(hash, artifact.id.generation);
+    hash = button_hash_mix(hash, artifact.bounds.x);
+    hash = button_hash_mix(hash, artifact.bounds.y);
+    hash = button_hash_mix(hash, artifact.bounds.width);
+    hash = button_hash_mix(hash, artifact.bounds.height);
+    hash = button_hash_mix(hash, artifact.content_bounds.x);
+    hash = button_hash_mix(hash, artifact.content_bounds.y);
+    hash = button_hash_mix(hash, artifact.content_bounds.width);
+    hash = button_hash_mix(hash, artifact.content_bounds.height);
+    hash = button_hash_mix(hash, artifact.interaction.hovered as i64);
+    hash = button_hash_mix(hash, artifact.interaction.focused as i64);
+    hash = button_hash_mix(hash, artifact.interaction.pressed as i64);
+    hash = button_hash_mix(hash, artifact.interaction.selected as i64);
+    hash = button_hash_mix(hash, artifact.interaction.enabled as i64);
+    hash = button_hash_mix(hash, artifact.interaction.loading as i64);
+    hash = button_hash_mix(hash, artifact.interaction.error as i64);
+    hash = button_hash_mix(hash, artifact.style.fill_token as i64);
+    hash = button_hash_mix(hash, artifact.style.border_token as i64);
+    hash = button_hash_mix(hash, artifact.style.text_token as i64);
+    hash = button_hash_mix(hash, artifact.style.focus_token as i64);
+    hash = button_hash_mix(hash, artifact.style.fill_alpha);
+    hash = button_hash_mix(hash, artifact.style.border_alpha);
+    hash = button_hash_mix(hash, artifact.style.radius);
+    hash = button_hash_mix(hash, artifact.style.elevation as i64);
+    hash = button_hash_mix(hash, artifact.effectively_enabled as i64);
+    return button_hash_mix(hash, artifact.content_visible as i64);
+}
+
+fn button_empty_artifact(spec: ButtonSpec) ButtonArtifact {
+    return ButtonArtifact{
+        .id = spec.id, .bounds = spec.bounds,
+        .content_bounds = rect(0, 0, 0, 0),
+        .interaction = spec.interaction, .style = button_style(spec),
+        .effectively_enabled = 0, .content_visible = 0,
+        .display_op_start = 0 - 1, .display_op_end = 0 - 1,
+        .hit_node_index = 0 - 1, .semantics_node_index = 0 - 1,
+        .evidence_hash = 0,
+    };
+}
+
+fn button_build_result(spec: ButtonSpec, error: ButtonBuildError) ButtonBuildResult {
+    return ButtonBuildResult{
+        .artifact = button_empty_artifact(spec), .error = error,
+        .display_error = DisplayError.none, .hit_error = HitTreeError.none,
+        .semantics_error = SemanticsError.none,
+    };
+}
+
+fn button_checkpoint(display: DisplayList, hits: HitTree,
+    semantics: SemanticsTree) ButtonBuildCheckpoint {
+    return ButtonBuildCheckpoint{
+        .display_length = display.ops.len, .display_revision = display.revision,
+        .display_hash = display.content_hash,
+        .display_last_error = display.last_error,
+        .display_error_index = display.error_index,
+        .hit_length = hits.nodes.len, .hit_revision = hits.revision,
+        .hit_last_error = hits.last_error, .hit_error_node = hits.error_node,
+        .semantics = semantics_tree_checkpoint(semantics),
+    };
+}
+
+fn button_rollback(display: *DisplayList, hits: *HitTree,
+    semantics: *SemanticsTree, checkpoint: ButtonBuildCheckpoint) void {
+    display.*.ops.len = checkpoint.display_length;
+    display.*.revision = checkpoint.display_revision;
+    display.*.content_hash = checkpoint.display_hash;
+    display.*.last_error = checkpoint.display_last_error;
+    display.*.error_index = checkpoint.display_error_index;
+    hits.*.nodes.len = checkpoint.hit_length;
+    hits.*.revision = checkpoint.hit_revision;
+    hits.*.last_error = checkpoint.hit_last_error;
+    hits.*.error_node = checkpoint.hit_error_node;
+    _ = semantics_tree_rollback(semantics, checkpoint.semantics);
+}
+
+fn button_push_round(display: *DisplayList, id: NodeKey, bounds: Rect,
+    radius: i64, paint: Paint) DisplayError {
+    let op: DisplayOp = display_op(DisplayOpKind.fill_rounded_rect, id);
+    op.bounds = bounds;
+    op.parameter = radius;
+    op.paint = paint;
+    return display_list_push(display, op);
+}
+
+fn button_emit(spec: ButtonSpec, display: *DisplayList, hits: *HitTree,
+    semantics: *SemanticsTree) ButtonBuildResult {
+    let result: ButtonBuildResult = button_build_result(spec, ButtonBuildError.none);
+    if (button_spec_valid(spec) == 0 || display.*.sealed != 0) {
+        result.error = ButtonBuildError.invalid_spec;
+        if (display.*.sealed != 0) {
+            result.error = ButtonBuildError.display_error;
+            result.display_error = DisplayError.sealed;
+        }
+        return result;
+    }
+    let checkpoint: ButtonBuildCheckpoint = button_checkpoint(
+        display.*, hits.*, semantics.*);
+    let style: ButtonResolvedStyle = button_style(spec);
+    let elevation: ResolvedElevationToken = semantic_elevation(style.elevation);
+    let enabled: i32 = button_effectively_enabled(spec.interaction);
+    let op_start: i32 = display.*.ops.len;
+
+    let display_error: DisplayError = DisplayError.none;
+    if (spec.interaction.focused != 0 && enabled != 0) {
+        let focus_extent: i64 = 3 * unit_scale();
+        display_error = button_push_round(display, spec.id,
+            rect(spec.bounds.x - focus_extent, spec.bounds.y - focus_extent,
+                spec.bounds.width + focus_extent * 2,
+                spec.bounds.height + focus_extent * 2),
+            style.radius + focus_extent,
+            semantic_color_with_alpha(style.focus_token, 39000));
+    }
+    if (display_error == DisplayError.none && elevation.shadow_alpha > 0 &&
+        spec.interaction.pressed == 0 && enabled != 0) {
+        let spread: i64 = elevation.shadow_spread;
+        display_error = button_push_round(display, spec.id,
+            rect(spec.bounds.x - spread,
+                spec.bounds.y + elevation.shadow_offset_y - spread,
+                spec.bounds.width + spread * 2,
+                spec.bounds.height + spread * 2),
+            style.radius + spread,
+            semantic_color_with_alpha(SemanticColorToken.shadow,
+                elevation.shadow_alpha));
+    }
+    if (display_error == DisplayError.none) {
+        display_error = button_push_round(display, spec.id, spec.bounds,
+            style.radius, semantic_color_with_alpha(style.border_token,
+                style.border_alpha));
+    }
+    if (display_error == DisplayError.none) {
+        let edge: i64 = unit_scale();
+        display_error = button_push_round(display, spec.id,
+            rect(spec.bounds.x + edge, spec.bounds.y + edge,
+                spec.bounds.width - edge * 2,
+                spec.bounds.height - edge * 2),
+            style.radius - edge,
+            semantic_color_with_alpha(style.fill_token, style.fill_alpha));
+    }
+    if (display_error == DisplayError.none && spec.interaction.loading != 0) {
+        let indicator_width: i64 = 20 * unit_scale();
+        let indicator_height: i64 = 4 * unit_scale();
+        display_error = button_push_round(display, spec.id,
+            rect(spec.bounds.x + (spec.bounds.width - indicator_width) / 2,
+                spec.bounds.y + (spec.bounds.height - indicator_height) / 2,
+                indicator_width, indicator_height),
+            indicator_height / 2,
+            semantic_color_with_alpha(SemanticColorToken.accent, 52000));
+    }
+    if (display_error != DisplayError.none) {
+        button_rollback(display, hits, semantics, checkpoint);
+        result.error = ButtonBuildError.display_error;
+        result.display_error = display_error;
+        return result;
+    }
+
+    let hit: HitNode = hit_node(spec.id, spec.parent, spec.bounds);
+    hit.clip = spec.bounds;
+    hit.has_clip = 1;
+    hit.z_order = spec.z_order;
+    hit.enabled = enabled;
+    hit.focusable = enabled;
+    let hit_error: HitTreeError = hit_tree_add(hits, hit);
+    if (hit_error != HitTreeError.none) {
+        button_rollback(display, hits, semantics, checkpoint);
+        result.error = ButtonBuildError.hit_error;
+        result.hit_error = hit_error;
+        return result;
+    }
+
+    let semantic: SemanticsSpec = semantics_spec(
+        spec.id, spec.parent, SemanticRole.button, spec.label);
+    semantic.description = spec.description;
+    semantic.value = button_state_value(spec);
+    semantic.focus_order = spec.focus_order;
+    semantic.disabled = (enabled == 0) as i32;
+    semantic.selected = spec.interaction.selected;
+    semantic.has_bounds = 1;
+    semantic.bounds = spec.bounds;
+    if (enabled != 0) {
+        semantic.action_mask = semantic_actions_add(
+            semantic_actions(SemanticAction.activate), SemanticAction.focus);
+    }
+    let semantic_error: SemanticsError = semantics_add(semantics, semantic);
+    if (semantic_error != SemanticsError.none) {
+        button_rollback(display, hits, semantics, checkpoint);
+        result.error = ButtonBuildError.semantics_error;
+        result.semantics_error = semantic_error;
+        return result;
+    }
+
+    result.artifact = ButtonArtifact{
+        .id = spec.id, .bounds = spec.bounds,
+        .content_bounds = button_content_bounds(spec),
+        .interaction = spec.interaction, .style = style,
+        .effectively_enabled = enabled,
+        .content_visible = (spec.interaction.loading == 0) as i32,
+        .display_op_start = op_start, .display_op_end = display.*.ops.len,
+        .hit_node_index = hits.*.nodes.len - 1,
+        .semantics_node_index = semantics.*.nodes.len - 1,
+        .evidence_hash = 0,
+    };
+    result.artifact.evidence_hash = button_artifact_hash(result.artifact);
+    return result;
+}

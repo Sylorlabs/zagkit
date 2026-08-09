@@ -43,8 +43,8 @@ is normative in [DEPENDENCIES.md](DEPENDENCIES.md).
 | Product and architecture contract | accepted | [RFC index](docs/rfcs/README.md) |
 | Compiler dependency | pinned, prerequisites incomplete | [toolchain lock](contracts/toolchain.json) |
 | Platform shells | unavailable | [support matrix](SUPPORT.md) |
-| Headless core | experimental state, reconciliation, intrinsic measurement, geometry, Flex, Grid, Overlay, scroll, virtual collections, collection semantics, Talkback, canonical paths and images, display lists, CPU raster, input, replay, and motion | [headless test](tools/test-headless.sh) |
-| Components and visual language | inventory only, visual review pending | [component inventory](contracts/components.json) |
+| Headless core | experimental state, reconciliation, intrinsic measurement, geometry, Flex, shared Button composition, retained Canvas drawing, Grid, Overlay, scroll, virtual collections, collection semantics, Talkback, canonical paths and images, display lists, CPU raster, input, replay, and motion | [headless test](tools/test-headless.sh) |
+| Components and visual language | Button and Canvas implementing against headless contracts; direction review and all other component families remain incomplete | [component inventory](contracts/components.json) |
 | Flex and Zagkit Talkback | Flex foundation and in-process ID-first Talkback dispatch executing; native transport remains unavailable | [Talkback contract](docs/automation/talkback.md) |
 | Benchmarks | scene specifications only, no results | [benchmark contract](benchmarks/README.md) |
 

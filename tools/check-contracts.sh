@@ -160,17 +160,29 @@ for id in \
 done
 
 jq -e '
+  (.schema_version == 2) and
+  (.status_vocabulary == ["planned", "implementing", "experimental", "conformant"]) and
   (.visual_direction_gate.state == "blocked") and
   (.components | length >= 40) and
   ((.components | map(.id) | unique | length) == (.components | length)) and
   all(.components[];
-    (.status == "planned") and
+    (.status | IN("planned", "implementing", "experimental", "conformant")) and
+    (if .status == "planned" then true else
+      ((.source | type == "string" and length > 0) and
+       (.evidence | type == "string" and length > 0) and
+       (.documentation | type == "string" and length > 0))
+     end) and
     (.milestone >= 2 and .milestone <= 4) and
     (.semantic_roles | type == "array" and length > 0) and
     (.inputs | type == "array") and
     (.adaptive | type == "array" and length > 0)
-  )
+  ) and
+  all(.components[]; .status != "experimental" and .status != "conformant")
 ' contracts/components.json >/dev/null || fail "component inventory or visual production gate is incomplete"
+for component_path in $(jq -r '.components[] | select(.status != "planned") |
+    .source, .evidence, .documentation' contracts/components.json); do
+    require_file "$component_path"
+done
 
 jq -e '
   (.result_state == "specifications-only") and

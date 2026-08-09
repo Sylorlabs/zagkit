@@ -128,6 +128,24 @@ fn rejection_contract(state: *TestState) void {
     bad_state.selected = 2;
     expect(state, semantics_add(&tree, bad_state) == SemanticsError.invalid_state,
         "noncanonical semantic flags fail instead of leaking ambiguous state");
+
+    let malformed_bytes: ArrayList[u8] = make[u8](2);
+    push[u8](&malformed_bytes, 194); push[u8](&malformed_bytes, 65);
+    let malformed_text: SemanticsSpec = semantics_spec(node_key(20), root_id,
+        SemanticRole.text, malformed_bytes.data[0..malformed_bytes.len]);
+    expect(state, semantics_add(&tree, malformed_text) == SemanticsError.invalid_text &&
+        tree.nodes.len == 2,
+        "malformed UTF-8 cannot enter owned accessibility text");
+    free[u8](&malformed_bytes);
+
+    let nul_bytes: ArrayList[u8] = make[u8](2);
+    push[u8](&nul_bytes, 65); push[u8](&nul_bytes, 0);
+    let nul_text: SemanticsSpec = semantics_spec(node_key(21), root_id,
+        SemanticRole.text, nul_bytes.data[0..nul_bytes.len]);
+    expect(state, semantics_add(&tree, nul_text) == SemanticsError.invalid_text &&
+        tree.nodes.len == 2,
+        "embedded NUL cannot truncate platform accessibility adapters");
+    free[u8](&nul_bytes);
     semantics_tree_free(&tree);
 }
 

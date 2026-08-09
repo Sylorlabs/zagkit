@@ -27,6 +27,12 @@ struct Utf8DecodeResult {
     error_offset: i64,
 }
 
+struct Utf8ValidationResult {
+    error: Utf8Error,
+    error_offset: i64,
+    scalar_count: i64,
+}
+
 fn unicode_scalar(value: i64, start: i64, length: i32) UnicodeScalar {
     return UnicodeScalar{
         .value = value,
@@ -50,6 +56,80 @@ fn utf8_fail(result: *Utf8DecodeResult, error: Utf8Error, offset: i64) void {
 
 fn utf8_continuation(byte: i32) i32 {
     return ((byte & 192) == 128) as i32;
+}
+
+// Allocation-free validation for metadata paths that need strict Unicode
+// truth but do not need to retain decoded scalars (semantics, IDs, labels).
+fn utf8_validate(bytes: []u8) Utf8ValidationResult {
+    let result: Utf8ValidationResult = Utf8ValidationResult{
+        .error = Utf8Error.none, .error_offset = 0, .scalar_count = 0,
+    };
+    if (bytes.len > 1048576) {
+        result.error = Utf8Error.input_too_large;
+        result.error_offset = bytes.len as i64;
+        return result;
+    }
+    let offset: i32 = 0;
+    while (offset < bytes.len) {
+        let lead: i32 = bytes[offset] as i32;
+        let length: i32 = 0;
+        let value: i64 = 0;
+        let minimum: i64 = 0;
+        if (lead < 128) {
+            length = 1;
+            value = lead as i64;
+        } else if (lead >= 194 && lead <= 223) {
+            length = 2;
+            value = (lead & 31) as i64;
+            minimum = 128;
+        } else if (lead >= 224 && lead <= 239) {
+            length = 3;
+            value = (lead & 15) as i64;
+            minimum = 2048;
+        } else if (lead >= 240 && lead <= 244) {
+            length = 4;
+            value = (lead & 7) as i64;
+            minimum = 65536;
+        } else {
+            result.error = Utf8Error.invalid_lead;
+            result.error_offset = offset as i64;
+            return result;
+        }
+        if (offset + length > bytes.len) {
+            result.error = Utf8Error.truncated;
+            result.error_offset = offset as i64;
+            return result;
+        }
+        let continuation_index: i32 = 1;
+        while (continuation_index < length) {
+            let continuation: i32 = bytes[offset + continuation_index] as i32;
+            if (utf8_continuation(continuation) == 0) {
+                result.error = Utf8Error.invalid_continuation;
+                result.error_offset = (offset + continuation_index) as i64;
+                return result;
+            }
+            value = (value << 6) | ((continuation & 63) as i64);
+            continuation_index = continuation_index + 1;
+        }
+        if (length > 1 && value < minimum) {
+            result.error = Utf8Error.overlong;
+            result.error_offset = offset as i64;
+            return result;
+        }
+        if (value >= 55296 && value <= 57343) {
+            result.error = Utf8Error.surrogate;
+            result.error_offset = offset as i64;
+            return result;
+        }
+        if (value > 1114111) {
+            result.error = Utf8Error.out_of_range;
+            result.error_offset = offset as i64;
+            return result;
+        }
+        result.scalar_count = result.scalar_count + 1;
+        offset = offset + length;
+    }
+    return result;
 }
 
 fn utf8_decode(bytes: []u8) Utf8DecodeResult {

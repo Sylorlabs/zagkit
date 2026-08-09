@@ -22,6 +22,7 @@ enum SemanticColorToken {
     focus,
     status_healthy,
     status_experimental,
+    status_error,
     category_semantics,
     category_motion,
     category_input,
@@ -42,7 +43,7 @@ struct ResolvedColorToken {
     paint: Paint,
 }
 
-fn semantic_color_token_count() i32 { return 30; }
+fn semantic_color_token_count() i32 { return 31; }
 
 fn semantic_color(token: SemanticColorToken) ResolvedColorToken {
     return switch (token) {
@@ -80,6 +81,8 @@ fn semantic_color(token: SemanticColorToken) ResolvedColorToken {
             .paint = paint_rgba16(18000, 56000, 42000, 65535) },
         .status_experimental => ResolvedColorToken{ .id = "color.status.experimental",
             .paint = paint_rgba16(65535, 43000, 17000, 65535) },
+        .status_error => ResolvedColorToken{ .id = "color.status.error",
+            .paint = paint_rgba16(65535, 17500, 23500, 65535) },
         .category_semantics => ResolvedColorToken{ .id = "color.category.semantics",
             .paint = paint_rgba16(15000, 48000, 65535, 65535) },
         .category_motion => ResolvedColorToken{ .id = "color.category.motion",

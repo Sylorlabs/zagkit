@@ -26,7 +26,7 @@ fn paint_equal(left: Paint, right: Paint) i32 {
 
 fn main() i32 {
     let state: TestState = TestState{ .passed = 0, .failed = 0 };
-    expect(&state, semantic_color_token_count() == 30 &&
+    expect(&state, semantic_color_token_count() == 31 &&
         bytes_equal(semantic_color(SemanticColorToken.accent).id, "color.accent") != 0,
         "semantic colors expose stable inspectable token IDs");
     expect(&state, paint_equal(semantic_color_paint(SemanticColorToken.accent),

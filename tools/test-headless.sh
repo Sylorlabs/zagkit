@@ -36,6 +36,10 @@ cd "$root"
 "$tmp/flex-adaptive-contract"
 "$znc" tests/design_tokens_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/design-tokens-contract"
 "$tmp/design-tokens-contract"
+"$znc" tests/button_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/button-contract"
+"$tmp/button-contract"
+"$znc" tests/canvas_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/canvas-contract"
+"$tmp/canvas-contract"
 "$znc" tests/measure_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/measure-contract"
 "$tmp/measure-contract"
 "$znc" tests/overlay_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/overlay-contract"
@@ -94,4 +98,4 @@ printf 'Linux preview CPU snapshot contract: pass=2 fail=0\n'
 "$znc" tests/motion_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/motion-contract"
 "$tmp/motion-contract"
 
-printf 'headless test: PASS (backend truth, state, reconciliation, intrinsic measurement, constraints, Flex, Grid, Overlay, scroll, virtual list, Table, Tree, recycling, Unicode grapheme segmentation, positioned glyph-run transport, collection semantics, Talkback, native-preview semantics, owned render resources, canonical paths and images, bounded PNG decode, display lists, analytic rounded geometry, CPU shape and image raster, deterministic PNG snapshots, input, replay, and motion)\n'
+printf 'headless test: PASS (backend truth, state, reconciliation, intrinsic measurement, constraints, Flex, shared Button state/render/hit/semantics/Talkback, retained Canvas immediate drawing, Grid, Overlay, scroll, virtual list, Table, Tree, recycling, Unicode grapheme segmentation, positioned glyph-run transport, collection semantics, Talkback, native-preview semantics, owned render resources, canonical paths and images, bounded PNG decode, display lists, analytic rounded geometry, CPU shape and image raster, deterministic PNG snapshots, input, replay, and motion)\n'

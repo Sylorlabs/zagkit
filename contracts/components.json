@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "generated_for": "0.1.0-experimental.0",
   "status_vocabulary": ["planned", "implementing", "experimental", "conformant"],
   "conformance_dimensions": [
@@ -31,7 +31,7 @@
     {"id":"shadow","family":"effects","name":"Shadow","milestone":2,"status":"planned","semantic_roles":["none"],"inputs":[],"adaptive":["density","contrast","color_space"]},
     {"id":"light","family":"effects","name":"Light","milestone":2,"status":"planned","semantic_roles":["none"],"inputs":[],"adaptive":["contrast","color_space","reduced_transparency"]},
     {"id":"divider","family":"content","name":"Divider","milestone":2,"status":"planned","semantic_roles":["separator"],"inputs":[],"adaptive":["density","contrast","direction"]},
-    {"id":"button","family":"actions","name":"Button","milestone":2,"status":"planned","semantic_roles":["button"],"inputs":["pointer","keyboard","touch","gamepad"],"adaptive":["density","platform","contrast","reduced_motion"]},
+    {"id":"button","family":"actions","name":"Button","milestone":2,"status":"implementing","semantic_roles":["button"],"inputs":["pointer","keyboard","touch","gamepad"],"adaptive":["density","platform","contrast","reduced_motion"],"source":"src/components/button.zag","evidence":"tests/button_contract.zag","documentation":"docs/components/button.md"},
     {"id":"toggle","family":"actions","name":"Toggle","milestone":2,"status":"planned","semantic_roles":["switch"],"inputs":["pointer","keyboard","touch","gamepad"],"adaptive":["density","platform","contrast","reduced_motion"]},
     {"id":"checkbox","family":"actions","name":"Checkbox","milestone":2,"status":"planned","semantic_roles":["checkbox"],"inputs":["pointer","keyboard","touch"],"adaptive":["density","platform","contrast"]},
     {"id":"radio","family":"actions","name":"RadioGroup","milestone":2,"status":"planned","semantic_roles":["radio","radiogroup"],"inputs":["pointer","keyboard","touch"],"adaptive":["density","platform","direction"]},
@@ -67,7 +67,7 @@
     {"id":"overlay","family":"layout","name":"Overlay","milestone":2,"status":"planned","semantic_roles":["none"],"inputs":[],"adaptive":["direction","text_scale"]},
     {"id":"scroll","family":"layout","name":"Scroll","milestone":2,"status":"planned","semantic_roles":["group"],"inputs":["pointer","keyboard","touch","pen","wheel","gamepad"],"adaptive":["density","platform","direction","reduced_motion"]},
     {"id":"safe-area","family":"layout","name":"SafeArea","milestone":2,"status":"planned","semantic_roles":["none"],"inputs":[],"adaptive":["platform","orientation"]},
-    {"id":"canvas","family":"advanced","name":"Canvas","milestone":2,"status":"planned","semantic_roles":["group"],"inputs":["pointer","keyboard","touch","pen"],"adaptive":["density","contrast","direction"]},
+    {"id":"canvas","family":"advanced","name":"Canvas","milestone":2,"status":"implementing","semantic_roles":["group"],"inputs":["pointer","keyboard","touch","pen"],"adaptive":["density","contrast","direction"],"source":"src/components/canvas.zag","evidence":"tests/canvas_contract.zag","documentation":"docs/architecture/canvas.md"},
     {"id":"viewport","family":"advanced","name":"Viewport","milestone":4,"status":"planned","semantic_roles":["application","group"],"inputs":["pointer","keyboard","touch","pen","wheel","gamepad","gesture"],"adaptive":["density","platform","contrast","reduced_motion"]},
     {"id":"command-palette","family":"advanced","name":"CommandPalette","milestone":4,"status":"planned","semantic_roles":["dialog","searchbox","listbox"],"inputs":["pointer","keyboard","touch"],"adaptive":["density","platform","locale","direction","text_scale"]}
   ]
