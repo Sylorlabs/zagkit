@@ -1,0 +1,167 @@
+@import("../src/text/segmentation.zag")
+
+struct TestState { passed: i32, failed: i32 }
+
+fn expect(state: *TestState, condition: i32, name: []u8) void {
+    if (condition != 0) {
+        state.*.passed = state.*.passed + 1;
+        _zag_print("ok  "); _zag_println(name);
+    } else {
+        state.*.failed = state.*.failed + 1;
+        _zag_print("FAIL "); _zag_println(name);
+    }
+}
+
+fn basic_spans(state: *TestState) void {
+    let empty: GraphemeSegmentation = grapheme_segment_utf8("");
+    expect(state, empty.error == GraphemeSegmentationError.none &&
+        empty.spans.len == 0 && empty.utf8.len == 0,
+        "empty text has no invented grapheme");
+    grapheme_segmentation_free(&empty);
+
+    let ascii: GraphemeSegmentation = grapheme_segment_utf8("AéZ");
+    expect(state, ascii.error == GraphemeSegmentationError.none &&
+        ascii.spans.len == 3 &&
+        ascii.spans.data[0].byte_start == 0 && ascii.spans.data[0].byte_length == 1 &&
+        ascii.spans.data[1].byte_start == 1 && ascii.spans.data[1].byte_length == 2 &&
+        ascii.spans.data[2].byte_start == 3 && ascii.spans.data[2].byte_length == 1,
+        "graphemes preserve exact UTF-8 byte spans");
+    expect(state, ascii.spans.data[0].scalar_start == 0 &&
+        ascii.spans.data[1].scalar_start == 1 &&
+        ascii.spans.data[2].scalar_length == 1,
+        "graphemes preserve exact scalar spans");
+    grapheme_segmentation_free(&ascii);
+
+    let source: ArrayList[u8] = make[u8](2);
+    push[u8](&source, 65); push[u8](&source, 66);
+    let owned: GraphemeSegmentation = grapheme_segment_utf8(
+        source.data[0..source.len]);
+    source.data[0] = 90;
+    expect(state, owned.error == GraphemeSegmentationError.none &&
+        owned.utf8.len == 2 && owned.utf8.data[0] == 65 && owned.utf8.data[1] == 66,
+        "successful segmentation owns its source bytes");
+    grapheme_segmentation_free(&owned); free[u8](&source);
+}
+
+fn combining_and_controls(state: *TestState) void {
+    let combining: GraphemeSegmentation = grapheme_segment_utf8("e\xCC\x81x");
+    expect(state, combining.error == GraphemeSegmentationError.none &&
+        combining.spans.len == 2 && combining.spans.data[0].byte_start == 0 &&
+        combining.spans.data[0].byte_length == 3 &&
+        combining.spans.data[0].scalar_length == 2 &&
+        combining.spans.data[1].byte_start == 3,
+        "combining marks remain attached with exact source bytes");
+    grapheme_segmentation_free(&combining);
+
+    let spacing: GraphemeSegmentation = grapheme_segment_utf8("काx");
+    expect(state, spacing.error == GraphemeSegmentationError.none &&
+        spacing.spans.len == 2 && spacing.spans.data[0].byte_length == 6 &&
+        spacing.spans.data[0].scalar_length == 2,
+        "curated spacing marks follow their base");
+    grapheme_segmentation_free(&spacing);
+
+    let controls: GraphemeSegmentation = grapheme_segment_utf8("A\r\nB\nC");
+    expect(state, controls.error == GraphemeSegmentationError.none &&
+        controls.spans.len == 5 &&
+        controls.spans.data[1].byte_start == 1 &&
+        controls.spans.data[1].byte_length == 2 &&
+        controls.spans.data[1].scalar_length == 2 &&
+        controls.spans.data[3].byte_start == 4 &&
+        controls.spans.data[3].byte_length == 1,
+        "CRLF remains one cluster while other controls break");
+    grapheme_segmentation_free(&controls);
+
+    let prepend: GraphemeSegmentation = grapheme_segment_utf8("\xD8\x80A");
+    expect(state, prepend.error == GraphemeSegmentationError.none &&
+        prepend.spans.len == 1 && prepend.spans.data[0].byte_length == 3 &&
+        prepend.spans.data[0].scalar_length == 2,
+        "curated Prepend characters stay with the following base");
+    grapheme_segmentation_free(&prepend);
+}
+
+fn hangul_and_emoji(state: *TestState) void {
+    let hangul: GraphemeSegmentation = grapheme_segment_utf8("각X");
+    expect(state, hangul.error == GraphemeSegmentationError.none &&
+        hangul.spans.len == 2 && hangul.spans.data[0].byte_length == 9 &&
+        hangul.spans.data[0].scalar_length == 3,
+        "Hangul L V T jamo form one grapheme");
+    grapheme_segmentation_free(&hangul);
+
+    let syllables: GraphemeSegmentation = grapheme_segment_utf8("각나");
+    expect(state, syllables.error == GraphemeSegmentationError.none &&
+        syllables.spans.len == 2 && syllables.spans.data[0].byte_length == 6 &&
+        syllables.spans.data[0].scalar_length == 2,
+        "precomposed Hangul LV accepts a trailing T jamo");
+    grapheme_segmentation_free(&syllables);
+
+    let zwj: GraphemeSegmentation = grapheme_segment_utf8("👩🏽‍💻!");
+    expect(state, zwj.error == GraphemeSegmentationError.none &&
+        zwj.spans.len == 2 && zwj.spans.data[0].byte_length == 15 &&
+        zwj.spans.data[0].scalar_length == 4 &&
+        zwj.spans.data[1].byte_start == 15,
+        "emoji modifier and ZWJ pictograph form one grapheme");
+    grapheme_segmentation_free(&zwj);
+
+    let flags: GraphemeSegmentation = grapheme_segment_utf8("🇺🇸🇨🇦🇬");
+    expect(state, flags.error == GraphemeSegmentationError.none &&
+        flags.spans.len == 3 &&
+        flags.spans.data[0].byte_length == 8 &&
+        flags.spans.data[1].byte_start == 8 && flags.spans.data[1].byte_length == 8 &&
+        flags.spans.data[2].byte_start == 16 && flags.spans.data[2].byte_length == 4,
+        "regional indicators pair from the start of each run");
+    grapheme_segmentation_free(&flags);
+}
+
+fn errors_and_determinism(state: *TestState) void {
+    let malformed: ArrayList[u8] = make[u8](4);
+    push[u8](&malformed, 65); push[u8](&malformed, 226);
+    push[u8](&malformed, 65); push[u8](&malformed, 128);
+    let invalid: GraphemeSegmentation = grapheme_segment_utf8(
+        malformed.data[0..malformed.len]);
+    expect(state, invalid.error == GraphemeSegmentationError.invalid_utf8 &&
+        invalid.utf8_error == Utf8Error.invalid_continuation &&
+        invalid.error_offset == 2 && invalid.spans.len == 0,
+        "malformed UTF-8 fails with the exact decoder error and byte");
+    grapheme_segmentation_free(&invalid); free[u8](&malformed);
+
+    let large: ArrayList[u8] = make[u8](1048577);
+    let index: i32 = 0;
+    while (index < 1048577) { push[u8](&large, 65); index = index + 1; }
+    let ceiling: GraphemeSegmentation = grapheme_segment_utf8(
+        large.data[0..large.len]);
+    expect(state, ceiling.error == GraphemeSegmentationError.input_too_large &&
+        ceiling.utf8_error == Utf8Error.input_too_large &&
+        ceiling.error_offset == 1048577 && ceiling.spans.len == 0,
+        "the one-megabyte source ceiling fails before decoding or copying");
+    grapheme_segmentation_free(&ceiling); free[u8](&large);
+
+    let first: GraphemeSegmentation = grapheme_segment_utf8("e\xCC\x81🇺🇸👩‍💻");
+    let second: GraphemeSegmentation = grapheme_segment_utf8("e\xCC\x81🇺🇸👩‍💻");
+    let equal: i32 = (first.error == second.error &&
+        first.spans.len == second.spans.len) as i32;
+    let span_index: i32 = 0;
+    while (equal != 0 && span_index < first.spans.len) {
+        let a: GraphemeSpan = first.spans.data[span_index];
+        let b: GraphemeSpan = second.spans.data[span_index];
+        if (a.byte_start != b.byte_start || a.byte_length != b.byte_length ||
+            a.scalar_start != b.scalar_start || a.scalar_length != b.scalar_length) {
+            equal = 0;
+        }
+        span_index = span_index + 1;
+    }
+    expect(state, equal != 0 && first.spans.len == 3,
+        "segmentation is deterministic across combining flag and ZWJ text");
+    grapheme_segmentation_free(&first); grapheme_segmentation_free(&second);
+}
+
+fn main() i32 {
+    let state: TestState = TestState{ .passed = 0, .failed = 0 };
+    basic_spans(&state);
+    combining_and_controls(&state);
+    hangul_and_emoji(&state);
+    errors_and_determinism(&state);
+    _zag_print("Segmentation contract: pass="); _zag_print_i64(state.passed as i64);
+    _zag_print(" fail="); _zag_print_i64(state.failed as i64); _zag_println("");
+    if (state.failed == 0) { return 0; }
+    return 1;
+}
