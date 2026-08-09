@@ -1,0 +1,162 @@
+@import("unicode.zag")
+@import("glyph_path.zag")
+
+enum GlyphRunError {
+    none,
+    invalid_text,
+    invalid_metrics,
+    missing_glyph,
+    invalid_outline,
+    path_error,
+    too_many_glyphs,
+}
+
+struct PositionedGlyph {
+    glyph_id: i32,
+    cluster_byte_offset: i32,
+    cluster_byte_length: i32,
+    origin_x: i64,
+    origin_y: i64,
+    advance_x: i64,
+}
+
+struct NominalGlyphRun {
+    glyphs: ArrayList[PositionedGlyph],
+    utf8: ArrayList[u8],
+    font_size: i64,
+    total_advance: i64,
+    error: GlyphRunError,
+    error_index: i32,
+}
+
+struct GlyphRunPathResult {
+    path: PathData,
+    error: GlyphRunError,
+    error_index: i32,
+}
+
+fn nominal_glyph_run_empty(font_size: i64) NominalGlyphRun {
+    return NominalGlyphRun{
+        .glyphs = make[PositionedGlyph](8), .utf8 = make[u8](16),
+        .font_size = font_size, .total_advance = 0,
+        .error = GlyphRunError.none, .error_index = 0 - 1,
+    };
+}
+
+fn nominal_glyph_run_free(run: *NominalGlyphRun) void {
+    free[PositionedGlyph](&run.*.glyphs); free[u8](&run.*.utf8);
+}
+
+fn nominal_glyph_run_ltr(face: OpenTypeFace, text: []u8, font_size: i64,
+    origin_x: i64, baseline_y: i64) NominalGlyphRun {
+    let run: NominalGlyphRun = nominal_glyph_run_empty(font_size);
+    if (face.error != OpenTypeError.none || face.units_per_em <= 0 ||
+        font_size <= 0 || path_fixed_valid(font_size) == 0 ||
+        path_fixed_valid(origin_x) == 0 || path_fixed_valid(baseline_y) == 0) {
+        run.error = GlyphRunError.invalid_metrics; return run;
+    }
+    let byte_index: i32 = 0;
+    while (byte_index < text.len) {
+        push[u8](&run.utf8, text[byte_index]); byte_index = byte_index + 1;
+    }
+    let decoded: Utf8DecodeResult = utf8_decode(text);
+    if (decoded.error != Utf8Error.none) {
+        utf8_decode_free(&decoded); run.error = GlyphRunError.invalid_text; return run;
+    }
+    if (decoded.scalars.len > 1048576) {
+        utf8_decode_free(&decoded); run.error = GlyphRunError.too_many_glyphs; return run;
+    }
+    let accumulated_units: i64 = 0;
+    let scalar_index: i32 = 0;
+    while (scalar_index < decoded.scalars.len) {
+        let scalar: UnicodeScalar = decoded.scalars.data[scalar_index];
+        let lookup: GlyphLookup = opentype_glyph_for_scalar(face, scalar.value);
+        if (lookup.error != OpenTypeError.none || lookup.glyph_id == 0) {
+            run.error = GlyphRunError.missing_glyph; run.error_index = scalar_index;
+            utf8_decode_free(&decoded); return run;
+        }
+        let metric: GlyphHorizontalMetric = opentype_horizontal_metric(face, lookup.glyph_id);
+        if (metric.error != OpenTypeError.none) {
+            run.error = GlyphRunError.invalid_metrics; run.error_index = scalar_index;
+            utf8_decode_free(&decoded); return run;
+        }
+        let position: i64 = origin_x +
+            (accumulated_units * font_size) / (face.units_per_em as i64);
+        let next_units: i64 = accumulated_units + metric.advance_width;
+        let next_position: i64 = origin_x +
+            (next_units * font_size) / (face.units_per_em as i64);
+        if (path_fixed_valid(position) == 0 || path_fixed_valid(next_position) == 0) {
+            run.error = GlyphRunError.invalid_metrics; run.error_index = scalar_index;
+            utf8_decode_free(&decoded); return run;
+        }
+        push[PositionedGlyph](&run.glyphs, PositionedGlyph{
+            .glyph_id = lookup.glyph_id,
+            .cluster_byte_offset = scalar.byte_start as i32,
+            .cluster_byte_length = scalar.byte_length,
+            .origin_x = position, .origin_y = baseline_y,
+            .advance_x = next_position - position,
+        });
+        accumulated_units = next_units; scalar_index = scalar_index + 1;
+    }
+    run.total_advance = (accumulated_units * font_size) /
+        (face.units_per_em as i64);
+    utf8_decode_free(&decoded);
+    return run;
+}
+
+fn glyph_run_path_result() GlyphRunPathResult {
+    return GlyphRunPathResult{
+        .path = path_make(PathFillRule.non_zero), .error = GlyphRunError.none,
+        .error_index = 0 - 1,
+    };
+}
+
+fn nominal_glyph_run_path(face: OpenTypeFace,
+    run: NominalGlyphRun) GlyphRunPathResult {
+    let result: GlyphRunPathResult = glyph_run_path_result();
+    if (run.error != GlyphRunError.none || face.error != OpenTypeError.none) {
+        result.error = run.error;
+        if (result.error == GlyphRunError.none) { result.error = GlyphRunError.invalid_metrics; }
+        return result;
+    }
+    let glyph_index: i32 = 0;
+    while (glyph_index < run.glyphs.len) {
+        let glyph: PositionedGlyph = run.glyphs.data[glyph_index];
+        let outline: GlyphOutline = opentype_glyph_outline(face, glyph.glyph_id);
+        if (outline.error != OpenTypeError.none) {
+            opentype_glyph_outline_free(&outline);
+            result.error = GlyphRunError.invalid_outline; result.error_index = glyph_index;
+            return result;
+        }
+        if (outline.points.len > 0) {
+            let glyph_path: GlyphPathResult = glyph_outline_to_path(outline,
+                face.units_per_em, run.font_size, glyph.origin_x, glyph.origin_y);
+            if (glyph_path.error != GlyphPathError.none) {
+                glyph_path_result_free(&glyph_path); opentype_glyph_outline_free(&outline);
+                result.error = GlyphRunError.path_error; result.error_index = glyph_index;
+                return result;
+            }
+            let command_index: i32 = 0;
+            while (command_index < glyph_path.path.commands.len) {
+                if (path_push(&result.path, glyph_path.path.commands.data[command_index]) !=
+                    PathError.none) {
+                    glyph_path_result_free(&glyph_path); opentype_glyph_outline_free(&outline);
+                    result.error = GlyphRunError.path_error; result.error_index = glyph_index;
+                    return result;
+                }
+                command_index = command_index + 1;
+            }
+            glyph_path_result_free(&glyph_path);
+        }
+        opentype_glyph_outline_free(&outline);
+        glyph_index = glyph_index + 1;
+    }
+    if (result.path.commands.len == 0 || path_seal(&result.path) != PathError.none) {
+        result.error = GlyphRunError.path_error;
+    }
+    return result;
+}
+
+fn glyph_run_path_result_free(result: *GlyphRunPathResult) void {
+    path_free(&result.*.path);
+}

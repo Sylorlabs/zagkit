@@ -1,5 +1,5 @@
 @import("../src/text/unicode.zag")
-@import("../src/text/glyph_path.zag")
+@import("../src/text/glyph_run.zag")
 
 fn main() i32 {
     if (_zag_argc() != 2) {
@@ -76,6 +76,20 @@ fn main() i32 {
     }
     let accented_points: i32 = accented_outline.points.len;
     opentype_glyph_outline_free(&accented_outline);
+    let nominal_run: NominalGlyphRun = nominal_glyph_run_ltr(
+        face, "Zagkit", 24 * unit_scale(), 0, 24 * unit_scale());
+    let nominal_path: GlyphRunPathResult = nominal_glyph_run_path(face, nominal_run);
+    if (nominal_run.error != GlyphRunError.none ||
+        nominal_path.error != GlyphRunError.none ||
+        path_verify(nominal_path.path) != PathError.none) {
+        glyph_run_path_result_free(&nominal_path); nominal_glyph_run_free(&nominal_run);
+        utf8_decode_free(&text); opentype_face_free(&face);
+        _zag_eprintln("system font smoke: nominal Latin run failed");
+        return 11;
+    }
+    let nominal_commands: i32 = nominal_path.path.commands.len;
+    let nominal_advance: i64 = nominal_run.total_advance;
+    glyph_run_path_result_free(&nominal_path); nominal_glyph_run_free(&nominal_run);
     _zag_print("system font smoke: unitsPerEm=");
     _zag_print_i64(face.units_per_em as i64);
     _zag_print(" glyphs=");
@@ -88,6 +102,10 @@ fn main() i32 {
     _zag_print_i64(path_commands as i64);
     _zag_print(" accented_outline_points=");
     _zag_print_i64(accented_points as i64);
+    _zag_print(" nominal_run_commands=");
+    _zag_print_i64(nominal_commands as i64);
+    _zag_print(" nominal_advance_fixed=");
+    _zag_print_i64(nominal_advance);
     _zag_println("");
     utf8_decode_free(&text); opentype_face_free(&face);
     return 0;

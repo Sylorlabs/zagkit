@@ -29,7 +29,12 @@ native widget text engines are not runtime dependencies.
   quadratic Zagkit paths at an exact fixed-point font size and baseline,
   including implied midpoints between consecutive off-curve points.
 - Those canonical paths already execute through the deterministic CPU oracle;
-  positioned multi-glyph run assembly and text antialiasing policy remain open.
+  the shaped-run resource and text antialiasing policy remain open.
+- `src/text/glyph_run.zag` provides an explicitly nominal LTR stage: strict
+  UTF-8 cluster byte spans map to glyph IDs, cumulative `hmtx` advances produce
+  drift-free fixed-point origins, and the positioned contours assemble into
+  one immutable path executable by the CPU oracle. Missing coverage returns a
+  fallback request instead of a fabricated glyph.
 - Unicode-to-glyph lookup supports bounded `cmap` format 4 and format 12
   subtables. A missing mapping returns glyph zero; it does not invent fallback.
 - The parser rejects table escapes, duplicate required tables, malformed
@@ -41,11 +46,12 @@ native widget text engines are not runtime dependencies.
 1. Parse vertical metrics, CFF/CFF2 outlines, variation axes, color-glyph
    tables, and font metadata.
 2. Implement normalization, grapheme/word/sentence segmentation, script runs,
-   bidi resolution, line breaking, fallback, and locale-aware shaping.
+   bidi resolution, line breaking, fallback, and locale-aware shaping. The
+   nominal LTR stage is not a substitute for any of these operations.
 3. Implement OpenType GSUB/GPOS and variation application with deterministic
    glyph-run serialization.
-4. Assemble and rasterize positioned glyph runs in the CPU oracle with
-   subpixel antialiasing and documented color-space behavior.
+4. Promote shaped glyph runs to a canonical render resource and define the
+   subpixel antialiasing and color-space policy used by the CPU oracle.
 5. Connect glyph runs to intrinsic measurement, selection, editing, semantics,
    IME composition, accessibility text navigation, Talkback, and replay.
 6. Prove representative Latin, Arabic, Hebrew, Indic, CJK, emoji, combining,
