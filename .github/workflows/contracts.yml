@@ -1,0 +1,53 @@
+name: Repository contracts
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ZNC: ${{ github.workspace }}/.toolchain/zag/zag-poc/znc
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+      - name: Resolve pinned Zag revision
+        id: toolchain
+        run: echo "zag_sha=$(jq -r '.zag.commit' contracts/toolchain.json)" >> "$GITHUB_OUTPUT"
+      - name: Check out pinned Zag toolchain
+        uses: actions/checkout@v6
+        with:
+          repository: Sylorlabs/zag
+          ref: ${{ steps.toolchain.outputs.zag_sha }}
+          path: .toolchain/zag
+      - name: Restore fixed-point Zag compiler
+        id: zag-cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            .toolchain/zag/zag-poc/znc
+            .toolchain/zag/zag-poc/zagd
+          key: zag-fixed-${{ runner.os }}-${{ steps.toolchain.outputs.zag_sha }}
+      - name: Bootstrap pinned Zag source
+        if: steps.zag-cache.outputs.cache-hit != 'true'
+        run: |
+          chmod +x .toolchain/zag/zag-poc/znc .toolchain/zag/zag-poc/bootstrap.sh
+          ZAG_BOOTSTRAP_MEMORY_GUARD=off .toolchain/zag/zag-poc/bootstrap.sh
+      - name: Run strict headless contracts
+        env:
+          ZNC: ${{ github.workspace }}/.toolchain/zag/zag-poc/znc
+        run: |
+          chmod +x "$ZNC"
+          ./tools/test-headless.sh
+      - name: Smoke test local CLI launcher
+        run: ./tools/test-zagkit-cli.sh
+      - name: Validate product contracts
+        run: ./tools/check-contracts.sh
+      - name: Reject whitespace errors
+        run: git show --check --format= HEAD

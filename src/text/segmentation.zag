@@ -1,0 +1,377 @@
+@import("unicode.zag")
+
+// This is a bounded foundation for Unicode extended grapheme segmentation. It
+// implements the UAX #29 break-rule shapes needed by Zagkit's first text
+// contracts, but the property ranges below are intentionally curated rather
+// than presented as a complete, versioned Unicode Character Database. A later
+// generated data package can extend the classifier without changing spans or
+// ownership.
+
+enum GraphemeBreakClass {
+    other,
+    cr,
+    lf,
+    control,
+    extend,
+    zwj,
+    regional_indicator,
+    prepend,
+    spacing_mark,
+    hangul_l,
+    hangul_v,
+    hangul_t,
+    hangul_lv,
+    hangul_lvt,
+    extended_pictographic,
+}
+
+enum GraphemeSegmentationError {
+    none,
+    input_too_large,
+    invalid_utf8,
+    too_many_scalars,
+    too_many_clusters,
+}
+
+struct GraphemeSpan {
+    byte_start: i64,
+    byte_length: i64,
+    scalar_start: i32,
+    scalar_length: i32,
+}
+
+struct GraphemeSegmentation {
+    spans: ArrayList[GraphemeSpan],
+    utf8: ArrayList[u8],
+    error: GraphemeSegmentationError,
+    utf8_error: Utf8Error,
+    error_offset: i64,
+}
+
+fn grapheme_segmentation_empty() GraphemeSegmentation {
+    return GraphemeSegmentation{
+        .spans = make[GraphemeSpan](16),
+        .utf8 = make[u8](32),
+        .error = GraphemeSegmentationError.none,
+        .utf8_error = Utf8Error.none,
+        .error_offset = 0,
+    };
+}
+
+fn grapheme_segmentation_free(result: *GraphemeSegmentation) void {
+    free[GraphemeSpan](&result.*.spans);
+    free[u8](&result.*.utf8);
+}
+
+fn grapheme_between(value: i64, first: i64, last: i64) i32 {
+    return (value >= first && value <= last) as i32;
+}
+
+fn grapheme_is_extend(value: i64) i32 {
+    // Common combining scripts, combining-symbol blocks, variation selectors,
+    // emoji modifiers, and the supplemental variation-selector plane.
+    if (grapheme_between(value, 768, 879) != 0 ||
+        grapheme_between(value, 1155, 1161) != 0 ||
+        grapheme_between(value, 1425, 1469) != 0 || value == 1471 ||
+        grapheme_between(value, 1473, 1474) != 0 ||
+        grapheme_between(value, 1476, 1477) != 0 || value == 1479 ||
+        grapheme_between(value, 1552, 1562) != 0 ||
+        grapheme_between(value, 1611, 1631) != 0 || value == 1648 ||
+        grapheme_between(value, 1750, 1756) != 0 ||
+        grapheme_between(value, 1759, 1764) != 0 ||
+        grapheme_between(value, 1767, 1768) != 0 ||
+        grapheme_between(value, 1770, 1773) != 0 || value == 1809 ||
+        grapheme_between(value, 1840, 1866) != 0 ||
+        grapheme_between(value, 1958, 1968) != 0 ||
+        grapheme_between(value, 2027, 2035) != 0 ||
+        grapheme_between(value, 2070, 2073) != 0 ||
+        grapheme_between(value, 2075, 2083) != 0 ||
+        grapheme_between(value, 2085, 2087) != 0 ||
+        grapheme_between(value, 2089, 2093) != 0 ||
+        grapheme_between(value, 2137, 2139) != 0 ||
+        grapheme_between(value, 2304, 2306) != 0 || value == 2362 ||
+        grapheme_between(value, 2364, 2364) != 0 ||
+        grapheme_between(value, 2369, 2376) != 0 || value == 2381 ||
+        grapheme_between(value, 2385, 2391) != 0 || value == 2402 || value == 2403 ||
+        grapheme_between(value, 6832, 6911) != 0 ||
+        grapheme_between(value, 7616, 7679) != 0 ||
+        grapheme_between(value, 8400, 8432) != 0 ||
+        grapheme_between(value, 65024, 65039) != 0 ||
+        grapheme_between(value, 65056, 65071) != 0 ||
+        grapheme_between(value, 127995, 127999) != 0 ||
+        grapheme_between(value, 917760, 917999) != 0) {
+        return 1;
+    }
+    return 0;
+}
+
+fn grapheme_is_spacing_mark(value: i64) i32 {
+    // Curated Indic and Southeast Asian spacing marks used by the contract and
+    // common editing paths. These remain separate from Extend for GB9a.
+    if (value == 2307 || value == 2363 ||
+        grapheme_between(value, 2366, 2368) != 0 ||
+        grapheme_between(value, 2377, 2380) != 0 ||
+        grapheme_between(value, 2382, 2383) != 0 ||
+        grapheme_between(value, 2434, 2435) != 0 || value == 2494 ||
+        grapheme_between(value, 2495, 2500) != 0 ||
+        grapheme_between(value, 2503, 2504) != 0 ||
+        grapheme_between(value, 2507, 2508) != 0 ||
+        grapheme_between(value, 2563, 2563) != 0 ||
+        grapheme_between(value, 2622, 2624) != 0 ||
+        grapheme_between(value, 2691, 2691) != 0 ||
+        grapheme_between(value, 2750, 2752) != 0 ||
+        grapheme_between(value, 2761, 2761) != 0 ||
+        grapheme_between(value, 2818, 2819) != 0 ||
+        grapheme_between(value, 2878, 2880) != 0 ||
+        grapheme_between(value, 2887, 2888) != 0 ||
+        grapheme_between(value, 2891, 2892) != 0 ||
+        grapheme_between(value, 3006, 3010) != 0 ||
+        grapheme_between(value, 3014, 3016) != 0 ||
+        grapheme_between(value, 3018, 3020) != 0 ||
+        grapheme_between(value, 3073, 3075) != 0 ||
+        grapheme_between(value, 3137, 3140) != 0 ||
+        grapheme_between(value, 3202, 3203) != 0 ||
+        grapheme_between(value, 3262, 3268) != 0 ||
+        grapheme_between(value, 3330, 3331) != 0 ||
+        grapheme_between(value, 3390, 3396) != 0 ||
+        grapheme_between(value, 3458, 3459) != 0 ||
+        grapheme_between(value, 3535, 3540) != 0 ||
+        grapheme_between(value, 3542, 3542) != 0 ||
+        grapheme_between(value, 3544, 3551) != 0 ||
+        grapheme_between(value, 3902, 3903) != 0 ||
+        grapheme_between(value, 3967, 3967) != 0) {
+        return 1;
+    }
+    return 0;
+}
+
+fn grapheme_is_prepend(value: i64) i32 {
+    if (grapheme_between(value, 1536, 1541) != 0 || value == 1757 ||
+        value == 1807 || value == 2192 || value == 2193 || value == 2274 ||
+        grapheme_between(value, 69821, 69821) != 0 ||
+        grapheme_between(value, 70082, 70083) != 0 ||
+        grapheme_between(value, 72250, 72250) != 0 ||
+        grapheme_between(value, 72324, 72329) != 0) {
+        return 1;
+    }
+    return 0;
+}
+
+fn grapheme_is_extended_pictographic(value: i64) i32 {
+    // Broad published emoji/symbol blocks used for GB11. Regional indicators
+    // are classified first so their pairing rule remains authoritative.
+    if (value == 169 || value == 174 || value == 8252 || value == 8265 ||
+        grapheme_between(value, 8482, 8482) != 0 ||
+        grapheme_between(value, 8505, 8505) != 0 ||
+        grapheme_between(value, 8596, 8601) != 0 ||
+        grapheme_between(value, 8617, 8618) != 0 ||
+        grapheme_between(value, 8986, 8987) != 0 ||
+        grapheme_between(value, 9000, 9000) != 0 ||
+        grapheme_between(value, 9167, 9167) != 0 ||
+        grapheme_between(value, 9193, 9210) != 0 ||
+        grapheme_between(value, 9728, 10175) != 0 ||
+        grapheme_between(value, 11013, 11015) != 0 || value == 11035 ||
+        value == 11036 || value == 11088 || value == 11093 ||
+        grapheme_between(value, 126976, 129791) != 0) {
+        return 1;
+    }
+    return 0;
+}
+
+fn grapheme_break_class(value: i64) GraphemeBreakClass {
+    if (value == 13) { return GraphemeBreakClass.cr; }
+    if (value == 10) { return GraphemeBreakClass.lf; }
+    if ((value >= 0 && value <= 31) || grapheme_between(value, 127, 159) != 0) {
+        return GraphemeBreakClass.control;
+    }
+    if (value == 8205) { return GraphemeBreakClass.zwj; }
+    if (grapheme_between(value, 127462, 127487) != 0) {
+        return GraphemeBreakClass.regional_indicator;
+    }
+    if (grapheme_between(value, 4352, 4447) != 0 ||
+        grapheme_between(value, 43360, 43388) != 0) {
+        return GraphemeBreakClass.hangul_l;
+    }
+    if (grapheme_between(value, 4448, 4519) != 0 ||
+        grapheme_between(value, 55216, 55238) != 0) {
+        return GraphemeBreakClass.hangul_v;
+    }
+    if (grapheme_between(value, 4520, 4607) != 0 ||
+        grapheme_between(value, 55243, 55291) != 0) {
+        return GraphemeBreakClass.hangul_t;
+    }
+    if (grapheme_between(value, 44032, 55203) != 0) {
+        if (((value - 44032) % 28) == 0) { return GraphemeBreakClass.hangul_lv; }
+        return GraphemeBreakClass.hangul_lvt;
+    }
+    if (grapheme_is_extend(value) != 0) { return GraphemeBreakClass.extend; }
+    if (grapheme_is_spacing_mark(value) != 0) {
+        return GraphemeBreakClass.spacing_mark;
+    }
+    if (grapheme_is_prepend(value) != 0) { return GraphemeBreakClass.prepend; }
+    if (grapheme_is_extended_pictographic(value) != 0) {
+        return GraphemeBreakClass.extended_pictographic;
+    }
+    return GraphemeBreakClass.other;
+}
+
+fn grapheme_control_class(classification: GraphemeBreakClass) i32 {
+    return (classification == GraphemeBreakClass.cr ||
+        classification == GraphemeBreakClass.lf ||
+        classification == GraphemeBreakClass.control) as i32;
+}
+
+fn grapheme_emoji_zwj_before(decoded: Utf8DecodeResult,
+    current_index: i32) i32 {
+    if (current_index <= 1 ||
+        grapheme_break_class(decoded.scalars.data[current_index].value) !=
+            GraphemeBreakClass.extended_pictographic ||
+        grapheme_break_class(decoded.scalars.data[current_index - 1].value) !=
+            GraphemeBreakClass.zwj) {
+        return 0;
+    }
+    let index: i32 = current_index - 2;
+    while (index >= 0 &&
+        grapheme_break_class(decoded.scalars.data[index].value) ==
+            GraphemeBreakClass.extend) {
+        index = index - 1;
+    }
+    if (index >= 0 &&
+        grapheme_break_class(decoded.scalars.data[index].value) ==
+            GraphemeBreakClass.extended_pictographic) {
+        return 1;
+    }
+    return 0;
+}
+
+fn grapheme_regional_indicator_count(decoded: Utf8DecodeResult,
+    current_index: i32) i32 {
+    let count: i32 = 0;
+    let index: i32 = current_index - 1;
+    while (index >= 0 &&
+        grapheme_break_class(decoded.scalars.data[index].value) ==
+            GraphemeBreakClass.regional_indicator) {
+        count = count + 1;
+        index = index - 1;
+    }
+    return count;
+}
+
+fn grapheme_should_break(decoded: Utf8DecodeResult, current_index: i32) i32 {
+    let previous: GraphemeBreakClass = grapheme_break_class(
+        decoded.scalars.data[current_index - 1].value);
+    let current: GraphemeBreakClass = grapheme_break_class(
+        decoded.scalars.data[current_index].value);
+
+    // GB3, then GB4/GB5.
+    if (previous == GraphemeBreakClass.cr && current == GraphemeBreakClass.lf) {
+        return 0;
+    }
+    if (grapheme_control_class(previous) != 0 ||
+        grapheme_control_class(current) != 0) {
+        return 1;
+    }
+    // GB6-GB8: conjoining Hangul syllables.
+    if (previous == GraphemeBreakClass.hangul_l &&
+        (current == GraphemeBreakClass.hangul_l ||
+         current == GraphemeBreakClass.hangul_v ||
+         current == GraphemeBreakClass.hangul_lv ||
+         current == GraphemeBreakClass.hangul_lvt)) {
+        return 0;
+    }
+    if ((previous == GraphemeBreakClass.hangul_lv ||
+         previous == GraphemeBreakClass.hangul_v) &&
+        (current == GraphemeBreakClass.hangul_v ||
+         current == GraphemeBreakClass.hangul_t)) {
+        return 0;
+    }
+    if ((previous == GraphemeBreakClass.hangul_lvt ||
+         previous == GraphemeBreakClass.hangul_t) &&
+        current == GraphemeBreakClass.hangul_t) {
+        return 0;
+    }
+    // GB9, GB9a, and GB9b.
+    if (current == GraphemeBreakClass.extend ||
+        current == GraphemeBreakClass.zwj ||
+        current == GraphemeBreakClass.spacing_mark ||
+        previous == GraphemeBreakClass.prepend) {
+        return 0;
+    }
+    // GB11 and GB12/GB13.
+    if (grapheme_emoji_zwj_before(decoded, current_index) != 0) { return 0; }
+    if (previous == GraphemeBreakClass.regional_indicator &&
+        current == GraphemeBreakClass.regional_indicator &&
+        (grapheme_regional_indicator_count(decoded, current_index) % 2) == 1) {
+        return 0;
+    }
+    return 1;
+}
+
+fn grapheme_push_span(result: *GraphemeSegmentation,
+    decoded: Utf8DecodeResult, scalar_start: i32, scalar_end: i32,
+    byte_end: i64) i32 {
+    if (result.*.spans.len >= 1048576) {
+        result.*.error = GraphemeSegmentationError.too_many_clusters;
+        result.*.error_offset = byte_end;
+        return 0;
+    }
+    let byte_start: i64 = decoded.scalars.data[scalar_start].byte_start;
+    push[GraphemeSpan](&result.*.spans, GraphemeSpan{
+        .byte_start = byte_start,
+        .byte_length = byte_end - byte_start,
+        .scalar_start = scalar_start,
+        .scalar_length = scalar_end - scalar_start,
+    });
+    return 1;
+}
+
+fn grapheme_segment_utf8(bytes: []u8) GraphemeSegmentation {
+    let result: GraphemeSegmentation = grapheme_segmentation_empty();
+    if (bytes.len > 1048576) {
+        result.error = GraphemeSegmentationError.input_too_large;
+        result.utf8_error = Utf8Error.input_too_large;
+        result.error_offset = bytes.len as i64;
+        return result;
+    }
+    let decoded: Utf8DecodeResult = utf8_decode(bytes);
+    if (decoded.error != Utf8Error.none) {
+        result.error = GraphemeSegmentationError.invalid_utf8;
+        result.utf8_error = decoded.error;
+        result.error_offset = decoded.error_offset;
+        utf8_decode_free(&decoded);
+        return result;
+    }
+    if (decoded.scalars.len > 1048576) {
+        result.error = GraphemeSegmentationError.too_many_scalars;
+        result.error_offset = bytes.len as i64;
+        utf8_decode_free(&decoded);
+        return result;
+    }
+    let byte_index: i32 = 0;
+    while (byte_index < bytes.len) {
+        push[u8](&result.utf8, bytes[byte_index]);
+        byte_index = byte_index + 1;
+    }
+    if (decoded.scalars.len == 0) {
+        utf8_decode_free(&decoded);
+        return result;
+    }
+    let cluster_start: i32 = 0;
+    let scalar_index: i32 = 1;
+    while (scalar_index < decoded.scalars.len) {
+        if (grapheme_should_break(decoded, scalar_index) != 0) {
+            let byte_end: i64 = decoded.scalars.data[scalar_index].byte_start;
+            if (grapheme_push_span(&result, decoded, cluster_start,
+                    scalar_index, byte_end) == 0) {
+                utf8_decode_free(&decoded);
+                return result;
+            }
+            cluster_start = scalar_index;
+        }
+        scalar_index = scalar_index + 1;
+    }
+    _ = grapheme_push_span(&result, decoded, cluster_start,
+        decoded.scalars.len, bytes.len as i64);
+    utf8_decode_free(&decoded);
+    return result;
+}

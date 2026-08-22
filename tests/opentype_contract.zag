@@ -1,0 +1,162 @@
+@import("../src/text/opentype.zag")
+@import("support/opentype_fixture.zag")
+
+struct TestState { passed: i32, failed: i32 }
+
+fn expect(state: *TestState, condition: i32, name: []u8) void {
+    if (condition != 0) {
+        state.*.passed = state.*.passed + 1;
+        _zag_print("ok  "); _zag_println(name);
+    } else {
+        state.*.failed = state.*.failed + 1;
+        _zag_print("FAIL "); _zag_println(name);
+    }
+}
+
+fn parse_contract(state: *TestState) void {
+    let bytes: ArrayList[u8] = fixture_font();
+    let face: OpenTypeFace = opentype_parse(bytes.data[0..bytes.len]);
+    expect(state, face.error == OpenTypeError.none,
+        "bounded SFNT directory and required tables parse");
+    expect(state, face.units_per_em == 1000 && face.glyph_count == 10 &&
+        face.ascender == 800 && face.descender == 0 - 200 &&
+        face.line_gap == 200 && face.cmap_format == 4 &&
+        face.horizontal_metric_count == 10,
+        "horizontal and vertical font metrics and selected cmap remain explicit");
+    let mapped: GlyphLookup = opentype_glyph_for_scalar(face, 65);
+    let missing: GlyphLookup = opentype_glyph_for_scalar(face, 66);
+    expect(state, mapped.error == OpenTypeError.none && mapped.glyph_id == 3,
+        "format 4 maps a Unicode scalar to the exact glyph ID");
+    expect(state, missing.error == OpenTypeError.none && missing.glyph_id == 0,
+        "missing scalars resolve to glyph zero without fabricated fallback");
+    let invalid: GlyphLookup = opentype_glyph_for_scalar(face, 55296);
+    expect(state, invalid.error == OpenTypeError.invalid_codepoint,
+        "surrogate lookup fails before cmap access");
+    let horizontal: GlyphHorizontalMetric = opentype_horizontal_metric(face, 3);
+    expect(state, horizontal.error == OpenTypeError.none &&
+        horizontal.advance_width == 530,
+        "glyph advance widths come from the owned hmtx table");
+    let outline: GlyphOutline = opentype_glyph_outline(face, 3);
+    expect(state, outline.error == OpenTypeError.none && outline.points.len == 3 &&
+        outline.contour_ends.len == 1 && outline.contour_ends.data[0] == 2 &&
+        outline.points.data[0].x == 10 && outline.points.data[0].y == 20 &&
+        outline.points.data[1].x == 110 && outline.points.data[1].y == 20 &&
+        outline.points.data[2].x == 10 && outline.points.data[2].y == 120,
+        "composite glyf components decode exact translated contour points");
+    opentype_glyph_outline_free(&outline);
+    let simple_outline: GlyphOutline = opentype_glyph_outline(face, 4);
+    expect(state, simple_outline.error == OpenTypeError.none &&
+        simple_outline.points.len == 3 && simple_outline.points.data[1].x == 100,
+        "simple glyf contours remain directly addressable components");
+    opentype_glyph_outline_free(&simple_outline);
+    opentype_face_free(&face); free[u8](&bytes);
+
+    let scaled_bytes: ArrayList[u8] = fixture_font();
+    fixture_u16(&scaled_bytes, 346, 60); fixture_u16(&scaled_bytes, 348, 70);
+    fixture_u16(&scaled_bytes, 350, 11); fixture_u16(&scaled_bytes, 358, 8192);
+    let scaled_face: OpenTypeFace = opentype_parse(
+        scaled_bytes.data[0..scaled_bytes.len]);
+    let scaled_outline: GlyphOutline = opentype_glyph_outline(scaled_face, 3);
+    expect(state, scaled_outline.error == OpenTypeError.none &&
+        scaled_outline.points.len == 3 && scaled_outline.points.data[1].x == 60 &&
+        scaled_outline.points.data[2].y == 70,
+        "F2Dot14 composite scale applies before exact component translation");
+    opentype_glyph_outline_free(&scaled_outline);
+    opentype_face_free(&scaled_face); free[u8](&scaled_bytes);
+
+    let attached_bytes: ArrayList[u8] = fixture_font_point_attached();
+    let attached_face: OpenTypeFace = opentype_parse(
+        attached_bytes.data[0..attached_bytes.len]);
+    let attached_outline: GlyphOutline = opentype_glyph_outline(attached_face, 3);
+    expect(state, attached_outline.error == OpenTypeError.none &&
+        attached_outline.points.len == 6 && attached_outline.contour_ends.len == 2 &&
+        attached_outline.points.data[1].x == 100 &&
+        attached_outline.points.data[3].x == 100 &&
+        attached_outline.points.data[4].x == 200,
+        "point-number attachment aligns a later component to retained parent geometry");
+    opentype_glyph_outline_free(&attached_outline);
+    opentype_face_free(&attached_face); free[u8](&attached_bytes);
+
+    let format12_bytes: ArrayList[u8] = fixture_font_format12();
+    let format12_face: OpenTypeFace = opentype_parse(
+        format12_bytes.data[0..format12_bytes.len]);
+    let emoji: GlyphLookup = opentype_glyph_for_scalar(format12_face, 128512);
+    expect(state, format12_face.error == OpenTypeError.none &&
+        format12_face.cmap_format == 12 && emoji.error == OpenTypeError.none &&
+        emoji.glyph_id == 4,
+        "format 12 maps supplementary-plane Unicode scalars");
+    opentype_face_free(&format12_face); free[u8](&format12_bytes);
+}
+
+fn malformed_contract(state: *TestState) void {
+    let short_face: OpenTypeFace = opentype_parse("font");
+    expect(state, short_face.error == OpenTypeError.truncated,
+        "truncated SFNT headers fail with owned cleanup");
+    opentype_face_free(&short_face);
+
+    let bad_signature_bytes: ArrayList[u8] = fixture_font();
+    bad_signature_bytes.data[1] = 0;
+    let bad_signature: OpenTypeFace = opentype_parse(
+        bad_signature_bytes.data[0..bad_signature_bytes.len]);
+    expect(state, bad_signature.error == OpenTypeError.unsupported_signature,
+        "unknown SFNT signatures fail closed");
+    opentype_face_free(&bad_signature); free[u8](&bad_signature_bytes);
+
+    let bad_bounds_bytes: ArrayList[u8] = fixture_font();
+    fixture_u32(&bad_bounds_bytes, 20, 1000);
+    let bad_bounds: OpenTypeFace = opentype_parse(
+        bad_bounds_bytes.data[0..bad_bounds_bytes.len]);
+    expect(state, bad_bounds.error == OpenTypeError.invalid_table_bounds &&
+        bad_bounds.error_offset == 20,
+        "table offsets cannot escape owned font bytes");
+    opentype_face_free(&bad_bounds); free[u8](&bad_bounds_bytes);
+
+    let bad_vertical_bytes: ArrayList[u8] = fixture_font();
+    fixture_u16(&bad_vertical_bytes, 244, 65336);
+    fixture_u16(&bad_vertical_bytes, 246, 800);
+    let bad_vertical: OpenTypeFace = opentype_parse(
+        bad_vertical_bytes.data[0..bad_vertical_bytes.len]);
+    expect(state, bad_vertical.error == OpenTypeError.invalid_metrics,
+        "inverted hhea ascender and descender metrics fail closed");
+    opentype_face_free(&bad_vertical); free[u8](&bad_vertical_bytes);
+
+    let duplicate_bytes: ArrayList[u8] = fixture_font();
+    fixture_tag(&duplicate_bytes, 28, "cmap");
+    let duplicate: OpenTypeFace = opentype_parse(
+        duplicate_bytes.data[0..duplicate_bytes.len]);
+    expect(state, duplicate.error == OpenTypeError.duplicate_required_table,
+        "duplicate required tables fail before ambiguous selection");
+    opentype_face_free(&duplicate); free[u8](&duplicate_bytes);
+
+    let escaped_loca_bytes: ArrayList[u8] = fixture_font();
+    fixture_u16(&escaped_loca_bytes, 324, 100);
+    let escaped_loca_face: OpenTypeFace = opentype_parse(
+        escaped_loca_bytes.data[0..escaped_loca_bytes.len]);
+    let escaped_outline: GlyphOutline = opentype_glyph_outline(escaped_loca_face, 3);
+    expect(state, escaped_outline.error == OpenTypeError.invalid_outline,
+        "loca entries cannot escape the owned glyf table");
+    opentype_glyph_outline_free(&escaped_outline);
+    opentype_face_free(&escaped_loca_face); free[u8](&escaped_loca_bytes);
+
+    let recursive_bytes: ArrayList[u8] = fixture_font();
+    fixture_u16(&recursive_bytes, 352, 3);
+    let recursive_face: OpenTypeFace = opentype_parse(
+        recursive_bytes.data[0..recursive_bytes.len]);
+    let recursive_outline: GlyphOutline = opentype_glyph_outline(recursive_face, 3);
+    expect(state, recursive_outline.error == OpenTypeError.invalid_outline,
+        "recursive composite glyphs hit a bounded fail-closed depth");
+    opentype_glyph_outline_free(&recursive_outline);
+    opentype_face_free(&recursive_face); free[u8](&recursive_bytes);
+}
+
+fn main() i32 {
+    let state: TestState = TestState{ .passed = 0, .failed = 0 };
+    parse_contract(&state); malformed_contract(&state);
+    let passed_text: []u8 = _zag_i64_to_str(state.passed as i64);
+    let failed_text: []u8 = _zag_i64_to_str(state.failed as i64);
+    _zag_print("OpenType contract: pass="); _zag_print(passed_text);
+    _zag_print(" fail="); _zag_println(failed_text);
+    _zag_str_free(passed_text); _zag_str_free(failed_text);
+    if (state.failed == 0) { return 0; }
+    return 1;
+}

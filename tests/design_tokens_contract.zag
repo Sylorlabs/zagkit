@@ -1,0 +1,106 @@
+@import("../src/design/tokens.zag")
+
+struct TestState { passed: i32, failed: i32 }
+fn expect(state: *TestState, condition: i32, name: []u8) void {
+    if (condition != 0) {
+        state.*.passed = state.*.passed + 1; _zag_print("ok  "); _zag_println(name);
+    } else {
+        state.*.failed = state.*.failed + 1; _zag_print("FAIL "); _zag_println(name);
+    }
+}
+
+fn bytes_equal(left: []u8, right: []u8) i32 {
+    if (left.len != right.len) { return 0; }
+    let index: i32 = 0;
+    while (index < left.len) {
+        if (left[index] != right[index]) { return 0; }
+        index = index + 1;
+    }
+    return 1;
+}
+
+fn paint_equal(left: Paint, right: Paint) i32 {
+    return (left.red == right.red && left.green == right.green &&
+        left.blue == right.blue && left.alpha == right.alpha) as i32;
+}
+
+fn main() i32 {
+    let state: TestState = TestState{ .passed = 0, .failed = 0 };
+    expect(&state, semantic_color_token_count() == 31 &&
+        bytes_equal(semantic_color(SemanticColorToken.accent).id, "color.accent") != 0,
+        "semantic colors expose stable inspectable token IDs");
+    expect(&state, paint_equal(semantic_color_paint(SemanticColorToken.accent),
+        semantic_color_paint(SemanticColorToken.chart_series_primary)) == 0,
+        "brand actions and data series are intentionally separate tokens");
+    let faded: Paint = semantic_color_with_alpha(SemanticColorToken.accent, 12345);
+    expect(&state, faded.alpha == 12345 && faded.red ==
+        semantic_color_paint(SemanticColorToken.accent).red,
+        "alpha variants preserve semantic color provenance");
+    expect(&state, semantic_type_token_count() == 7 &&
+        semantic_type_size(SemanticTypeToken.display) >
+            semantic_type_size(SemanticTypeToken.title) &&
+        semantic_type_size(SemanticTypeToken.title) >
+            semantic_type_size(SemanticTypeToken.heading) &&
+        semantic_type_size(SemanticTypeToken.heading) >
+            semantic_type_size(SemanticTypeToken.body),
+        "the typography ramp has explicit ordered roles");
+    expect(&state, semantic_radius(SemanticRadiusToken.control) <
+        semantic_radius(SemanticRadiusToken.card) &&
+        semantic_radius(SemanticRadiusToken.card) <
+            semantic_radius(SemanticRadiusToken.panel),
+        "control card and panel shapes are distinct semantic tiers");
+    let base: ResolvedElevationToken = semantic_elevation(SemanticElevationToken.base);
+    let panel: ResolvedElevationToken = semantic_elevation(SemanticElevationToken.panel);
+    let raised: ResolvedElevationToken = semantic_elevation(SemanticElevationToken.raised);
+    let overlay: ResolvedElevationToken = semantic_elevation(SemanticElevationToken.overlay);
+    expect(&state, base.ambient_shadow_alpha < panel.ambient_shadow_alpha &&
+        panel.ambient_shadow_alpha < raised.ambient_shadow_alpha &&
+        raised.ambient_shadow_alpha < overlay.ambient_shadow_alpha,
+        "base panel raised and overlay elevations have ordered ambient depth");
+    expect(&state, panel.contact_shadow_alpha > 0 &&
+        panel.contact_shadow_alpha < raised.contact_shadow_alpha &&
+        raised.contact_shadow_alpha < overlay.contact_shadow_alpha,
+        "contact shadow alpha increases with elevation tier");
+    expect(&state, base.edge_highlight_alpha < panel.edge_highlight_alpha &&
+        panel.edge_highlight_alpha < raised.edge_highlight_alpha &&
+        raised.edge_highlight_alpha < overlay.edge_highlight_alpha,
+        "edge highlight alpha increases with elevation tier");
+    let solid_material: ResolvedMaterialToken = semantic_material(
+        SemanticMaterialToken.solid);
+    let veil_material: ResolvedMaterialToken = semantic_material(
+        SemanticMaterialToken.veil);
+    let glass_material: ResolvedMaterialToken = semantic_material(
+        SemanticMaterialToken.glass);
+    expect(&state, semantic_material_token_count() == 3 &&
+        bytes_equal(solid_material.id, "material.solid") != 0 &&
+        solid_material.elevation_token == SemanticElevationToken.base &&
+        veil_material.elevation_token == SemanticElevationToken.panel &&
+        glass_material.elevation_token == SemanticElevationToken.raised &&
+        solid_material.fill_token != veil_material.fill_token &&
+        veil_material.fill_token != glass_material.fill_token,
+        "three material tiers bind inspectable fill radius depth and fallback rules");
+    let veil_first: Paint = semantic_material_band_paint(
+        SemanticMaterialToken.veil, 0, 48);
+    let veil_last: Paint = semantic_material_band_paint(
+        SemanticMaterialToken.veil, 47, 48);
+    expect(&state, paint_equal(veil_first, veil_last) == 0 &&
+        veil_first.alpha == veil_last.alpha &&
+        bytes_equal(semantic_material(
+            SemanticMaterialToken.veil).id,
+            "material.veil") != 0,
+        "veil bands vary through one named material instead of local colors");
+    expect(&state, bytes_equal(showcase_category_description(
+        ShowcaseCategory.frame_pacing), showcase_category_description(
+            ShowcaseCategory.semantics)) == 0 &&
+        showcase_category_color(ShowcaseCategory.frame_pacing) !=
+            showcase_category_color(ShowcaseCategory.semantics),
+        "showcase status marks have documented non-decorative meanings");
+    expect(&state, flex_spacing(FlexSpacingToken.small, FlexDensity.standard) ==
+        8 * unit_scale() && flex_spacing(FlexSpacingToken.large,
+            FlexDensity.standard) == 16 * unit_scale(),
+        "showcase placement reuses the public Flex spacing scale");
+    _zag_print("Design tokens: pass="); _zag_print_i64(state.passed as i64);
+    _zag_print(" fail="); _zag_print_i64(state.failed as i64); _zag_println("");
+    if (state.failed == 0) { return 0; }
+    return 1;
+}

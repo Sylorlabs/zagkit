@@ -1,0 +1,671 @@
+@import("../src/components/surface.zag")
+@import("../src/automation/talkback.zag")
+
+struct TestState { passed: i32, failed: i32 }
+
+fn expect(state:  *TestState,
+    condition: i32, name: []u8) void {
+    if (condition != 0) {
+        state.*.passed = state.*.passed + 1;
+        _zag_print("ok  "); _zag_println(name);
+    } else {
+        state.*.failed = state.*.failed + 1;
+        _zag_print("FAIL "); _zag_println(name);
+    }
+}
+
+fn bytes_equal(left:  []u8, right:  []u8) i32 {
+    if (left.len != right.len) { return 0; }
+    let index: i32 = 0;
+    while (index < left.len) {
+        if (left[index] != right[index]) { return 0; }
+        index = index + 1;
+    }
+    return 1;
+}
+
+fn copy_bytes(destination:  *ArrayList[u8],
+    source:  []u8) void {
+    let index: i32 = 0;
+    while (index < source.len) {
+        push[u8](destination, source[index]);
+        index = index + 1;
+    }
+}
+
+fn action_fixture(id: i64, state: SurfaceCanonicalState) SurfaceSpec {
+    let spec: SurfaceSpec = surface_action_spec(node_key(id), hit_root_key(),
+        rect(20 * unit_scale(),
+            (20 + (id - 200) * 82) * unit_scale(),
+            240 * unit_scale(), 72 * unit_scale()),
+        "Action card", SurfaceTier.raised);
+    spec.description = "Opens the selected toolkit detail";
+    spec.focus_order = id - 199;
+    spec.z_order = id;
+    spec.interaction = surface_canonical_state(state);
+    if (state == SurfaceCanonicalState.loading) {
+        spec.live_region = LiveRegion.polite;
+    }
+    if (state == SurfaceCanonicalState.error) {
+        spec.live_region = LiveRegion.assertive;
+    }
+    return spec;
+}
+
+fn expected_material(index: i32) SemanticMaterialToken {
+    return switch (index) {
+        0 => SemanticMaterialToken.solid,
+        1 => SemanticMaterialToken.veil,
+        2 => SemanticMaterialToken.glass,
+        else => SemanticMaterialToken.glass,
+    };
+}
+
+fn expected_elevation(index: i32) SemanticElevationToken {
+    return switch (index) {
+        0 => SemanticElevationToken.base,
+        1 => SemanticElevationToken.panel,
+        2 => SemanticElevationToken.raised,
+        else => SemanticElevationToken.overlay,
+    };
+}
+
+fn expected_spacing(index: i32) FlexSpacingToken {
+    if (index == 0) { return FlexSpacingToken.medium; }
+    if (index == 1) { return FlexSpacingToken.large; }
+    return FlexSpacingToken.xlarge;
+}
+
+fn expected_material_name(index: i32) []u8 {
+    return switch (index) {
+        0 => "material.solid",
+        1 => "material.veil",
+        2 => "material.glass",
+        else => "material.glass",
+    };
+}
+
+fn reducer_contract(state:  *TestState) void {
+    let initial: ButtonInteraction = surface_interaction();
+    let group: SurfaceTransition = surface_reduce(SurfaceMode.group,
+        initial, ButtonEvent.pointer_down);
+    expect(state, group.rejected == 1 && group.activate == 0 &&
+        button_interaction_equal(group.interaction, initial) != 0,
+        "noninteractive groups reject input without mutating state");
+
+    let entered: SurfaceTransition = surface_reduce(SurfaceMode.actionable,
+        initial, ButtonEvent.pointer_enter);
+    let pressed: SurfaceTransition = surface_reduce(SurfaceMode.actionable,
+        entered.interaction, ButtonEvent.pointer_down);
+    let activated: SurfaceTransition = surface_reduce(SurfaceMode.actionable,
+        pressed.interaction, ButtonEvent.pointer_up_inside);
+    expect(state, entered.interaction.hovered == 1 &&
+        pressed.interaction.pressed == 1 && activated.activate == 1 &&
+        activated.interaction.pressed == 0 && activated.rejected == 0,
+        "actionable cards use one state-down action-up reducer contract");
+
+    let loading: SurfaceTransition = surface_reduce(SurfaceMode.actionable,
+        pressed.interaction, ButtonEvent.begin_loading);
+    let ignored: SurfaceTransition = surface_reduce(SurfaceMode.actionable,
+        loading.interaction, ButtonEvent.pointer_down);
+    expect(state, loading.interaction.loading == 1 &&
+        loading.interaction.pressed == 0 && ignored.interaction.pressed == 0,
+        "loading cards fail closed to new presses");
+}
+
+fn focus_modality_contract(state:  *TestState) void {
+    let initial: ButtonInteraction = surface_interaction();
+    let pointer_focus: SurfaceTransition = surface_reduce(
+        SurfaceMode.actionable, initial, ButtonEvent.focus_gained_pointer);
+    let keyboard_focus: SurfaceTransition = surface_reduce(
+        SurfaceMode.actionable, initial, ButtonEvent.focus_gained_keyboard);
+    expect(state, pointer_focus.interaction.focused == 1 &&
+        pointer_focus.interaction.focus_visible == 0 &&
+        keyboard_focus.interaction.focused == 1 &&
+        keyboard_focus.interaction.focus_visible == 1,
+        "pointer and keyboard focus share actual focus but preserve ring modality");
+
+    let display: DisplayList = display_list_make();
+    let hits: HitTree = hit_tree_make();
+    let semantics: SemanticsTree = semantics_tree_make();
+    let spec: SurfaceSpec = surface_action_spec(node_key(90), hit_root_key(),
+        rect(20 * unit_scale(), 20 * unit_scale(),
+            240 * unit_scale(), 72 * unit_scale()),
+        "Pointer-focused card", SurfaceTier.raised);
+    spec.interaction = pointer_focus.interaction;
+    let built: SurfaceBuildResult = surface_emit(spec,
+        &display, &hits, &semantics);
+    let session: TalkbackSession = talkback_session_make(talkback_capabilities());
+    let viewport: Rect = rect(0, 0, 400 * unit_scale(), 200 * unit_scale());
+    let query: TalkbackResponse = talkback_dispatch(&session, semantics,
+        viewport, talkback_request(90, TalkbackCommand.query, node_key(90),
+            semantics.revision));
+    expect(state, built.error == SurfaceBuildError.none &&
+        built.artifact.interaction.focused == 1 &&
+        built.artifact.interaction.focus_visible == 0 &&
+        built.artifact.focus_ring_visible == 0 &&
+        semantics.nodes.data[0].focused == 1 &&
+        (query.state_flags & talkback_state_focused_bit()) != 0,
+        "pointer focus is semantic and Talkback-visible without painting a keyboard ring");
+    talkback_session_free(&session);
+    semantics_tree_free(&semantics);
+    hit_tree_free(&hits);
+    display_list_free(&display);
+}
+
+fn hierarchy_and_spacing_contract(state:  *TestState) void {
+    let display: DisplayList = display_list_make();
+    let hits: HitTree = hit_tree_make();
+    let semantics: SemanticsTree = semantics_tree_make();
+
+    let index: i32 = 0;
+    let previous_hash: i64 = 0;
+    while (index < 4) {
+        let bounds: Rect = rect(20 * unit_scale(),
+            (20 + index * 100) as i64 * unit_scale(),
+            260 * unit_scale(), 80 * unit_scale());
+        let spec: SurfaceSpec = surface_spec(node_key(100 + index),
+            hit_root_key(), bounds, "Hierarchy tier", index as SurfaceTier);
+        spec.description = "Canonical noninteractive surface";
+        spec.z_order = index as i64;
+        if (index == 2) { spec.live_region = LiveRegion.polite; }
+        let built: SurfaceBuildResult = surface_emit(spec,
+            &display, &hits, &semantics);
+        let spacing: i64 = flex_spacing(expected_spacing(index),
+            FlexDensity.standard);
+        let material: ResolvedMaterialToken = semantic_material(
+            built.artifact.style.material_token);
+        expect(state, built.error == SurfaceBuildError.none &&
+            built.artifact.style.material_token == expected_material(index) &&
+            built.artifact.style.material_elevation_token ==
+                expected_elevation(index) &&
+            built.artifact.style.radius_token == material.radius_token &&
+            built.artifact.style.material_fill_token == material.fill_token &&
+            built.artifact.style.edge_token == material.edge_token &&
+            bytes_equal(material.id, expected_material_name(index)) != 0,
+            "each hierarchy tier exposes named material elevation radius and color provenance");
+        expect(state, built.artifact.content_bounds.x == bounds.x + spacing &&
+            built.artifact.content_bounds.y == bounds.y + spacing &&
+            built.artifact.content_bounds.width == bounds.width - spacing * 2 &&
+            built.artifact.content_bounds.height == bounds.height - spacing * 2 &&
+            built.artifact.style.content_spacing_token ==
+                expected_spacing(index),
+            "each hierarchy tier returns exact Flex token content geometry");
+        let op_index: i32 = built.artifact.display_op_start;
+        let owners_match: i32 = 1;
+        while (op_index < built.artifact.display_op_end) {
+            if (node_key_equal(display.ops.data[op_index].owner, spec.id) == 0) {
+                owners_match = 0;
+            }
+            op_index = op_index + 1;
+        }
+        expect(state, owners_match != 0 &&
+            node_key_equal(hits.nodes.data[index].id, spec.id) != 0 &&
+            node_key_equal(semantics.nodes.data[index].id, spec.id) != 0 &&
+            semantics.nodes.data[index].role == SemanticRole.group &&
+            hits.nodes.data[index].enabled == 0 &&
+            semantics.nodes.data[index].action_mask == 0,
+            "pixels semantics hits and ID automation share one non-actionable group key");
+        expect(state, built.artifact.evidence_hash != 0 &&
+            (index == 0 || built.artifact.evidence_hash != previous_hash),
+            "tier evidence changes deterministically with hierarchy inputs");
+        previous_hash = built.artifact.evidence_hash;
+        index = index + 1;
+    }
+    expect(state, display.ops.len == 18 && hits.nodes.len == 4 &&
+        semantics.nodes.len == 4 &&
+        semantics.nodes.data[2].live_region == LiveRegion.polite,
+        "base panel raised and overlay contribute deliberately different retained depth");
+
+    let session: TalkbackSession = talkback_session_make(talkback_capabilities());
+    let viewport: Rect = rect(0, 0, 400 * unit_scale(), 500 * unit_scale());
+    let query: TalkbackResponse = talkback_dispatch(&session, semantics,
+        viewport, talkback_request(1, TalkbackCommand.query, node_key(102),
+            semantics.revision));
+    let click: TalkbackResponse = talkback_dispatch(&session, semantics,
+        viewport, talkback_request(2, TalkbackCommand.click, node_key(102),
+            semantics.revision));
+    expect(state, query.status == TalkbackStatus.accepted &&
+        query.resolved_role == SemanticRole.group &&
+        click.status == TalkbackStatus.action_unavailable &&
+        click.emitted_action == 0,
+        "Talkback discovers group surfaces by ID while actions remain unavailable");
+    expect(state, display_list_seal(&display) == DisplayError.none &&
+        display_list_verify(&display) == DisplayError.none,
+        "all four surface tiers seal as one immutable verified display list");
+
+    talkback_session_free(&session);
+    semantics_tree_free(&semantics);
+    hit_tree_free(&hits);
+    display_list_free(&display);
+}
+
+fn state_matrix_contract(state:  *TestState) void {
+    let display: DisplayList = display_list_make();
+    let hits: HitTree = hit_tree_make();
+    let semantics: SemanticsTree = semantics_tree_make();
+    let previous_hash: i64 = 0;
+    let aggregate_hash: i64 = 17;
+    let index: i32 = 0;
+    while (index < 8) {
+        let spec: SurfaceSpec = action_fixture(200 + index,
+            index as SurfaceCanonicalState);
+        let built: SurfaceBuildResult = surface_emit(spec,
+            &display, &hits, &semantics);
+        expect(state, built.error == SurfaceBuildError.none &&
+            built.artifact.hit_node_index == index &&
+            built.artifact.semantics_node_index == index &&
+            built.artifact.semantics_role == SemanticRole.button &&
+            node_key_equal(hits.nodes.data[index].id, spec.id) != 0 &&
+            node_key_equal(semantics.nodes.data[index].id, spec.id) != 0,
+            "each actionable state shares one exact display hit semantic and Talkback ID");
+        expect(state, built.artifact.evidence_hash != 0 &&
+            (index == 0 || built.artifact.evidence_hash != previous_hash),
+            "default hover focus pressed selected disabled loading and error evidence differ");
+        previous_hash = built.artifact.evidence_hash;
+        aggregate_hash = surface_mix(aggregate_hash,
+            built.artifact.evidence_hash);
+        index = index + 1;
+    }
+
+    expect(state, semantic_text_equal(semantics.nodes.data[0].value, "Ready") != 0 &&
+        semantic_text_equal(semantics.nodes.data[1].value, "Hovered") != 0 &&
+        semantic_text_equal(semantics.nodes.data[2].value, "Focused") != 0 &&
+        semantic_text_equal(semantics.nodes.data[3].value, "Pressed") != 0 &&
+        semantic_text_equal(semantics.nodes.data[4].value, "Selected") != 0 &&
+        semantic_text_equal(semantics.nodes.data[5].value, "Disabled") != 0 &&
+        semantic_text_equal(semantics.nodes.data[6].value, "Loading") != 0 &&
+        semantic_text_equal(semantics.nodes.data[7].value, "Error") != 0,
+        "every canonical interaction has explicit non-color semantic state text");
+    expect(state, semantics.nodes.data[4].selected == 1 &&
+        semantics.nodes.data[5].disabled == 1 &&
+        semantics.nodes.data[5].action_mask == 0 &&
+        hits.nodes.data[5].enabled == 0 &&
+        semantics.nodes.data[6].disabled == 1 &&
+        semantics.nodes.data[6].live_region == LiveRegion.polite &&
+        semantics.nodes.data[7].live_region == LiveRegion.assertive,
+        "selected disabled loading and error truth agrees across semantics hit and live regions");
+    expect(state, semantics.nodes.data[2].focused == 1 &&
+        semantics.nodes.data[0].focused == 0 &&
+        semantic_actions_has(semantics.nodes.data[2].action_mask,
+            SemanticAction.focus) != 0,
+        "focused styling is backed by one retained semantic focus owner");
+    expect(state, semantic_actions_has(semantics.nodes.data[0].action_mask,
+            SemanticAction.activate) != 0 &&
+        semantic_actions_has(semantics.nodes.data[0].action_mask,
+            SemanticAction.focus) != 0 &&
+        semantics.nodes.data[7].disabled == 0,
+        "ready and error cards remain genuinely actionable");
+
+    let hover_spec: SurfaceSpec = action_fixture(250,
+        SurfaceCanonicalState.hover);
+    let hover_style: SurfaceResolvedStyle = surface_style(hover_spec);
+    let selected_spec: SurfaceSpec = action_fixture(251,
+        SurfaceCanonicalState.selected);
+    let selected_style: SurfaceResolvedStyle = surface_style(selected_spec);
+    let disabled_spec: SurfaceSpec = action_fixture(252,
+        SurfaceCanonicalState.disabled);
+    let disabled_style: SurfaceResolvedStyle = surface_style(disabled_spec);
+    let error_spec: SurfaceSpec = action_fixture(253,
+        SurfaceCanonicalState.error);
+    let error_style: SurfaceResolvedStyle = surface_style(error_spec);
+    expect(state, hover_style.fill_token == SemanticColorToken.surface_interactive &&
+        hover_style.state_token == SemanticColorToken.accent &&
+        selected_style.fill_token == SemanticColorToken.surface_selected &&
+        selected_style.state_token == SemanticColorToken.accent &&
+        disabled_style.content_color_token == SemanticColorToken.text_disabled &&
+        error_style.state_token == SemanticColorToken.status_error,
+        "state colors resolve only through named semantic tokens");
+
+    let hover_start: i32 = 0;
+    let focus_start: i32 = 0;
+    let pressed_start: i32 = 0;
+    let selected_start: i32 = 0;
+    let disabled_start: i32 = 0;
+    let loading_start: i32 = 0;
+    let error_start: i32 = 0;
+    // Retained ranges are recovered from deterministic per-state builds.
+    index = 0;
+    while (index < 8) {
+        if (hits.nodes.data[index].id.value == 201) {
+            hover_start = index;
+        }
+        if (hits.nodes.data[index].id.value == 202) { focus_start = index; }
+        if (hits.nodes.data[index].id.value == 203) { pressed_start = index; }
+        if (hits.nodes.data[index].id.value == 204) { selected_start = index; }
+        if (hits.nodes.data[index].id.value == 205) { disabled_start = index; }
+        if (hits.nodes.data[index].id.value == 206) { loading_start = index; }
+        if (hits.nodes.data[index].id.value == 207) { error_start = index; }
+        index = index + 1;
+    }
+    expect(state, hover_start == 1 && focus_start == 2 && pressed_start == 3 &&
+        selected_start == 4 && disabled_start == 5 && loading_start == 6 &&
+        error_start == 7 && aggregate_hash != 0,
+        "the complete state matrix remains stable and addressable by ID");
+
+    let hit: HitResult = hit_test(hits, 30 * unit_scale(), 30 * unit_scale());
+    expect(state, hit.found != 0 && hit.id.value == 200,
+        "pointer routing resolves the same stable actionable card ID");
+
+    let session: TalkbackSession = talkback_session_make(talkback_capabilities());
+    let viewport: Rect = rect(0, 0, 400 * unit_scale(), 800 * unit_scale());
+    let selected_query: TalkbackResponse = talkback_dispatch(&session, semantics,
+        viewport, talkback_request(10, TalkbackCommand.query, node_key(204),
+            semantics.revision));
+    let ready_click: TalkbackResponse = talkback_dispatch(&session, semantics,
+        viewport, talkback_request(11, TalkbackCommand.click, node_key(200),
+            semantics.revision));
+    let disabled_click: TalkbackResponse = talkback_dispatch(&session, semantics,
+        viewport, talkback_request(12, TalkbackCommand.click, node_key(205),
+            semantics.revision));
+    let pixel_fallback: TalkbackPixelFallbackTarget =
+        talkback_pixel_fallback_for_id(semantics, viewport, node_key(204),
+            TalkbackCommand.click, 2, 1);
+    expect(state, selected_query.status == TalkbackStatus.accepted &&
+        (selected_query.state_flags & 2) != 0 &&
+        ready_click.status == TalkbackStatus.accepted &&
+        ready_click.emitted_action == 1 &&
+        disabled_click.status == TalkbackStatus.action_unavailable &&
+        disabled_click.emitted_action == 0,
+        "Talkback queries and activates Surface by semantics ID without pixel routing");
+    expect(state, pixel_fallback.status == TalkbackStatus.accepted &&
+        pixel_fallback.source_id.value == 204 &&
+        pixel_fallback.bounds_x == 20 * unit_scale() &&
+        pixel_fallback.bounds_y == 348 * unit_scale() &&
+        pixel_fallback.pixel_x == 280 && pixel_fallback.pixel_y == 768 &&
+        pixel_fallback.action_available == 1 &&
+        pixel_fallback.evidence_hash != 0,
+        "ID-derived pixel fallback records the same Surface geometry and source key");
+    expect(state, display_list_seal(&display) == DisplayError.none &&
+        display_list_verify(&display) == DisplayError.none,
+        "all eight actionable states seal and verify");
+
+    talkback_session_free(&session);
+    semantics_tree_free(&semantics);
+    hit_tree_free(&hits);
+    display_list_free(&display);
+}
+
+fn visible_treatment_contract(state:  *TestState) void {
+    let display: DisplayList = display_list_make();
+    let hits: HitTree = hit_tree_make();
+    let semantics: SemanticsTree = semantics_tree_make();
+    let hover: SurfaceBuildResult = surface_emit(action_fixture(400,
+        SurfaceCanonicalState.hover), &display, &hits, &semantics);
+    let focus: SurfaceBuildResult = surface_emit(action_fixture(401,
+        SurfaceCanonicalState.focus), &display, &hits, &semantics);
+    let pressed: SurfaceBuildResult = surface_emit(action_fixture(402,
+        SurfaceCanonicalState.pressed), &display, &hits, &semantics);
+    let selected: SurfaceBuildResult = surface_emit(action_fixture(403,
+        SurfaceCanonicalState.selected), &display, &hits, &semantics);
+    let disabled: SurfaceBuildResult = surface_emit(action_fixture(404,
+        SurfaceCanonicalState.disabled), &display, &hits, &semantics);
+    let loading: SurfaceBuildResult = surface_emit(action_fixture(405,
+        SurfaceCanonicalState.loading), &display, &hits, &semantics);
+    let error: SurfaceBuildResult = surface_emit(action_fixture(406,
+        SurfaceCanonicalState.error), &display, &hits, &semantics);
+    expect(state, hover.artifact.hover_treatment_visible == 1 &&
+        hover.artifact.display_op_end - hover.artifact.display_op_start >= 5 &&
+        display.ops.data[hover.artifact.display_op_end - 1].bounds.width ==
+            3 * unit_scale(),
+        "hover adds a geometric trailing marker beyond its color token");
+    expect(state, focus.artifact.focus_ring_visible == 1 &&
+        display.ops.data[focus.artifact.display_op_start].bounds.width ==
+            focus.artifact.bounds.width + 6 * unit_scale(),
+        "focus adds a retained ring outside the material surface");
+    expect(state, pressed.artifact.pressed_treatment_visible == 1 &&
+        pressed.artifact.chrome_bounds.x == pressed.artifact.bounds.x +
+            2 * unit_scale() &&
+        pressed.artifact.chrome_bounds.width == pressed.artifact.bounds.width -
+            4 * unit_scale() &&
+        pressed.artifact.style.elevation_token == SemanticElevationToken.base,
+        "pressed state depresses geometry and removes raised elevation");
+    expect(state, selected.artifact.selected_marker_visible == 1 &&
+        display.ops.data[selected.artifact.display_op_end - 1].bounds.height ==
+            3 * unit_scale(),
+        "selection adds a persistent geometric underline");
+    expect(state, disabled.artifact.disabled_treatment_visible == 1 &&
+        disabled.artifact.effectively_enabled == 0 &&
+        disabled.artifact.display_op_end - disabled.artifact.display_op_start >= 5,
+        "disabled state adds a two-line unavailable mark and removes actionability");
+    expect(state, loading.artifact.loading_treatment_visible == 1 &&
+        display.ops.data[loading.artifact.display_op_end - 2].bounds.width ==
+            22 * unit_scale() &&
+        display.ops.data[loading.artifact.display_op_end - 1].bounds.width ==
+            13 * unit_scale(),
+        "loading adds a two-part progress rail instead of changing fill alone");
+    expect(state, error.artifact.error_treatment_visible == 1 &&
+        display.ops.data[error.artifact.display_op_end - 1].bounds.width ==
+            flex_spacing(FlexSpacingToken.tiny, FlexDensity.standard) &&
+        display.ops.data[error.artifact.display_op_end - 1].bounds.height ==
+            flex_spacing(FlexSpacingToken.xlarge, FlexDensity.standard),
+        "error adds a Flex-sized trailing state rail in addition to its status token");
+    semantics_tree_free(&semantics);
+    hit_tree_free(&hits);
+    display_list_free(&display);
+}
+
+fn dynamic_return_lifetime_contract(state:  *TestState) void {
+    let name_owner: ArrayList[u8] = make[u8](32);
+    copy_bytes(&name_owner, "Dynamic raised surface");
+    let spec: SurfaceSpec = surface_spec(node_key(500), hit_root_key(),
+        rect(20 * unit_scale(), 20 * unit_scale(),
+            260 * unit_scale(), 80 * unit_scale()),
+        name_owner.data[0..name_owner.len], SurfaceTier.raised);
+    let display: DisplayList = display_list_make();
+    let hits: HitTree = hit_tree_make();
+    let semantics: SemanticsTree = semantics_tree_make();
+    let built: SurfaceBuildResult = surface_emit(spec,
+        &display, &hits, &semantics);
+
+    // The constructor's retained-return loan ends at Surface emission; semantic
+    // text is now owned by the retained tree, so caller backing can be released.
+    free[u8](&name_owner);
+    expect(state, built.error == SurfaceBuildError.none &&
+        semantic_text_equal(semantics.nodes.data[0].name,
+            "Dynamic raised surface") != 0,
+        "dynamic constructor text stays alive through emission then becomes owned semantic text");
+    semantics_tree_free(&semantics);
+    hit_tree_free(&hits);
+    display_list_free(&display);
+}
+
+fn builders_restored(display:  *DisplayList,
+    hits:  *HitTree, semantics:  *SemanticsTree,
+    display_length: i32, display_revision: i64, display_hash: i64,
+    hit_length: i32, hit_revision: i64,
+    semantic_length: i32, semantic_revision: i64) i32 {
+    return (display.*.ops.len == display_length &&
+        display.*.revision == display_revision &&
+        display.*.content_hash == display_hash &&
+        hits.*.nodes.len == hit_length && hits.*.revision == hit_revision &&
+        semantics.*.nodes.len == semantic_length &&
+        semantics.*.revision == semantic_revision) as i32;
+}
+
+fn capacity_and_atomicity_contract(state:  *TestState) void {
+    let display: DisplayList = display_list_make();
+    let hits: HitTree = hit_tree_make();
+    let semantics: SemanticsTree = semantics_tree_make();
+    let seed: SurfaceSpec = surface_action_spec(node_key(600), hit_root_key(),
+        rect(20 * unit_scale(), 20 * unit_scale(),
+            240 * unit_scale(), 72 * unit_scale()),
+        "Committed card", SurfaceTier.panel);
+    let committed: SurfaceBuildResult = surface_emit(seed,
+        &display, &hits, &semantics);
+    let display_length: i32 = display.ops.len;
+    let display_revision: i64 = display.revision;
+    let display_hash: i64 = display.content_hash;
+    let hit_length: i32 = hits.nodes.len;
+    let hit_revision: i64 = hits.revision;
+    let semantic_length: i32 = semantics.nodes.len;
+    let semantic_revision: i64 = semantics.revision;
+
+    let display_limited: SurfaceSpec = action_fixture(610,
+        SurfaceCanonicalState.error);
+    display_limited.focus_order = 2;
+    display_limited.limits.display_operations = 2;
+    let display_failure: SurfaceBuildResult = surface_emit(display_limited,
+        &display, &hits, &semantics);
+    expect(state, committed.error == SurfaceBuildError.none &&
+        display_failure.error == SurfaceBuildError.capacity_error &&
+        display_failure.capacity_error ==
+            SurfaceCapacityError.display_operations &&
+        builders_restored(&display, &hits, &semantics,
+            display_length, display_revision, display_hash,
+            hit_length, hit_revision, semantic_length, semantic_revision) != 0,
+        "display capacity exhaustion atomically restores every retained builder");
+
+    let hit_limited: SurfaceSpec = action_fixture(611,
+        SurfaceCanonicalState.selected);
+    hit_limited.focus_order = 2;
+    hit_limited.limits.hit_nodes = 0;
+    let hit_failure: SurfaceBuildResult = surface_emit(hit_limited,
+        &display, &hits, &semantics);
+    expect(state, hit_failure.error == SurfaceBuildError.capacity_error &&
+        hit_failure.capacity_error == SurfaceCapacityError.hit_nodes &&
+        builders_restored(&display, &hits, &semantics,
+            display_length, display_revision, display_hash,
+            hit_length, hit_revision, semantic_length, semantic_revision) != 0,
+        "hit capacity exhaustion rolls back all prior surface display operations");
+
+    let semantic_limited: SurfaceSpec = action_fixture(612,
+        SurfaceCanonicalState.loading);
+    semantic_limited.focus_order = 2;
+    semantic_limited.limits.semantic_nodes = 0;
+    let semantic_failure: SurfaceBuildResult = surface_emit(semantic_limited,
+        &display, &hits, &semantics);
+    expect(state, semantic_failure.error == SurfaceBuildError.capacity_error &&
+        semantic_failure.capacity_error == SurfaceCapacityError.semantic_nodes &&
+        builders_restored(&display, &hits, &semantics,
+            display_length, display_revision, display_hash,
+            hit_length, hit_revision, semantic_length, semantic_revision) != 0,
+        "semantic capacity exhaustion frees staged text and restores display and hits");
+
+    let duplicate: SurfaceBuildResult = surface_emit(seed,
+        &display, &hits, &semantics);
+    expect(state, duplicate.error == SurfaceBuildError.hit_error &&
+        duplicate.hit_error == HitTreeError.duplicate_id &&
+        builders_restored(&display, &hits, &semantics,
+            display_length, display_revision, display_hash,
+            hit_length, hit_revision, semantic_length, semantic_revision) != 0,
+        "duplicate stable IDs fail visibly without partial contributions");
+
+    let collision: SurfaceSpec = action_fixture(613,
+        SurfaceCanonicalState.rest);
+    collision.focus_order = 1;
+    let semantic_collision: SurfaceBuildResult = surface_emit(collision,
+        &display, &hits, &semantics);
+    expect(state, semantic_collision.error == SurfaceBuildError.semantics_error &&
+        semantic_collision.semantics_error ==
+            SemanticsError.duplicate_focus_order &&
+        builders_restored(&display, &hits, &semantics,
+            display_length, display_revision, display_hash,
+            hit_length, hit_revision, semantic_length, semantic_revision) != 0,
+        "semantic focus collisions also roll back pixels hits and copied text");
+
+    semantics_tree_free(&semantics);
+    hit_tree_free(&hits);
+    display_list_free(&display);
+}
+
+fn invalid_and_deterministic_contract(state:  *TestState) void {
+    let invalid_display: DisplayList = display_list_make();
+    let invalid_hits: HitTree = hit_tree_make();
+    let invalid_semantics: SemanticsTree = semantics_tree_make();
+    let interactive_group: SurfaceSpec = surface_spec(node_key(700),
+        hit_root_key(), rect(0, 0, 100 * unit_scale(), 60 * unit_scale()),
+        "Invalid group", SurfaceTier.base);
+    interactive_group.interaction = surface_canonical_state(
+        SurfaceCanonicalState.hover);
+    let no_focus: SurfaceSpec = surface_action_spec(node_key(701),
+        hit_root_key(), rect(0, 0, 100 * unit_scale(), 60 * unit_scale()),
+        "No focus order", SurfaceTier.base);
+    no_focus.focus_order = 0;
+    let too_small: SurfaceSpec = surface_action_spec(node_key(702),
+        hit_root_key(), rect(0, 0, 43 * unit_scale(), 43 * unit_scale()),
+        "Too small", SurfaceTier.base);
+    let invalid_tier: SurfaceSpec = surface_spec(node_key(703),
+        hit_root_key(), rect(0, 0, 100 * unit_scale(), 60 * unit_scale()),
+        "Invalid tier", 99 as SurfaceTier);
+    let invalid_limits: SurfaceSpec = surface_spec(node_key(704),
+        hit_root_key(), rect(0, 0, 100 * unit_scale(), 60 * unit_scale()),
+        "Invalid limits", SurfaceTier.base);
+    invalid_limits.limits.display_operations = 0 - 1;
+    expect(state, surface_minimum_action_target() == 44 * unit_scale() &&
+        surface_emit(interactive_group, &invalid_display, &invalid_hits,
+            &invalid_semantics).error == SurfaceBuildError.invalid_spec &&
+        surface_emit(no_focus, &invalid_display, &invalid_hits,
+            &invalid_semantics).error == SurfaceBuildError.invalid_spec &&
+        surface_emit(too_small, &invalid_display, &invalid_hits,
+            &invalid_semantics).error == SurfaceBuildError.invalid_spec &&
+        surface_emit(invalid_tier, &invalid_display, &invalid_hits,
+            &invalid_semantics).error == SurfaceBuildError.invalid_spec &&
+        surface_emit(invalid_limits, &invalid_display, &invalid_hits,
+            &invalid_semantics).error == SurfaceBuildError.invalid_spec &&
+        invalid_display.ops.len == 0 && invalid_hits.nodes.len == 0 &&
+        invalid_semantics.nodes.len == 0,
+        "invalid modes targets enums and limits fail closed before mutation");
+    semantics_tree_free(&invalid_semantics);
+    hit_tree_free(&invalid_hits);
+    display_list_free(&invalid_display);
+
+    let display_a: DisplayList = display_list_make();
+    let hits_a: HitTree = hit_tree_make();
+    let semantics_a: SemanticsTree = semantics_tree_make();
+    let display_b: DisplayList = display_list_make();
+    let hits_b: HitTree = hit_tree_make();
+    let semantics_b: SemanticsTree = semantics_tree_make();
+    let spec: SurfaceSpec = action_fixture(720,
+        SurfaceCanonicalState.selected);
+    spec.focus_order = 1;
+    let first: SurfaceBuildResult = surface_emit(spec,
+        &display_a, &hits_a, &semantics_a);
+    let second: SurfaceBuildResult = surface_emit(spec,
+        &display_b, &hits_b, &semantics_b);
+    expect(state, first.error == SurfaceBuildError.none &&
+        second.error == SurfaceBuildError.none &&
+        first.artifact.evidence_hash != 0 &&
+        first.artifact.evidence_hash == second.artifact.evidence_hash &&
+        display_a.content_hash == display_b.content_hash &&
+        talkback_tree_hash(semantics_a) == talkback_tree_hash(semantics_b),
+        "identical Surface inputs produce identical component display and semantic evidence");
+    semantics_tree_free(&semantics_b); hit_tree_free(&hits_b);
+    display_list_free(&display_b);
+    semantics_tree_free(&semantics_a); hit_tree_free(&hits_a);
+    display_list_free(&display_a);
+
+    let sealed_display: DisplayList = display_list_make();
+    let sealed_hits: HitTree = hit_tree_make();
+    let sealed_semantics: SemanticsTree = semantics_tree_make();
+    _ = display_list_seal(&sealed_display);
+    let sealed: SurfaceBuildResult = surface_emit(action_fixture(730,
+        SurfaceCanonicalState.rest), &sealed_display, &sealed_hits,
+        &sealed_semantics);
+    expect(state, sealed.error == SurfaceBuildError.display_error &&
+        sealed.display_error == DisplayError.sealed &&
+        sealed_display.ops.len == 0 && sealed_hits.nodes.len == 0 &&
+        sealed_semantics.nodes.len == 0,
+        "sealed display destinations fail without partial hit or semantic trees");
+    semantics_tree_free(&sealed_semantics);
+    hit_tree_free(&sealed_hits);
+    display_list_free(&sealed_display);
+}
+
+fn main() i32 {
+    let state: TestState = TestState{ .passed = 0, .failed = 0 };
+    reducer_contract(&state);
+    focus_modality_contract(&state);
+    hierarchy_and_spacing_contract(&state);
+    state_matrix_contract(&state);
+    visible_treatment_contract(&state);
+    dynamic_return_lifetime_contract(&state);
+    capacity_and_atomicity_contract(&state);
+    invalid_and_deterministic_contract(&state);
+    _zag_print("Surface contract: pass=");
+    _zag_print_i64(state.passed as i64);
+    _zag_print(" fail="); _zag_print_i64(state.failed as i64);
+    _zag_println("");
+    if (state.failed == 0) { return 0; }
+    return 1;
+}

@@ -1,0 +1,553 @@
+@import("std:list")
+@import("../core/view_contract.zag")
+@import("../core/geometry.zag")
+@import("../text/unicode.zag")
+
+enum SemanticRole {
+    application,
+    window,
+    group,
+    text,
+    button,
+    toggle,
+    checkbox,
+    radio,
+    radio_group,
+    slider,
+    progress,
+    text_field,
+    text_editor,
+    image,
+    link,
+    menu,
+    menu_item,
+    tab,
+    tab_list,
+    list,
+    list_item,
+    table,
+    row,
+    cell,
+    tree,
+    tree_item,
+    dialog,
+}
+
+enum SemanticAction {
+    activate,
+    set_value,
+    increment,
+    decrement,
+    focus,
+    scroll,
+    expand,
+    collapse,
+    dismiss,
+    select,
+}
+
+enum LiveRegion { off, polite, assertive }
+
+enum SemanticsError {
+    none,
+    invalid_id,
+    duplicate_id,
+    missing_parent,
+    duplicate_focus_order,
+    invalid_range,
+    invalid_text_selection,
+    invalid_text,
+    invalid_bounds,
+    invalid_relationship,
+    invalid_collection,
+    invalid_state,
+}
+
+struct SemanticsSpec {
+    id: NodeKey,
+    parent: NodeKey,
+    role: SemanticRole,
+    name: []u8,
+    description: []u8,
+    value: []u8,
+    action_mask: i64,
+    focus_order: i64,
+    disabled: i32,
+    selected: i32,
+    focused: i32,
+    hidden: i32,
+    live_region: LiveRegion,
+    has_range: i32,
+    range_min: i64,
+    range_max: i64,
+    range_value: i64,
+    range_step: i64,
+    text_length: i64,
+    selection_start: i64,
+    selection_end: i64,
+    has_bounds: i32,
+    bounds: Rect,
+    labelled_by: NodeKey,
+    described_by: NodeKey,
+    controls: NodeKey,
+    row_count: i64,
+    column_count: i64,
+    row_index: i64,
+    column_index: i64,
+    row_span: i64,
+    column_span: i64,
+    level: i64,
+    set_size: i64,
+    position_in_set: i64,
+    expanded: i32,
+}
+
+struct SemanticsNode {
+    id: NodeKey,
+    parent: NodeKey,
+    role: SemanticRole,
+    name: ArrayList[u8],
+    description: ArrayList[u8],
+    value: ArrayList[u8],
+    action_mask: i64,
+    focus_order: i64,
+    disabled: i32,
+    selected: i32,
+    focused: i32,
+    hidden: i32,
+    live_region: LiveRegion,
+    has_range: i32,
+    range_min: i64,
+    range_max: i64,
+    range_value: i64,
+    range_step: i64,
+    text_length: i64,
+    selection_start: i64,
+    selection_end: i64,
+    has_bounds: i32,
+    bounds: Rect,
+    labelled_by: NodeKey,
+    described_by: NodeKey,
+    controls: NodeKey,
+    row_count: i64,
+    column_count: i64,
+    row_index: i64,
+    column_index: i64,
+    row_span: i64,
+    column_span: i64,
+    level: i64,
+    set_size: i64,
+    position_in_set: i64,
+    expanded: i32,
+}
+
+struct SemanticsTree {
+    nodes: ArrayList[SemanticsNode],
+    revision: i64,
+    last_error: SemanticsError,
+    error_node: NodeKey,
+}
+
+struct SemanticsCheckpoint {
+    length: i32,
+    revision: i64,
+    last_error: SemanticsError,
+    error_node: NodeKey,
+}
+
+fn semantic_root_key() NodeKey { return node_key(0 - 1); }
+fn semantic_none_key() NodeKey { return node_key(0 - 2); }
+
+fn semantic_action_bit(action: SemanticAction) i64 {
+    return switch (action) {
+        .activate => 1,
+        .set_value => 2,
+        .increment => 4,
+        .decrement => 8,
+        .focus => 16,
+        .scroll => 32,
+        .expand => 64,
+        .collapse => 128,
+        .dismiss => 256,
+        .select => 512,
+    };
+}
+
+fn semantic_actions(first: SemanticAction) i64 {
+    return semantic_action_bit(first);
+}
+
+fn semantic_actions_add(mask: i64, action: SemanticAction) i64 {
+    return mask | semantic_action_bit(action);
+}
+
+fn semantic_actions_has(mask: i64, action: SemanticAction) i32 {
+    return ((mask & semantic_action_bit(action)) != 0) as i32;
+}
+
+fn semantic_generated_key(parent: NodeKey, role: SemanticRole, ordinal: i64) NodeKey {
+    let role_code: i64 = role as i64;
+    let value: i64 = parent.value * 1000003 + role_code * 1009 + ordinal + 17;
+    return node_key_scoped(value, parent.generation);
+}
+
+fn semantics_spec(id: NodeKey, parent: NodeKey, role: SemanticRole, name: []u8) SemanticsSpec {
+    return SemanticsSpec{
+        .id = id,
+        .parent = parent,
+        .role = role,
+        .name = name,
+        .description = "",
+        .value = "",
+        .action_mask = 0,
+        .focus_order = 0,
+        .disabled = 0,
+        .selected = 0,
+        .focused = 0,
+        .hidden = 0,
+        .live_region = LiveRegion.off,
+        .has_range = 0,
+        .range_min = 0,
+        .range_max = 0,
+        .range_value = 0,
+        .range_step = 0,
+        .text_length = 0,
+        .selection_start = 0,
+        .selection_end = 0,
+        .has_bounds = 0,
+        .bounds = rect(0, 0, 0, 0),
+        .labelled_by = semantic_none_key(),
+        .described_by = semantic_none_key(),
+        .controls = semantic_none_key(),
+        .row_count = 0 - 1,
+        .column_count = 0 - 1,
+        .row_index = 0 - 1,
+        .column_index = 0 - 1,
+        .row_span = 0,
+        .column_span = 0,
+        .level = 0,
+        .set_size = 0,
+        .position_in_set = 0,
+        .expanded = 0 - 1,
+    };
+}
+
+fn semantics_tree_make() SemanticsTree {
+    return SemanticsTree{
+        .nodes = make[SemanticsNode](8),
+        .revision = 0,
+        .last_error = SemanticsError.none,
+        .error_node = semantic_root_key(),
+    };
+}
+
+fn semantic_text_copy(text: []u8) ArrayList[u8] {
+    let result: ArrayList[u8] = make[u8](text.len);
+    let i: i32 = 0;
+    while (i < text.len) {
+        push[u8](&result, text[i]);
+        i = i + 1;
+    }
+    return result;
+}
+
+fn semantic_text_equal(actual: ArrayList[u8], expected: []u8) i32 {
+    if (actual.len != expected.len) { return 0; }
+    let i: i32 = 0;
+    while (i < actual.len) {
+        if (actual.data[i] != expected[i]) { return 0; }
+        i = i + 1;
+    }
+    return 1;
+}
+
+fn semantic_text_input_valid(text: []u8) i32 {
+    let i: i32 = 0;
+    while (i < text.len) {
+        if (text[i] == 0) { return 0; }
+        i = i + 1;
+    }
+    return (utf8_validate(text).error == Utf8Error.none) as i32;
+}
+
+fn semantic_evidence_mix(hash: i64, value: i64) i64 {
+    return (hash * 1099511628211) ^ value;
+}
+
+fn semantic_text_evidence_hash(hash: i64, text: ArrayList[u8]) i64 {
+    let result: i64 = semantic_evidence_mix(hash, text.len as i64);
+    let i: i32 = 0;
+    while (i < text.len) {
+        result = semantic_evidence_mix(result, text.data[i] as i64);
+        i = i + 1;
+    }
+    return result;
+}
+
+fn semantic_node_evidence_hash(node: SemanticsNode) i64 {
+    let hash: i64 = semantic_evidence_mix(17, node.id.value);
+    hash = semantic_evidence_mix(hash, node.id.generation);
+    hash = semantic_evidence_mix(hash, node.parent.value);
+    hash = semantic_evidence_mix(hash, node.parent.generation);
+    hash = semantic_evidence_mix(hash, node.role as i64);
+    hash = semantic_text_evidence_hash(hash, node.name);
+    hash = semantic_text_evidence_hash(hash, node.description);
+    hash = semantic_text_evidence_hash(hash, node.value);
+    hash = semantic_evidence_mix(hash, node.action_mask);
+    hash = semantic_evidence_mix(hash, node.focus_order);
+    hash = semantic_evidence_mix(hash, node.disabled as i64);
+    hash = semantic_evidence_mix(hash, node.selected as i64);
+    hash = semantic_evidence_mix(hash, node.focused as i64);
+    hash = semantic_evidence_mix(hash, node.hidden as i64);
+    hash = semantic_evidence_mix(hash, node.live_region as i64);
+    hash = semantic_evidence_mix(hash, node.has_range as i64);
+    hash = semantic_evidence_mix(hash, node.range_min);
+    hash = semantic_evidence_mix(hash, node.range_max);
+    hash = semantic_evidence_mix(hash, node.range_value);
+    hash = semantic_evidence_mix(hash, node.range_step);
+    hash = semantic_evidence_mix(hash, node.text_length);
+    hash = semantic_evidence_mix(hash, node.selection_start);
+    hash = semantic_evidence_mix(hash, node.selection_end);
+    hash = semantic_evidence_mix(hash, node.has_bounds as i64);
+    hash = semantic_evidence_mix(hash, node.bounds.x);
+    hash = semantic_evidence_mix(hash, node.bounds.y);
+    hash = semantic_evidence_mix(hash, node.bounds.width);
+    hash = semantic_evidence_mix(hash, node.bounds.height);
+    hash = semantic_evidence_mix(hash, node.labelled_by.value);
+    hash = semantic_evidence_mix(hash, node.labelled_by.generation);
+    hash = semantic_evidence_mix(hash, node.described_by.value);
+    hash = semantic_evidence_mix(hash, node.described_by.generation);
+    hash = semantic_evidence_mix(hash, node.controls.value);
+    hash = semantic_evidence_mix(hash, node.controls.generation);
+    hash = semantic_evidence_mix(hash, node.row_count);
+    hash = semantic_evidence_mix(hash, node.column_count);
+    hash = semantic_evidence_mix(hash, node.row_index);
+    hash = semantic_evidence_mix(hash, node.column_index);
+    hash = semantic_evidence_mix(hash, node.row_span);
+    hash = semantic_evidence_mix(hash, node.column_span);
+    hash = semantic_evidence_mix(hash, node.level);
+    hash = semantic_evidence_mix(hash, node.set_size);
+    hash = semantic_evidence_mix(hash, node.position_in_set);
+    return semantic_evidence_mix(hash, node.expanded as i64);
+}
+
+fn semantics_find_index(tree: SemanticsTree, id: NodeKey) i32 {
+    let i: i32 = tree.nodes.len - 1;
+    while (i >= 0) {
+        if (node_key_equal(tree.nodes.data[i].id, id) == 1) { return i; }
+        i = i - 1;
+    }
+    return 0 - 1;
+}
+
+fn semantics_find_index_borrowed(tree: *SemanticsTree, id: NodeKey) i32 {
+    return semantics_find_index(tree.*, id);
+}
+
+fn semantics_fail(tree: @borrows_mut *SemanticsTree,
+    error: SemanticsError, id: NodeKey) SemanticsError {
+    tree.*.last_error = error;
+    tree.*.error_node = id;
+    return error;
+}
+
+fn semantics_relationship_valid(tree: SemanticsTree, owner: NodeKey, target: NodeKey) i32 {
+    if (node_key_equal(target, semantic_none_key()) == 1) { return 1; }
+    if (node_key_equal(owner, target) == 1) { return 0; }
+    return (semantics_find_index(tree, target) >= 0) as i32;
+}
+
+fn semantics_bounds_valid(spec: SemanticsSpec) i32 {
+    if (spec.has_bounds == 0) { return 1; }
+    if (spec.has_bounds != 1 || spec.bounds.width < 0 || spec.bounds.height < 0) { return 0; }
+    if (spec.bounds.x < 0 - unbounded_extent() || spec.bounds.x > unbounded_extent() ||
+        spec.bounds.y < 0 - unbounded_extent() || spec.bounds.y > unbounded_extent() ||
+        spec.bounds.width > unbounded_extent() || spec.bounds.height > unbounded_extent()) { return 0; }
+    if (spec.bounds.x > unbounded_extent() - spec.bounds.width ||
+        spec.bounds.y > unbounded_extent() - spec.bounds.height) { return 0; }
+    return 1;
+}
+
+fn semantics_collection_valid(spec: SemanticsSpec) i32 {
+    if (spec.row_count < 0 - 1 || spec.column_count < 0 - 1 ||
+        spec.row_index < 0 - 1 || spec.column_index < 0 - 1 ||
+        spec.row_span < 0 || spec.column_span < 0 || spec.level < 0 ||
+        spec.set_size < 0 || spec.position_in_set < 0 ||
+        spec.expanded < 0 - 1 || spec.expanded > 1) { return 0; }
+    if ((spec.row_index < 0 && spec.row_span != 0) ||
+        (spec.row_index >= 0 && spec.row_span <= 0) ||
+        (spec.column_index < 0 && spec.column_span != 0) ||
+        (spec.column_index >= 0 && spec.column_span <= 0)) { return 0; }
+    if (spec.row_count >= 0 && spec.row_index >= 0 &&
+        (spec.row_index >= spec.row_count || spec.row_span > spec.row_count - spec.row_index)) { return 0; }
+    if (spec.column_count >= 0 && spec.column_index >= 0 &&
+        (spec.column_index >= spec.column_count || spec.column_span > spec.column_count - spec.column_index)) { return 0; }
+    if ((spec.set_size == 0 && spec.position_in_set != 0) ||
+        (spec.set_size > 0 && (spec.position_in_set <= 0 || spec.position_in_set > spec.set_size))) { return 0; }
+    return 1;
+}
+
+fn semantics_state_valid(spec: SemanticsSpec) i32 {
+    if ((spec.disabled != 0 && spec.disabled != 1) ||
+        (spec.selected != 0 && spec.selected != 1) ||
+        (spec.hidden != 0 && spec.hidden != 1) ||
+        (spec.has_range != 0 && spec.has_range != 1) ||
+        spec.action_mask < 0 || spec.action_mask > 1023 || spec.focus_order < 0) { return 0; }
+    if (spec.has_range == 0 && (spec.range_min != 0 || spec.range_max != 0 ||
+        spec.range_value != 0 || spec.range_step != 0)) { return 0; }
+    if (spec.has_bounds == 0 && (spec.bounds.x != 0 || spec.bounds.y != 0 ||
+        spec.bounds.width != 0 || spec.bounds.height != 0)) { return 0; }
+    return 1;
+}
+
+fn semantics_add(tree: @borrows_mut *SemanticsTree,
+    spec: SemanticsSpec) SemanticsError {
+    if (node_key_equal(spec.id, semantic_root_key()) == 1 ||
+        node_key_equal(spec.id, semantic_none_key()) == 1) {
+        return semantics_fail(tree, SemanticsError.invalid_id, spec.id);
+    }
+    if (semantics_find_index(tree.*, spec.id) >= 0) {
+        return semantics_fail(tree, SemanticsError.duplicate_id, spec.id);
+    }
+    if (semantic_text_input_valid(spec.name) == 0 ||
+        semantic_text_input_valid(spec.description) == 0 ||
+        semantic_text_input_valid(spec.value) == 0) {
+        return semantics_fail(tree, SemanticsError.invalid_text, spec.id);
+    }
+    if (node_key_equal(spec.parent, semantic_root_key()) == 0 &&
+        semantics_find_index(tree.*, spec.parent) < 0) {
+        return semantics_fail(tree, SemanticsError.missing_parent, spec.id);
+    }
+    if (spec.focus_order > 0) {
+        let i: i32 = 0;
+        while (i < tree.*.nodes.len) {
+            if (tree.*.nodes.data[i].focus_order == spec.focus_order) {
+                return semantics_fail(tree, SemanticsError.duplicate_focus_order, spec.id);
+            }
+            i = i + 1;
+        }
+    }
+    if (spec.has_range != 0 &&
+        (spec.range_min > spec.range_max || spec.range_value < spec.range_min ||
+         spec.range_value > spec.range_max || spec.range_step <= 0)) {
+        return semantics_fail(tree, SemanticsError.invalid_range, spec.id);
+    }
+    if (spec.text_length < 0 || spec.selection_start < 0 ||
+        spec.selection_end < spec.selection_start || spec.selection_end > spec.text_length) {
+        return semantics_fail(tree, SemanticsError.invalid_text_selection, spec.id);
+    }
+    if (semantics_bounds_valid(spec) == 0) {
+        return semantics_fail(tree, SemanticsError.invalid_bounds, spec.id);
+    }
+    if (semantics_relationship_valid(tree.*, spec.id, spec.labelled_by) == 0 ||
+        semantics_relationship_valid(tree.*, spec.id, spec.described_by) == 0 ||
+        semantics_relationship_valid(tree.*, spec.id, spec.controls) == 0) {
+        return semantics_fail(tree, SemanticsError.invalid_relationship, spec.id);
+    }
+    if (semantics_collection_valid(spec) == 0) {
+        return semantics_fail(tree, SemanticsError.invalid_collection, spec.id);
+    }
+    if (semantics_state_valid(spec) == 0) {
+        return semantics_fail(tree, SemanticsError.invalid_state, spec.id);
+    }
+
+    let node: SemanticsNode = SemanticsNode{
+        .id = spec.id,
+        .parent = spec.parent,
+        .role = spec.role,
+        .name = semantic_text_copy(spec.name),
+        .description = semantic_text_copy(spec.description),
+        .value = semantic_text_copy(spec.value),
+        .action_mask = spec.action_mask,
+        .focus_order = spec.focus_order,
+        .disabled = spec.disabled,
+        .selected = spec.selected,
+        .focused = spec.focused,
+        .hidden = spec.hidden,
+        .live_region = spec.live_region,
+        .has_range = spec.has_range,
+        .range_min = spec.range_min,
+        .range_max = spec.range_max,
+        .range_value = spec.range_value,
+        .range_step = spec.range_step,
+        .text_length = spec.text_length,
+        .selection_start = spec.selection_start,
+        .selection_end = spec.selection_end,
+        .has_bounds = spec.has_bounds,
+        .bounds = spec.bounds,
+        .labelled_by = spec.labelled_by,
+        .described_by = spec.described_by,
+        .controls = spec.controls,
+        .row_count = spec.row_count,
+        .column_count = spec.column_count,
+        .row_index = spec.row_index,
+        .column_index = spec.column_index,
+        .row_span = spec.row_span,
+        .column_span = spec.column_span,
+        .level = spec.level,
+        .set_size = spec.set_size,
+        .position_in_set = spec.position_in_set,
+        .expanded = spec.expanded,
+    };
+    push[SemanticsNode](&tree.*.nodes, node);
+    tree.*.revision = tree.*.revision + 1;
+    tree.*.last_error = SemanticsError.none;
+    tree.*.error_node = semantic_root_key();
+    return SemanticsError.none;
+}
+
+fn semantics_next_focus(tree: SemanticsTree, after_order: i64) NodeKey {
+    let found: i32 = 0;
+    let best_order: i64 = 0;
+    let best: NodeKey = semantic_root_key();
+    let i: i32 = 0;
+    while (i < tree.nodes.len) {
+        let node: SemanticsNode = tree.nodes.data[i];
+        if (node.focus_order > after_order && node.disabled == 0 && node.hidden == 0 &&
+            (found == 0 || node.focus_order < best_order)) {
+            found = 1;
+            best_order = node.focus_order;
+            best = node.id;
+        }
+        i = i + 1;
+    }
+    return best;
+}
+
+fn semantics_tree_free(tree: *SemanticsTree) void {
+    let i: i32 = 0;
+    while (i < tree.*.nodes.len) {
+        free[u8](&tree.*.nodes.data[i].name);
+        free[u8](&tree.*.nodes.data[i].description);
+        free[u8](&tree.*.nodes.data[i].value);
+        i = i + 1;
+    }
+    free[SemanticsNode](&tree.*.nodes);
+}
+
+fn semantics_tree_checkpoint(tree: SemanticsTree) SemanticsCheckpoint {
+    return SemanticsCheckpoint{
+        .length = tree.nodes.len,
+        .revision = tree.revision,
+        .last_error = tree.last_error,
+        .error_node = tree.error_node,
+    };
+}
+
+fn semantics_tree_rollback(tree: *SemanticsTree,
+    checkpoint: SemanticsCheckpoint) i32 {
+    if (checkpoint.length < 0 || checkpoint.length > tree.*.nodes.len ||
+        checkpoint.revision < 0 || checkpoint.revision > tree.*.revision) { return 0; }
+    let i: i32 = checkpoint.length;
+    while (i < tree.*.nodes.len) {
+        free[u8](&tree.*.nodes.data[i].name);
+        free[u8](&tree.*.nodes.data[i].description);
+        free[u8](&tree.*.nodes.data[i].value);
+        i = i + 1;
+    }
+    tree.*.nodes.len = checkpoint.length;
+    tree.*.revision = checkpoint.revision;
+    tree.*.last_error = checkpoint.last_error;
+    tree.*.error_node = checkpoint.error_node;
+    return 1;
+}

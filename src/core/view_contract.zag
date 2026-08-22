@@ -1,0 +1,157 @@
+@import("std:list")
+
+struct NodeKey {
+    value: i64,
+    generation: i64,
+}
+
+struct StateRead {
+    reader: NodeKey,
+    state_id: i64,
+    revision: i64,
+}
+
+struct StateChange {
+    state_id: i64,
+    from_revision: i64,
+    to_revision: i64,
+}
+
+struct InvalidationCause {
+    found: i32,
+    reader: NodeKey,
+    state_id: i64,
+    read_revision: i64,
+    from_revision: i64,
+    to_revision: i64,
+}
+
+struct Action {
+    id: i64,
+    source: NodeKey,
+    target_state_id: i64,
+    from_revision: i64,
+    to_revision: i64,
+}
+
+struct EnvironmentEntry {
+    key: i64,
+    value: i64,
+    revision: i64,
+}
+
+struct Environment {
+    entries: ArrayList[EnvironmentEntry],
+    revision: i64,
+}
+
+struct ViewContext {
+    reader: NodeKey,
+    reads: ArrayList[StateRead],
+}
+
+fn node_key(value: i64) NodeKey {
+    return NodeKey{ .value = value, .generation = 0 };
+}
+
+fn node_key_scoped(value: i64, generation: i64) NodeKey {
+    return NodeKey{ .value = value, .generation = generation };
+}
+
+fn node_key_equal(a: NodeKey, b: NodeKey) i32 {
+    return (a.value == b.value && a.generation == b.generation) as i32;
+}
+
+fn environment_make() Environment {
+    return Environment{ .entries = make[EnvironmentEntry](4), .revision = 0 };
+}
+
+fn environment_free(env: *Environment) void {
+    free[EnvironmentEntry](&env.*.entries);
+}
+
+fn environment_set(env: *Environment, key: i64, value: i64) i64 {
+    let i: i32 = 0;
+    while (i < env.*.entries.len) {
+        if (env.*.entries.data[i].key == key) {
+            if (env.*.entries.data[i].value != value) {
+                env.*.revision = env.*.revision + 1;
+                env.*.entries.data[i].value = value;
+                env.*.entries.data[i].revision = env.*.revision;
+            }
+            return env.*.entries.data[i].revision;
+        }
+        i = i + 1;
+    }
+    env.*.revision = env.*.revision + 1;
+    push[EnvironmentEntry](&env.*.entries, EnvironmentEntry{
+        .key = key,
+        .value = value,
+        .revision = env.*.revision,
+    });
+    return env.*.revision;
+}
+
+fn environment_get(env: Environment, key: i64, fallback: i64) i64 {
+    let i: i32 = env.entries.len - 1;
+    while (i >= 0) {
+        if (env.entries.data[i].key == key) { return env.entries.data[i].value; }
+        i = i - 1;
+    }
+    return fallback;
+}
+
+fn view_context_make(reader: NodeKey) ViewContext {
+    return ViewContext{ .reader = reader, .reads = make[StateRead](4) };
+}
+
+fn view_context_free(ctx: *ViewContext) void {
+    free[StateRead](&ctx.*.reads);
+}
+
+fn view_context_record_read(ctx: *ViewContext, state_id: i64, revision: i64) void {
+    let i: i32 = 0;
+    while (i < ctx.*.reads.len) {
+        if (ctx.*.reads.data[i].state_id == state_id &&
+            node_key_equal(ctx.*.reads.data[i].reader, ctx.*.reader) == 1) {
+            ctx.*.reads.data[i].revision = revision;
+            return;
+        }
+        i = i + 1;
+    }
+    push[StateRead](&ctx.*.reads, StateRead{
+        .reader = ctx.*.reader,
+        .state_id = state_id,
+        .revision = revision,
+    });
+}
+
+fn view_context_invalidation(ctx: ViewContext, change: StateChange) InvalidationCause {
+    let i: i32 = 0;
+    while (i < ctx.reads.len) {
+        let read: StateRead = ctx.reads.data[i];
+        if (read.state_id == change.state_id && read.revision < change.to_revision) {
+            return InvalidationCause{
+                .found = 1,
+                .reader = read.reader,
+                .state_id = read.state_id,
+                .read_revision = read.revision,
+                .from_revision = change.from_revision,
+                .to_revision = change.to_revision,
+            };
+        }
+        i = i + 1;
+    }
+    return InvalidationCause{
+        .found = 0,
+        .reader = ctx.reader,
+        .state_id = change.state_id,
+        .read_revision = 0,
+        .from_revision = change.from_revision,
+        .to_revision = change.to_revision,
+    };
+}
+
+fn view_context_invalidated(ctx: ViewContext, change: StateChange) i32 {
+    return view_context_invalidation(ctx, change).found;
+}

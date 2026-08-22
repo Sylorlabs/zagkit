@@ -1,0 +1,632 @@
+@import("std:list")
+@import("canvas.zag")
+@import("../design/tokens.zag")
+@import("../text/glyph_run.zag")
+
+// Experimental, bounded, single-line text composition. This component uses
+// Zagkit's nominal LTR glyph run and TrueType path pipeline. It deliberately
+// does not claim shaping, bidi, fallback, normalization, or wrapping.
+
+enum TextAlignment {
+    start,
+    center,
+    end,
+}
+
+enum TextOverflowPolicy {
+    reject,
+    clip,
+}
+
+enum TextSemanticsMode {
+    own,
+    parent_owned,
+}
+
+enum TextError {
+    none,
+    invalid_spec,
+    invalid_text,
+    invalid_font,
+    overflow,
+    glyph_run_error,
+    path_error,
+    canvas_error,
+}
+
+enum TextContributionError {
+    none,
+    invalid_artifact,
+    invalid_destination,
+    missing_semantic_parent,
+    duplicate_semantic_id,
+    display_error,
+    semantics_error,
+}
+
+struct TextSpec {
+    id: NodeKey,
+    semantic_parent: NodeKey,
+    bounds: Rect,
+    text: []u8,
+    type_token: SemanticTypeToken,
+    color_token: SemanticColorToken,
+    alignment: TextAlignment,
+    overflow: TextOverflowPolicy,
+    semantics_mode: TextSemanticsMode,
+    disabled: i32,
+}
+
+struct TextArtifact {
+    canvas: Canvas,
+    text: ArrayList[u8],
+    semantic_parent: NodeKey,
+    bounds: Rect,
+    type_token: SemanticTypeToken,
+    color_token: SemanticColorToken,
+    type_token_id: []u8,
+    color_token_id: []u8,
+    alignment: TextAlignment,
+    overflow: TextOverflowPolicy,
+    semantics_mode: TextSemanticsMode,
+    disabled: i32,
+    font_size: i64,
+    ascender: i64,
+    descender: i64,
+    line_gap: i64,
+    line_height: i64,
+    origin_x: i64,
+    baseline: i64,
+    advance: i64,
+    scalar_count: i64,
+    glyph_count: i32,
+    path_count: i32,
+    path_command_count: i32,
+    resource_id: i64,
+    clipped: i32,
+    error: TextError,
+    glyph_error: GlyphRunError,
+    path_error: PathError,
+    canvas_error: CanvasError,
+    evidence_hash: i64,
+}
+
+struct TextContributionResult {
+    error: TextContributionError,
+    canvas_error: CanvasError,
+    display_error: DisplayError,
+    semantics_error: SemanticsError,
+    display_operations_added: i32,
+    display_resources_added: i32,
+    semantic_nodes_added: i32,
+}
+
+struct TextDisplayStage {
+    display: DisplayList,
+    valid: i32,
+}
+
+fn text_byte_limit() i32 { return 4096; }
+fn text_glyph_limit() i64 { return 1024; }
+fn text_local_path_resource_id() i64 { return 1; }
+
+fn text_spec(id: NodeKey, semantic_parent: NodeKey, bounds: Rect,
+    text: []u8, type_token: SemanticTypeToken,
+    color_token: SemanticColorToken) TextSpec {
+    return TextSpec{
+        .id = id,
+        .semantic_parent = semantic_parent,
+        .bounds = bounds,
+        .text = text,
+        .type_token = type_token,
+        .color_token = color_token,
+        .alignment = TextAlignment.start,
+        .overflow = TextOverflowPolicy.reject,
+        .semantics_mode = TextSemanticsMode.own,
+        .disabled = 0,
+    };
+}
+
+fn text_copy_bytes(bytes: []u8) ArrayList[u8] {
+    let owned: ArrayList[u8] = make[u8](bytes.len);
+    let i: i32 = 0;
+    while (i < bytes.len) {
+        push[u8](&owned, bytes[i]);
+        i = i + 1;
+    }
+    return owned;
+}
+
+fn text_slice_hash(hash: i64, bytes: []u8) i64 {
+    let result: i64 = canvas_mix(hash, bytes.len as i64);
+    let i: i32 = 0;
+    while (i < bytes.len) {
+        result = canvas_mix(result, bytes[i] as i64);
+        i = i + 1;
+    }
+    return result;
+}
+
+fn text_limits() CanvasLimits {
+    let limits: CanvasLimits = canvas_limits_default();
+    limits.max_operations = 1;
+    limits.max_resources = 1;
+    limits.max_total_resource_bytes = 4194304;
+    limits.max_resource_bytes = 4194304;
+    return limits;
+}
+
+fn text_canvas(spec: TextSpec) Canvas {
+    let canvas_specification: CanvasSpec = canvas_spec(
+        spec.id, spec.bounds, CanvasSemanticsPolicy.decorative, "");
+    canvas_specification.semantic_parent = spec.semantic_parent;
+    canvas_specification.clip = spec.bounds;
+    canvas_specification.has_clip = 1;
+    canvas_specification.enabled = (spec.disabled == 0) as i32;
+    return canvas_make(canvas_specification, text_limits());
+}
+
+fn text_empty_artifact(spec: TextSpec) TextArtifact {
+    return TextArtifact{
+        .canvas = text_canvas(spec),
+        .text = text_copy_bytes(""),
+        .semantic_parent = spec.semantic_parent,
+        .bounds = spec.bounds,
+        .type_token = spec.type_token,
+        .color_token = spec.color_token,
+        .type_token_id = "",
+        .color_token_id = "",
+        .alignment = spec.alignment,
+        .overflow = spec.overflow,
+        .semantics_mode = spec.semantics_mode,
+        .disabled = spec.disabled,
+        .font_size = 0,
+        .ascender = 0,
+        .descender = 0,
+        .line_gap = 0,
+        .line_height = 0,
+        .origin_x = 0,
+        .baseline = 0,
+        .advance = 0,
+        .scalar_count = 0,
+        .glyph_count = 0,
+        .path_count = 0,
+        .path_command_count = 0,
+        .resource_id = 0,
+        .clipped = 0,
+        .error = TextError.none,
+        .glyph_error = GlyphRunError.none,
+        .path_error = PathError.none,
+        .canvas_error = CanvasError.none,
+        .evidence_hash = 0,
+    };
+}
+
+fn text_enum_spec_valid(spec: TextSpec) i32 {
+    let alignment: i64 = spec.alignment as i64;
+    let overflow: i64 = spec.overflow as i64;
+    let semantics_mode: i64 = spec.semantics_mode as i64;
+    let type_token: i64 = spec.type_token as i64;
+    let color_token: i64 = spec.color_token as i64;
+    return (alignment >= TextAlignment.start as i64 &&
+        alignment <= TextAlignment.end as i64 &&
+        overflow >= TextOverflowPolicy.reject as i64 &&
+        overflow <= TextOverflowPolicy.clip as i64 &&
+        semantics_mode >= TextSemanticsMode.own as i64 &&
+        semantics_mode <= TextSemanticsMode.parent_owned as i64 &&
+        type_token >= 0 && type_token < semantic_type_token_count() as i64 &&
+        color_token >= 0 && color_token < semantic_color_token_count() as i64 &&
+        (spec.disabled == 0 || spec.disabled == 1)) as i32;
+}
+
+fn text_font_valid(face: OpenTypeFace) i32 {
+    let line_units: i64 = (face.ascender as i64) -
+        (face.descender as i64) + (face.line_gap as i64);
+    return (face.error == OpenTypeError.none && face.units_per_em > 0 &&
+        face.glyph_count > 0 && face.ascender > face.descender &&
+        line_units > 0) as i32;
+}
+
+fn text_spec_geometry_valid(spec: TextSpec) i32 {
+    return (canvas_key_valid(spec.id) != 0 &&
+        canvas_parent_valid(spec.semantic_parent, semantic_root_key()) != 0 &&
+        hit_geometry_valid(spec.bounds) != 0) as i32;
+}
+
+fn text_aligned_origin(spec: TextSpec, advance: i64) i64 {
+    if (spec.alignment == TextAlignment.center) {
+        return spec.bounds.x + (spec.bounds.width - advance) / 2;
+    }
+    if (spec.alignment == TextAlignment.end) {
+        return spec.bounds.x + spec.bounds.width - advance;
+    }
+    return spec.bounds.x;
+}
+
+fn text_artifact_hash(artifact: TextArtifact) i64 {
+    let hash: i64 = canvas_mix(17, artifact.canvas.key.value);
+    hash = canvas_mix(hash, artifact.canvas.key.generation);
+    hash = canvas_mix(hash, artifact.semantic_parent.value);
+    hash = canvas_mix(hash, artifact.semantic_parent.generation);
+    hash = canvas_mix(hash, artifact.bounds.x);
+    hash = canvas_mix(hash, artifact.bounds.y);
+    hash = canvas_mix(hash, artifact.bounds.width);
+    hash = canvas_mix(hash, artifact.bounds.height);
+    hash = canvas_text_hash(hash, artifact.text);
+    hash = canvas_mix(hash, artifact.type_token as i64);
+    hash = canvas_mix(hash, artifact.color_token as i64);
+    hash = text_slice_hash(hash, artifact.type_token_id);
+    hash = text_slice_hash(hash, artifact.color_token_id);
+    hash = canvas_mix(hash, artifact.alignment as i64);
+    hash = canvas_mix(hash, artifact.overflow as i64);
+    hash = canvas_mix(hash, artifact.semantics_mode as i64);
+    hash = canvas_mix(hash, artifact.disabled as i64);
+    hash = canvas_mix(hash, artifact.font_size);
+    hash = canvas_mix(hash, artifact.ascender);
+    hash = canvas_mix(hash, artifact.descender);
+    hash = canvas_mix(hash, artifact.line_gap);
+    hash = canvas_mix(hash, artifact.line_height);
+    hash = canvas_mix(hash, artifact.origin_x);
+    hash = canvas_mix(hash, artifact.baseline);
+    hash = canvas_mix(hash, artifact.advance);
+    hash = canvas_mix(hash, artifact.scalar_count);
+    hash = canvas_mix(hash, artifact.glyph_count as i64);
+    hash = canvas_mix(hash, artifact.path_count as i64);
+    hash = canvas_mix(hash, artifact.path_command_count as i64);
+    hash = canvas_mix(hash, artifact.resource_id);
+    hash = canvas_mix(hash, artifact.clipped as i64);
+    return canvas_mix(hash, artifact.canvas.content_hash);
+}
+
+fn text_build(face: OpenTypeFace, spec: TextSpec) TextArtifact {
+    let artifact: TextArtifact = text_empty_artifact(spec);
+    if (text_spec_geometry_valid(spec) == 0 || text_enum_spec_valid(spec) == 0 ||
+        artifact.canvas.last_error != CanvasError.none) {
+        artifact.error = TextError.invalid_spec;
+        artifact.canvas_error = artifact.canvas.last_error;
+        return artifact;
+    }
+    if (spec.text.len <= 0 || spec.text.len > text_byte_limit() ||
+        semantic_text_input_valid(spec.text) == 0) {
+        artifact.error = TextError.invalid_text;
+        return artifact;
+    }
+    let validation: Utf8ValidationResult = utf8_validate(spec.text);
+    if (validation.error != Utf8Error.none || validation.scalar_count <= 0 ||
+        validation.scalar_count > text_glyph_limit()) {
+        artifact.error = TextError.invalid_text;
+        return artifact;
+    }
+    if (text_font_valid(face) == 0) {
+        artifact.error = TextError.invalid_font;
+        return artifact;
+    }
+
+    artifact.font_size = semantic_type_size(spec.type_token);
+    artifact.ascender = ((face.ascender as i64) * artifact.font_size) /
+        (face.units_per_em as i64);
+    artifact.descender = ((face.descender as i64) * artifact.font_size) /
+        (face.units_per_em as i64);
+    artifact.line_gap = ((face.line_gap as i64) * artifact.font_size) /
+        (face.units_per_em as i64);
+    artifact.line_height = artifact.ascender - artifact.descender +
+        artifact.line_gap;
+    if (artifact.font_size <= 0 || artifact.line_height <= 0) {
+        artifact.error = TextError.invalid_font;
+        return artifact;
+    }
+
+    let run: NominalGlyphRun = nominal_glyph_run_ltr(
+        face, spec.text, artifact.font_size, 0, 0);
+    if (run.error != GlyphRunError.none || run.glyphs.len <= 0) {
+        artifact.error = TextError.glyph_run_error;
+        artifact.glyph_error = run.error;
+        nominal_glyph_run_free(&run);
+        return artifact;
+    }
+    artifact.advance = run.total_advance;
+    artifact.scalar_count = validation.scalar_count;
+    artifact.glyph_count = run.glyphs.len;
+    artifact.origin_x = text_aligned_origin(spec, artifact.advance);
+    let line_offset: i64 = (spec.bounds.height - artifact.line_height) / 2;
+    artifact.baseline = spec.bounds.y + line_offset +
+        artifact.line_gap / 2 + artifact.ascender;
+    let overflows: i32 = (artifact.advance > spec.bounds.width ||
+        artifact.line_height > spec.bounds.height) as i32;
+    artifact.clipped = overflows;
+    if (overflows != 0 && spec.overflow == TextOverflowPolicy.reject) {
+        artifact.error = TextError.overflow;
+        nominal_glyph_run_free(&run);
+        return artifact;
+    }
+    if (path_fixed_valid(artifact.origin_x) == 0 ||
+        path_fixed_valid(artifact.baseline) == 0) {
+        artifact.error = TextError.invalid_spec;
+        nominal_glyph_run_free(&run);
+        return artifact;
+    }
+
+    let glyph_index: i32 = 0;
+    while (glyph_index < run.glyphs.len) {
+        run.glyphs.data[glyph_index].origin_x =
+            run.glyphs.data[glyph_index].origin_x + artifact.origin_x;
+        run.glyphs.data[glyph_index].origin_y = artifact.baseline;
+        glyph_index = glyph_index + 1;
+    }
+    let run_path: GlyphRunPathResult = nominal_glyph_run_path(face, run);
+    if (run_path.error != GlyphRunError.none) {
+        artifact.error = TextError.glyph_run_error;
+        artifact.glyph_error = run_path.error;
+        glyph_run_path_result_free(&run_path);
+        nominal_glyph_run_free(&run);
+        return artifact;
+    }
+    artifact.path_count = 1;
+    artifact.path_command_count = run_path.path.commands.len;
+    let payload: PathEncodeResult = path_encode(run_path.path);
+    if (payload.error != PathError.none) {
+        artifact.error = TextError.path_error;
+        artifact.path_error = payload.error;
+        path_encode_free(&payload);
+        glyph_run_path_result_free(&run_path);
+        nominal_glyph_run_free(&run);
+        return artifact;
+    }
+    let resource: CanvasResourceSpec = canvas_resource_spec(
+        text_local_path_resource_id(), RenderResourceKind.path,
+        payload.bytes.data[0..payload.bytes.len], path_resource_format_tag());
+    let canvas_resource_error: CanvasError = canvas_add_resource(
+        &artifact.canvas, resource);
+    if (canvas_resource_error != CanvasError.none) {
+        artifact.error = TextError.canvas_error;
+        artifact.canvas_error = canvas_resource_error;
+        path_encode_free(&payload);
+        glyph_run_path_result_free(&run_path);
+        nominal_glyph_run_free(&run);
+        return artifact;
+    }
+    let draw: DisplayOp = canvas_resource_op(
+        artifact.canvas, DisplayOpKind.draw_path,
+        text_local_path_resource_id());
+    draw.paint = semantic_color_paint(spec.color_token);
+    let canvas_draw_error: CanvasError = canvas_push(&artifact.canvas, draw);
+    if (canvas_draw_error != CanvasError.none) {
+        artifact.error = TextError.canvas_error;
+        artifact.canvas_error = canvas_draw_error;
+        path_encode_free(&payload);
+        glyph_run_path_result_free(&run_path);
+        nominal_glyph_run_free(&run);
+        return artifact;
+    }
+    let canvas_seal_error: CanvasError = canvas_seal(&artifact.canvas);
+    if (canvas_seal_error != CanvasError.none) {
+        artifact.error = TextError.canvas_error;
+        artifact.canvas_error = canvas_seal_error;
+        path_encode_free(&payload);
+        glyph_run_path_result_free(&run_path);
+        nominal_glyph_run_free(&run);
+        return artifact;
+    }
+
+    free[u8](&artifact.text);
+    artifact.text = text_copy_bytes(spec.text);
+    artifact.type_token_id = semantic_type_name(spec.type_token);
+    artifact.color_token_id = semantic_color(spec.color_token).id;
+    artifact.resource_id = canvas_resource_id(
+        artifact.canvas.key, text_local_path_resource_id());
+    artifact.evidence_hash = text_artifact_hash(artifact);
+    path_encode_free(&payload);
+    glyph_run_path_result_free(&run_path);
+    nominal_glyph_run_free(&run);
+    return artifact;
+}
+
+fn text_artifact_valid(artifact: *TextArtifact) i32 {
+    if (artifact.*.error != TextError.none || artifact.*.evidence_hash == 0 ||
+        artifact.*.evidence_hash != text_artifact_hash(artifact.*) ||
+        artifact.*.text.len <= 0 || artifact.*.glyph_count <= 0 ||
+        artifact.*.path_count != 1 || artifact.*.path_command_count <= 0 ||
+        artifact.*.resource_id <= 0 ||
+        artifact.*.canvas.display.ops.len != 1 ||
+        artifact.*.canvas.display.resources.resources.len != 1 ||
+        artifact.*.canvas.has_clip != 1 ||
+        artifact.*.canvas.clip.x != artifact.*.bounds.x ||
+        artifact.*.canvas.clip.y != artifact.*.bounds.y ||
+        artifact.*.canvas.clip.width != artifact.*.bounds.width ||
+        artifact.*.canvas.clip.height != artifact.*.bounds.height ||
+        canvas_verify(&artifact.*.canvas) != CanvasError.none) { return 0; }
+    let op: DisplayOp = artifact.*.canvas.display.ops.data[0];
+    let resource: RenderResource =
+        artifact.*.canvas.display.resources.resources.data[0];
+    return (op.kind == DisplayOpKind.draw_path &&
+        op.resource_id == artifact.*.resource_id &&
+        resource.id == artifact.*.resource_id &&
+        resource.kind == RenderResourceKind.path &&
+        resource.format_tag == path_resource_format_tag()) as i32;
+}
+
+fn text_semantic_spec(artifact: TextArtifact) SemanticsSpec {
+    let spec: SemanticsSpec = semantics_spec(
+        artifact.canvas.key, artifact.semantic_parent,
+        SemanticRole.text, artifact.text.data[0..artifact.text.len]);
+    spec.disabled = artifact.disabled;
+    spec.text_length = artifact.scalar_count;
+    spec.has_bounds = 1;
+    spec.bounds = artifact.bounds;
+    return spec;
+}
+
+fn text_contribution_result() TextContributionResult {
+    return TextContributionResult{
+        .error = TextContributionError.none,
+        .canvas_error = CanvasError.none,
+        .display_error = DisplayError.none,
+        .semantics_error = SemanticsError.none,
+        .display_operations_added = 0,
+        .display_resources_added = 0,
+        .semantic_nodes_added = 0,
+    };
+}
+
+fn text_resource_copy(resource: RenderResource) RenderResource {
+    return RenderResource{
+        .id = resource.id,
+        .kind = resource.kind,
+        .payload = render_resource_payload_copy(
+            resource.payload.data[0..resource.payload.len]),
+        .revision = resource.revision,
+        .format_tag = resource.format_tag,
+        .width = resource.width,
+        .height = resource.height,
+        .color_space = resource.color_space,
+        .content_hash = resource.content_hash,
+    };
+}
+
+fn text_stage_display(source: DisplayList) TextDisplayStage {
+    let staged: DisplayList = display_list_make_with_resource_limits(
+        source.resources.max_resources, source.resources.max_total_bytes,
+        source.resources.max_payload_bytes);
+    let result: TextDisplayStage = TextDisplayStage{
+        .display = staged,
+        .valid = 0,
+    };
+    if (source.sealed != 0 || source.resources.sealed != 0 ||
+        source.last_error != DisplayError.none ||
+        source.resources.last_error != RenderResourceError.none ||
+        render_resource_store_configuration_valid(source.resources) == 0 ||
+        source.stack_depth < 0 || source.layer_depth < 0) { return result; }
+    let total: i64 = 0;
+    let resource_index: i32 = 0;
+    while (resource_index < source.resources.resources.len) {
+        let resource: RenderResource =
+            source.resources.resources.data[resource_index];
+        if (resource.id <= 0 || resource.payload.len <= 0 ||
+            render_resource_hash(resource) != resource.content_hash ||
+            (resource_index > 0 && source.resources.resources.data[
+                resource_index - 1].id >= resource.id)) { return result; }
+        push[RenderResource](&result.display.resources.resources,
+            text_resource_copy(resource));
+        total = total + resource.payload.len as i64;
+        resource_index = resource_index + 1;
+    }
+    if (total != source.resources.total_bytes ||
+        render_resource_store_hash(source.resources) !=
+            source.resources.content_hash) { return result; }
+    result.display.resources.total_bytes = source.resources.total_bytes;
+    result.display.resources.revision = source.resources.revision;
+    result.display.resources.content_hash = source.resources.content_hash;
+    result.display.resources.last_error = RenderResourceError.none;
+    result.display.resources.error_id = 0;
+    result.display.content_hash = display_mix(17,
+        result.display.resources.content_hash);
+    result.display.revision = result.display.resources.revision;
+    let operation_index: i32 = 0;
+    while (operation_index < source.ops.len) {
+        if (display_list_push(&result.display,
+            source.ops.data[operation_index]) != DisplayError.none) {
+            return result;
+        }
+        operation_index = operation_index + 1;
+    }
+    if (result.display.stack_depth != source.stack_depth ||
+        result.display.layer_depth != source.layer_depth ||
+        result.display.revision != source.revision ||
+        result.display.content_hash != source.content_hash ||
+        display_list_calculate_hash(result.display) != source.content_hash) {
+        return result;
+    }
+    result.valid = 1;
+    return result;
+}
+
+fn text_semantics_preflight(artifact: TextArtifact,
+    destination: SemanticsTree) TextContributionError {
+    if (artifact.semantics_mode == TextSemanticsMode.parent_owned) {
+        return TextContributionError.none;
+    }
+    if (semantics_find_index(destination, artifact.canvas.key) >= 0) {
+        return TextContributionError.duplicate_semantic_id;
+    }
+    if (node_key_equal(artifact.semantic_parent, semantic_root_key()) == 0 &&
+        semantics_find_index(destination, artifact.semantic_parent) < 0) {
+        return TextContributionError.missing_semantic_parent;
+    }
+    return TextContributionError.none;
+}
+
+// Atomically contributes the sealed visual resource and, only in own mode,
+// one text semantic node. Parent-owned mode is visual-only so a parent such as
+// PerformanceChart can retain the same semantic ID without duplication.
+fn text_contribute(artifact: *TextArtifact,
+    display: *DisplayList,
+    semantics: *SemanticsTree) TextContributionResult {
+    let result: TextContributionResult = text_contribution_result();
+    if (text_artifact_valid(artifact) == 0) {
+        result.error = TextContributionError.invalid_artifact;
+        return result;
+    }
+    let semantic_preflight: TextContributionError =
+        text_semantics_preflight(artifact.*, semantics.*);
+    if (semantic_preflight != TextContributionError.none) {
+        result.error = semantic_preflight;
+        return result;
+    }
+    let display_preflight: CanvasError = canvas_destination_preflight(
+        artifact.*.canvas, display.*);
+    if (display_preflight != CanvasError.none) {
+        result.error = TextContributionError.invalid_destination;
+        result.canvas_error = display_preflight;
+        return result;
+    }
+    let staged: TextDisplayStage = text_stage_display(display.*);
+    if (staged.valid == 0) {
+        display_list_free(&staged.display);
+        result.error = TextContributionError.invalid_destination;
+        return result;
+    }
+    let operations_before: i32 = staged.display.ops.len;
+    let resources_before: i32 = staged.display.resources.resources.len;
+    // Contribution may update Canvas diagnostic scalars. Keep those writes on
+    // a shallow staged view; owned display/resource storage remains immutable
+    // and the reusable Text artifact is unchanged on either outcome.
+    let staged_canvas: Canvas = artifact.*.canvas;
+    let canvas_error: CanvasError = canvas_contribute_display(
+        &staged_canvas, &staged.display);
+    if (canvas_error != CanvasError.none) {
+        result.error = TextContributionError.display_error;
+        result.canvas_error = canvas_error;
+        result.display_error = staged.display.last_error;
+        display_list_free(&staged.display);
+        return result;
+    }
+
+    let semantics_checkpoint: SemanticsCheckpoint =
+        semantics_tree_checkpoint(semantics.*);
+    if (artifact.*.semantics_mode == TextSemanticsMode.own) {
+        let semantic: SemanticsSpec = text_semantic_spec(artifact.*);
+        let semantics_error: SemanticsError = semantics_add(semantics, semantic);
+        if (semantics_error != SemanticsError.none) {
+            _ = semantics_tree_rollback(semantics, semantics_checkpoint);
+            display_list_free(&staged.display);
+            result.error = TextContributionError.semantics_error;
+            result.semantics_error = semantics_error;
+            return result;
+        }
+    }
+    let previous: DisplayList = display.*;
+    display.* = staged.display;
+    display_list_free(&previous);
+    result.display_operations_added = display.*.ops.len - operations_before;
+    result.display_resources_added =
+        display.*.resources.resources.len - resources_before;
+    result.semantic_nodes_added =
+        semantics.*.nodes.len - semantics_checkpoint.length;
+    return result;
+}
+
+fn text_free(artifact: *TextArtifact) void {
+    free[u8](&artifact.*.text);
+    _ = canvas_free(&artifact.*.canvas);
+    artifact.*.evidence_hash = 0;
+}

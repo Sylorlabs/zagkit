@@ -1,0 +1,64 @@
+@import("../src/text/glyph_run.zag")
+@import("../src/render/cpu_raster.zag")
+@import("support/opentype_fixture.zag")
+
+struct TestState { passed: i32, failed: i32 }
+fn expect(state: *TestState, condition: i32, name: []u8) void {
+    if (condition != 0) {
+        state.*.passed = state.*.passed + 1; _zag_print("ok  "); _zag_println(name);
+    } else {
+        state.*.failed = state.*.failed + 1; _zag_print("FAIL "); _zag_println(name);
+    }
+}
+
+fn main() i32 {
+    let state: TestState = TestState{ .passed = 0, .failed = 0 };
+    let bytes: ArrayList[u8] = fixture_font();
+    let face: OpenTypeFace = opentype_parse(bytes.data[0..bytes.len]);
+    let run: NominalGlyphRun = nominal_glyph_run_ltr(
+        face, "AAA", 10 * unit_scale(), unit_scale(), 8 * unit_scale());
+    expect(&state, run.error == GlyphRunError.none && run.glyphs.len == 3 &&
+        run.glyphs.data[0].glyph_id == 3 && run.glyphs.data[2].cluster_byte_offset == 2,
+        "nominal mapping retains exact glyph IDs and UTF-8 cluster spans");
+    let first_advance: i64 = (530 * 10 * unit_scale()) / 1000;
+    let second_origin: i64 = (1060 * 10 * unit_scale()) / 1000;
+    let complete_advance: i64 = (1590 * 10 * unit_scale()) / 1000;
+    expect(&state, run.glyphs.data[0].origin_x == unit_scale() &&
+        run.glyphs.data[1].origin_x == unit_scale() + first_advance &&
+        run.glyphs.data[2].origin_x == unit_scale() + second_origin &&
+        run.total_advance == complete_advance,
+        "cumulative font-unit positioning conserves exact fixed-point advance");
+    let run_path: GlyphRunPathResult = nominal_glyph_run_path(face, run);
+    expect(&state, run_path.error == GlyphRunError.none &&
+        path_verify(run_path.path) == PathError.none && run_path.path.commands.len == 12,
+        "positioned glyph contours assemble into one canonical retained path");
+    let payload: PathEncodeResult = path_encode(run_path.path);
+    let list: DisplayList = display_list_make();
+    _ = display_list_add_resource(&list, render_resource_spec(
+        77, RenderResourceKind.path, payload.bytes.data[0..payload.bytes.len],
+        path_resource_format_tag()));
+    path_encode_free(&payload);
+    let draw: DisplayOp = display_op(DisplayOpKind.draw_path, node_key(77));
+    draw.resource_id = 77; draw.paint = paint_rgba16(65535, 65535, 65535, 65535);
+    _ = display_list_push(&list, draw); _ = display_list_seal(&list);
+    let raster: CpuRasterResult = cpu_rasterize(list, 24, 10);
+    expect(&state, raster.error == CpuRasterError.none && raster.pixels_touched > 0,
+        "a positioned multi-glyph run executes through the CPU oracle");
+    cpu_raster_free(&raster); display_list_free(&list);
+    glyph_run_path_result_free(&run_path); nominal_glyph_run_free(&run);
+
+    let missing: NominalGlyphRun = nominal_glyph_run_ltr(face, "B", unit_scale(), 0, 0);
+    expect(&state, missing.error == GlyphRunError.missing_glyph && missing.error_index == 0,
+        "missing font coverage requests fallback instead of inventing a glyph");
+    nominal_glyph_run_free(&missing);
+    let malformed: NominalGlyphRun = nominal_glyph_run_ltr(
+        face, "\xC0\xAF", unit_scale(), 0, 0);
+    expect(&state, malformed.error == GlyphRunError.invalid_text,
+        "nominal runs reject malformed UTF-8 before glyph lookup");
+    nominal_glyph_run_free(&malformed);
+    opentype_face_free(&face); free[u8](&bytes);
+    _zag_print("Glyph run contract: pass="); _zag_print_i64(state.passed as i64);
+    _zag_print(" fail="); _zag_print_i64(state.failed as i64); _zag_println("");
+    if (state.failed == 0) { return 0; }
+    return 1;
+}

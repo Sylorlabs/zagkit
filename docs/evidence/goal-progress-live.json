@@ -1,0 +1,22 @@
+{
+  "generated_at": "2026-08-09T13:03:05-07:00",
+  "zagkit_version": "0.1.0-experimental.0",
+  "compiler_commit": "43870455a07bf8e7d4adf38fad807fe3baee4e26",
+  "goal": {
+    "total_items": 100,
+    "completed_items": 26,
+    "blocked_items": 74
+  },
+  "upstream": {
+    "total_entries": 17,
+    "available": 2,
+    "partial": 7,
+    "missing": 8,
+    "missing_ids": ["target-darwin-macho","target-windows-pe-coff","target-ios-arm64","target-android-arm64","abi-objective-c","abi-com","abi-jni","abi-aggregates"]
+  },
+  "platforms": {
+    "required": "linux, macos, windows, ios, android",
+    "capabilities_total": 45,
+    "unavailable": 42
+  }
+}

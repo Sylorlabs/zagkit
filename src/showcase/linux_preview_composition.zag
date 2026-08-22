@@ -1,0 +1,2447 @@
+@import("../automation/talkback.zag")
+@import("../components/navigation_item.zag")
+@import("../components/performance_chart.zag")
+@import("../components/scroll_viewport.zag")
+@import("../components/segmented_control.zag")
+@import("../components/surface.zag")
+@import("../components/text.zag")
+@import("linux_preview_layout.zag")
+@import("linux_preview_model.zag")
+@import("component_state_gallery.zag")
+@import("typography_specimen.zag")
+
+// First-party composition authority for the Linux showcase. One retained
+// artifact owns the caller-visible display list, semantic tree, and hit tree.
+// Every interactive component receives its exact bounds and stable identity
+// from this file; there is no parallel pixel map.
+
+enum LinuxPreviewCompositionError {
+    none,
+    invalid_layout,
+    display_error,
+    semantics_error,
+    hit_error,
+    navigation_error,
+    button_error,
+    segmented_error,
+    surface_error,
+    chart_error,
+    chart_host_error,
+    typography_error,
+    typography_host_error,
+    gallery_error,
+    scroll_viewport_error,
+    text_error,
+    text_contribution_error,
+    seal_error,
+}
+
+struct LinuxPreviewCompositionDiagnostics {
+    display_error: DisplayError,
+    semantics_error: SemanticsError,
+    hit_error: HitTreeError,
+    navigation_error: NavigationItemBuildError,
+    button_error: ButtonBuildError,
+    segmented_error: SegmentedControlBuildError,
+    surface_error: SurfaceBuildError,
+    surface_capacity_error: SurfaceCapacityError,
+    chart_error: PerformanceChartError,
+    chart_host_error: PerformanceChartHostError,
+    typography_error: TypographySpecimenError,
+    typography_host_error: TypographySpecimenHostError,
+    gallery_error: ComponentStateGalleryError,
+    scroll_viewport_error: ScrollViewportBuildError,
+    scroll_viewport_capacity_error: ScrollViewportCapacityError,
+    scroll_viewport_resource_error: RenderResourceError,
+    text_error: TextError,
+    text_contribution_error: TextContributionError,
+}
+
+// Pointer, keyboard, and accessibility focus share one retained interaction
+// truth. NodeKey identity is authoritative; components never infer state from
+// colors or from a second pixel map. The segmented control retains its richer
+// roving model separately because it owns four internal focus targets.
+struct LinuxPreviewInteractionState {
+    hovered: NodeKey,
+    pressed: NodeKey,
+    focused: NodeKey,
+    focus_visible: i32,
+}
+
+fn linux_preview_interaction_state() LinuxPreviewInteractionState {
+    return LinuxPreviewInteractionState{
+        .hovered = hit_root_key(),
+        .pressed = hit_root_key(),
+        .focused = hit_root_key(),
+        .focus_visible = 0,
+    };
+}
+
+fn linux_preview_interaction_state_valid(
+    state: LinuxPreviewInteractionState) i32 {
+    if (state.focus_visible != 0 && state.focus_visible != 1) { return 0; }
+    if (state.focus_visible != 0 &&
+        node_key_equal(state.focused, hit_root_key()) != 0) { return 0; }
+    return 1;
+}
+
+fn linux_preview_interaction_for(state: LinuxPreviewInteractionState,
+    id: NodeKey, enabled: i32, selected: i32) ButtonInteraction {
+    let interaction: ButtonInteraction = button_interaction();
+    interaction.enabled = (enabled != 0) as i32;
+    interaction.selected = (selected != 0) as i32;
+    if (interaction.enabled == 0) { return interaction; }
+    interaction.hovered = node_key_equal(state.hovered, id);
+    interaction.pressed = node_key_equal(state.pressed, id);
+    interaction.focused = node_key_equal(state.focused, id);
+    interaction.focus_visible =
+        (interaction.focused != 0 && state.focus_visible != 0) as i32;
+    return interaction;
+}
+
+// Application state is the only mutable route authority. Composition consumes
+// a value snapshot and publishes the normalized snapshot it actually rendered;
+// callers retain the next snapshot across resize, input, and Talkback reveal.
+struct LinuxPreviewAppState {
+    selected_navigation: i32,
+    overview_segmented: SegmentedControlModel,
+    token_inspector_open: i32,
+    interaction: LinuxPreviewInteractionState,
+    components_scroll: ScrollState,
+    gallery_runtime: ComponentStateGalleryRuntimeState,
+}
+
+struct LinuxPreviewCompositionArtifact {
+    layout: LinuxPreviewLayout,
+    display: DisplayList,
+    semantics: SemanticsTree,
+    hits: HitTree,
+    error: LinuxPreviewCompositionError,
+    diagnostics: LinuxPreviewCompositionDiagnostics,
+    app_state: LinuxPreviewAppState,
+    interaction: LinuxPreviewInteractionState,
+    selected_navigation: i32,
+    components_available: i32,
+    typography_available: i32,
+    segmented_model: SegmentedControlModel,
+    token_inspector_open: i32,
+    navigation_items_composed: i32,
+    inspect_composed: i32,
+    token_inspector_composed: i32,
+    token_inspector_text_instances: i32,
+    segmented_control_composed: i32,
+    segmented_items_composed: i32,
+    surfaces_composed: i32,
+    chart_composed: i32,
+    chart_text_slots_composed: i32,
+    typography_composed: i32,
+    typography_rows_composed: i32,
+    typography_display_operations: i32,
+    typography_display_resources: i32,
+    typography_semantic_nodes: i32,
+    component_gallery_composed: i32,
+    component_gallery_display_operations: i32,
+    component_gallery_display_resources: i32,
+    component_gallery_hit_nodes: i32,
+    component_gallery_semantic_nodes: i32,
+    component_gallery_evidence_hash: i64,
+    component_viewport_composed: i32,
+    component_viewport_display_operations: i32,
+    component_viewport_display_resources: i32,
+    component_viewport_hit_nodes: i32,
+    component_viewport_semantic_nodes: i32,
+    component_viewport_state_hash: i64,
+    component_viewport_evidence_hash: i64,
+    component_viewport: ScrollViewportArtifact,
+    compact_summary_composed: i32,
+    unsupported_size_composed: i32,
+    status_items_composed: i32,
+    text_instances_composed: i32,
+    component_evidence_hash: i64,
+    evidence_hash: i64,
+}
+
+fn linux_preview_composition_root_id() NodeKey { return node_key(20000); }
+fn linux_preview_composition_header_id() NodeKey { return node_key(20050); }
+fn linux_preview_composition_header_title_id() NodeKey { return node_key(20051); }
+fn linux_preview_composition_header_status_id() NodeKey { return node_key(20052); }
+fn linux_preview_composition_navigation_surface_id() NodeKey {
+    return node_key(20099);
+}
+fn linux_preview_composition_navigation_id() NodeKey { return node_key(20100); }
+fn linux_preview_composition_nav_id(index: i32) NodeKey {
+    return node_key(20200 + index as i64);
+}
+fn linux_preview_composition_main_id() NodeKey { return node_key(20300); }
+fn linux_preview_composition_heading_id() NodeKey { return node_key(20301); }
+fn linux_preview_composition_heading_description_id() NodeKey {
+    return node_key(20304);
+}
+fn linux_preview_composition_inspect_id() NodeKey { return node_key(20302); }
+fn linux_preview_composition_segmented_id() NodeKey { return node_key(20303); }
+fn linux_preview_composition_segment_id(index: i32) NodeKey {
+    return node_key(20400 + index as i64);
+}
+fn linux_preview_composition_status_id() NodeKey { return node_key(20500); }
+fn linux_preview_composition_status_surface_id() NodeKey {
+    return node_key(20499);
+}
+fn linux_preview_composition_status_heading_id() NodeKey {
+    return node_key(20497);
+}
+fn linux_preview_composition_status_caption_id() NodeKey {
+    return node_key(20498);
+}
+fn linux_preview_composition_status_item_id(index: i32) NodeKey {
+    return node_key(20600 + index as i64);
+}
+fn linux_preview_composition_summary_id() NodeKey { return node_key(20740); }
+fn linux_preview_composition_summary_surface_id() NodeKey {
+    return node_key(20739);
+}
+fn linux_preview_composition_unsupported_id() NodeKey { return node_key(20750); }
+fn linux_preview_composition_unsupported_surface_id() NodeKey {
+    return node_key(20749);
+}
+fn linux_preview_composition_unsupported_title_id() NodeKey {
+    return node_key(20751);
+}
+fn linux_preview_composition_unsupported_body_id() NodeKey {
+    return node_key(20752);
+}
+fn linux_preview_composition_chart_id() NodeKey { return node_key(27000); }
+fn linux_preview_composition_chart_series_id(index: i32) NodeKey {
+    return node_key(27100 + index as i64);
+}
+fn linux_preview_composition_token_inspector_id() NodeKey {
+    return node_key(20800);
+}
+fn linux_preview_composition_token_inspector_line_id(index: i32) NodeKey {
+    return node_key(20801 + index as i64);
+}
+fn linux_preview_composition_typography_id() NodeKey {
+    return node_key(30000);
+}
+fn linux_preview_composition_components_viewport_id() NodeKey {
+    return node_key(20900);
+}
+fn linux_preview_composition_component_gallery_id() NodeKey {
+    return node_key(40000);
+}
+
+fn linux_preview_composition_component_content_size() Size {
+    return size(1072 * unit_scale(), 1192 * unit_scale());
+}
+
+fn linux_preview_typography_bounds(layout: LinuxPreviewLayout) Rect {
+    if (layout.error != LinuxPreviewLayoutError.none) { return rect(0, 0, 0, 0); }
+    return layout.route_content;
+}
+
+fn linux_preview_token_inspector_available(layout: LinuxPreviewLayout) i32 {
+    return (layout.error == LinuxPreviewLayoutError.none &&
+        layout.status_visible != 0 &&
+        layout.status.width > 0 && layout.status.height > 0) as i32;
+}
+
+fn linux_preview_token_inspector_bounds(layout: LinuxPreviewLayout) Rect {
+    if (linux_preview_token_inspector_available(layout) == 0) {
+        return rect(0, 0, 0, 0);
+    }
+    return layout.status;
+}
+
+fn linux_preview_app_state() LinuxPreviewAppState {
+    return LinuxPreviewAppState{
+        .selected_navigation = linux_preview_initial_navigation(),
+        .overview_segmented = linux_preview_composition_segmented_model(),
+        .token_inspector_open = 0,
+        .interaction = linux_preview_interaction_state(),
+        .components_scroll = scroll_state(
+            size(0, 0), linux_preview_composition_component_content_size()),
+        .gallery_runtime =
+            component_state_gallery_runtime_state_default(),
+    };
+}
+
+fn linux_preview_app_state_valid(state:  LinuxPreviewAppState) i32 {
+    let content: Size = linux_preview_composition_component_content_size();
+    if (state.selected_navigation == 1 &&
+        node_key_equal(state.interaction.focused,
+            hit_root_key()) == 0 &&
+        node_key_equal(state.gallery_runtime.focused,
+            semantic_none_key()) == 0) { return 0; }
+    return (linux_preview_navigation_index_valid(
+            state.selected_navigation) != 0 &&
+        segmented_control_model_valid(state.overview_segmented) != 0 &&
+        state.overview_segmented.segment_count == 4 &&
+        segmented_control_index_enabled(state.overview_segmented, 3) == 0 &&
+        (state.token_inspector_open == 0 ||
+            state.token_inspector_open == 1) &&
+        linux_preview_interaction_state_valid(state.interaction) != 0 &&
+        scroll_state_valid(state.components_scroll) == ScrollError.none &&
+        state.components_scroll.content.width == content.width &&
+        state.components_scroll.content.height == content.height &&
+        component_state_gallery_runtime_state_valid(
+            linux_preview_composition_component_gallery_id(),
+            state.gallery_runtime) != 0) as i32;
+}
+
+fn linux_preview_app_state_hash(state:  LinuxPreviewAppState) i64 {
+    let hash: i64 = linux_preview_composition_mix(17,
+        state.selected_navigation as i64);
+    hash = linux_preview_composition_mix(hash,
+        state.overview_segmented.selected_index as i64);
+    hash = linux_preview_composition_mix(hash,
+        state.overview_segmented.roving_index as i64);
+    hash = linux_preview_composition_mix(hash,
+        state.overview_segmented.has_focus as i64);
+    hash = linux_preview_composition_mix(hash,
+        state.overview_segmented.focus_visible as i64);
+    hash = linux_preview_composition_mix(hash,
+        state.overview_segmented.hovered_index as i64);
+    hash = linux_preview_composition_mix(hash,
+        state.overview_segmented.pressed_index as i64);
+    hash = linux_preview_composition_mix(hash,
+        state.overview_segmented.enabled_mask);
+    hash = linux_preview_composition_mix(hash,
+        state.token_inspector_open as i64);
+    hash = linux_preview_composition_mix(hash, state.interaction.hovered.value);
+    hash = linux_preview_composition_mix(hash, state.interaction.pressed.value);
+    hash = linux_preview_composition_mix(hash, state.interaction.focused.value);
+    hash = linux_preview_composition_mix(hash,
+        state.interaction.focus_visible as i64);
+    hash = linux_preview_composition_mix(hash,
+        scroll_state_hash(state.components_scroll));
+    hash = linux_preview_composition_mix(hash,
+        component_state_gallery_runtime_state_hash(state.gallery_runtime));
+    if (hash == 0) { return 1; }
+    return hash;
+}
+
+fn linux_preview_app_state_reconcile_components(
+    state:  *LinuxPreviewAppState,
+    layout: LinuxPreviewLayout) ScrollMutation {
+    let anchor: ScrollAnchor = scroll_anchor(
+        state.*.components_scroll.offset_x,
+        state.*.components_scroll.offset_y, 0, 0);
+    return scroll_reconcile(&state.*.components_scroll,
+        size(layout.route_content.width, layout.route_content.height),
+        linux_preview_composition_component_content_size(), anchor);
+}
+
+fn linux_preview_composition_components_viewport_spec(
+    layout: LinuxPreviewLayout,
+    interaction: LinuxPreviewInteractionState) ScrollViewportSpec {
+    let id: NodeKey = linux_preview_composition_components_viewport_id();
+    let spec: ScrollViewportSpec = scroll_viewport_spec(id,
+        linux_preview_composition_main_id(),
+        linux_preview_composition_main_id(), layout.route_content,
+        "Component gallery viewport");
+    spec.description =
+        "Scrollable canonical component tiers and interaction states";
+    spec.value = "Horizontal and vertical gallery position";
+    spec.axis = ScrollViewportAxis.both;
+    spec.density = FlexDensity.standard;
+    spec.focus_order = 7;
+    spec.content_focus_order_offset = 100;
+    spec.z_order = 50;
+    spec.focused = node_key_equal(interaction.focused, id);
+    spec.focus_visible = (spec.focused != 0 &&
+        interaction.focus_visible != 0) as i32;
+    return spec;
+}
+
+fn linux_preview_app_state_scroll_components(
+    state:  *LinuxPreviewAppState,
+    delta_x: i64, delta_y: i64) ScrollViewportTransition {
+    return scroll_viewport_apply_delta(
+        &state.*.components_scroll, ScrollViewportAxis.both,
+        LayoutDirection.ltr,
+        (state.*.selected_navigation == 1) as i32,
+        ScrollViewportInputKind.semantic,
+        scroll_viewport_command_for_delta(ScrollViewportAxis.both,
+            delta_x, delta_y),
+        delta_x, delta_y);
+}
+
+fn linux_preview_app_state_reveal_component(
+    state:  *LinuxPreviewAppState,
+    artifact:  *LinuxPreviewCompositionArtifact,
+    id: NodeKey) ScrollViewportTargetReveal {
+    return scroll_viewport_reveal_hosted_semantic_id(
+        &state.*.components_scroll, ScrollViewportAxis.both,
+        LayoutDirection.ltr,
+        (artifact.*.selected_navigation == 1 &&
+            artifact.*.component_viewport_composed != 0) as i32,
+        &artifact.*.semantics, artifact.*.component_viewport.geometry,
+        linux_preview_composition_components_viewport_id(), id);
+}
+
+fn linux_preview_composition_typography_fits(
+    layout: LinuxPreviewLayout) i32 {
+    let bounds: Rect = linux_preview_typography_bounds(layout);
+    return (layout.error == LinuxPreviewLayoutError.none &&
+        layout.mode == LinuxPreviewLayoutMode.expanded &&
+        bounds.width >= typography_specimen_structural_minimum_width(
+            FlexDensity.standard) &&
+        bounds.height >= typography_specimen_required_height(
+            unit_scale(), FlexDensity.standard)) as i32;
+}
+
+fn linux_preview_composition_navigation_enabled(index: i32,
+    components_available: i32, typography_available: i32) i32 {
+    return (index == linux_preview_initial_navigation() ||
+        (index == 1 && components_available != 0) ||
+        (index == 3 && typography_available != 0)) as i32;
+}
+
+fn linux_preview_composition_navigation_normalize(index: i32,
+    components_available: i32, typography_available: i32) i32 {
+    if (linux_preview_navigation_index_valid(index) != 0 &&
+        linux_preview_composition_navigation_enabled(
+            index, components_available,
+            typography_available) != 0) { return index; }
+    return linux_preview_initial_navigation();
+}
+
+fn linux_preview_composition_navigation_value(index: i32,
+    components_available: i32, typography_available: i32) []u8 {
+    if (linux_preview_composition_navigation_enabled(
+        index, components_available,
+        typography_available) != 0) { return "Available"; }
+    if (index == 1) {
+        return "Requires valid layout, font, gallery, and viewport host";
+    }
+    if (index == 3) { return "Requires expanded layout and three font weights"; }
+    return linux_preview_navigation_value(index);
+}
+
+fn linux_preview_composition_general_target_available(
+    layout: LinuxPreviewLayout, id: NodeKey,
+    selected_navigation: i32, components_available: i32,
+    typography_available: i32) i32 {
+    if (node_key_equal(id, hit_root_key()) != 0) { return 1; }
+    let index: i32 = 0;
+    while (index < linux_preview_navigation_count()) {
+        if (node_key_equal(id,
+                linux_preview_composition_nav_id(index)) != 0) {
+            return linux_preview_composition_navigation_enabled(
+                index, components_available, typography_available);
+        }
+        index = index + 1;
+    }
+    if (node_key_equal(id,
+            linux_preview_composition_inspect_id()) != 0) {
+        return (selected_navigation == 0 &&
+            linux_preview_token_inspector_available(layout) != 0) as i32;
+    }
+    if (node_key_equal(id,
+            linux_preview_composition_components_viewport_id()) != 0) {
+        return (selected_navigation == 1 &&
+            components_available != 0) as i32;
+    }
+    return 0;
+}
+
+fn linux_preview_composition_diagnostics()
+    LinuxPreviewCompositionDiagnostics {
+    return LinuxPreviewCompositionDiagnostics{
+        .display_error = DisplayError.none,
+        .semantics_error = SemanticsError.none,
+        .hit_error = HitTreeError.none,
+        .navigation_error = NavigationItemBuildError.none,
+        .button_error = ButtonBuildError.none,
+        .segmented_error = SegmentedControlBuildError.none,
+        .surface_error = SurfaceBuildError.none,
+        .surface_capacity_error = SurfaceCapacityError.none,
+        .chart_error = PerformanceChartError.none,
+        .chart_host_error = PerformanceChartHostError.none,
+        .typography_error = TypographySpecimenError.none,
+        .typography_host_error = TypographySpecimenHostError.none,
+        .gallery_error = ComponentStateGalleryError.none,
+        .scroll_viewport_error = ScrollViewportBuildError.none,
+        .scroll_viewport_capacity_error =
+            ScrollViewportCapacityError.none,
+        .scroll_viewport_resource_error = RenderResourceError.none,
+        .text_error = TextError.none,
+        .text_contribution_error = TextContributionError.none,
+    };
+}
+
+fn linux_preview_composition_empty(layout: LinuxPreviewLayout,
+    state: LinuxPreviewAppState, components_available: i32,
+    typography_fonts_available: i32)
+    LinuxPreviewCompositionArtifact {
+    let normalized_state: LinuxPreviewAppState = state;
+    let normalized_model: SegmentedControlModel =
+        normalized_state.overview_segmented;
+    if (segmented_control_model_valid(normalized_model) == 0 ||
+        normalized_model.segment_count != 4 ||
+        segmented_control_index_enabled(normalized_model, 3) != 0) {
+        normalized_model = linux_preview_composition_segmented_model_for(0);
+    }
+    let normalized_inspector: i32 =
+        (normalized_state.token_inspector_open != 0 &&
+        normalized_state.selected_navigation == 0 &&
+        linux_preview_token_inspector_available(layout) != 0) as i32;
+    let typography_available: i32 =
+        (typography_fonts_available != 0 &&
+         linux_preview_composition_typography_fits(layout) != 0) as i32;
+    let normalized_navigation: i32 =
+        linux_preview_composition_navigation_normalize(
+            normalized_state.selected_navigation, components_available,
+            typography_available);
+    normalized_state.selected_navigation = normalized_navigation;
+    normalized_state.token_inspector_open = normalized_inspector;
+    normalized_state.overview_segmented = normalized_model;
+    if (normalized_navigation != linux_preview_initial_navigation()) {
+        normalized_model.has_focus = 0;
+        normalized_model.focus_visible = 0;
+        normalized_model.hovered_index = segmented_control_no_index();
+        normalized_model.pressed_index = segmented_control_no_index();
+    }
+    let normalized_interaction: LinuxPreviewInteractionState =
+        normalized_state.interaction;
+    if (linux_preview_composition_general_target_available(layout,
+            normalized_interaction.hovered, normalized_navigation,
+            components_available, typography_available) == 0) {
+        normalized_interaction.hovered = hit_root_key();
+    }
+    if (linux_preview_composition_general_target_available(layout,
+            normalized_interaction.pressed, normalized_navigation,
+            components_available, typography_available) == 0) {
+        normalized_interaction.pressed = hit_root_key();
+    }
+    if (linux_preview_composition_general_target_available(layout,
+            normalized_interaction.focused, normalized_navigation,
+            components_available, typography_available) == 0) {
+        normalized_interaction.focused = hit_root_key();
+        normalized_interaction.focus_visible = 0;
+    }
+    normalized_state.interaction = normalized_interaction;
+    normalized_state.overview_segmented = normalized_model;
+    let viewport_spec: ScrollViewportSpec =
+        linux_preview_composition_components_viewport_spec(
+            layout, normalized_interaction);
+    return LinuxPreviewCompositionArtifact{
+        .layout = layout,
+        .display = display_list_make(),
+        .semantics = semantics_tree_make(),
+        .hits = hit_tree_make(),
+        .error = LinuxPreviewCompositionError.none,
+        .diagnostics = linux_preview_composition_diagnostics(),
+        .app_state = normalized_state,
+        .interaction = normalized_interaction,
+        .selected_navigation = normalized_navigation,
+        .components_available = components_available,
+        .typography_available = typography_available,
+        .segmented_model = normalized_model,
+        .token_inspector_open = normalized_inspector,
+        .navigation_items_composed = 0,
+        .inspect_composed = 0,
+        .token_inspector_composed = 0,
+        .token_inspector_text_instances = 0,
+        .segmented_control_composed = 0,
+        .segmented_items_composed = 0,
+        .surfaces_composed = 0,
+        .chart_composed = 0,
+        .chart_text_slots_composed = 0,
+        .typography_composed = 0,
+        .typography_rows_composed = 0,
+        .typography_display_operations = 0,
+        .typography_display_resources = 0,
+        .typography_semantic_nodes = 0,
+        .component_gallery_composed = 0,
+        .component_gallery_display_operations = 0,
+        .component_gallery_display_resources = 0,
+        .component_gallery_hit_nodes = 0,
+        .component_gallery_semantic_nodes = 0,
+        .component_gallery_evidence_hash = 0,
+        .component_viewport_composed = 0,
+        .component_viewport_display_operations = 0,
+        .component_viewport_display_resources = 0,
+        .component_viewport_hit_nodes = 0,
+        .component_viewport_semantic_nodes = 0,
+        .component_viewport_state_hash = 0,
+        .component_viewport_evidence_hash = 0,
+        .component_viewport = scroll_viewport_empty_artifact(
+            viewport_spec, normalized_state.components_scroll),
+        .compact_summary_composed = 0,
+        .unsupported_size_composed = 0,
+        .status_items_composed = 0,
+        .text_instances_composed = 0,
+        .component_evidence_hash = 17,
+        .evidence_hash = 0,
+    };
+}
+
+fn linux_preview_composition_mix(hash: i64, value: i64) i64 {
+    return (hash * 1099511628211) ^ value;
+}
+
+fn linux_preview_composition_hit_hash(tree: HitTree) i64 {
+    let hash: i64 = linux_preview_composition_mix(17, tree.revision);
+    hash = linux_preview_composition_mix(hash, tree.nodes.len as i64);
+    let index: i32 = 0;
+    while (index < tree.nodes.len) {
+        let node: HitNode = tree.nodes.data[index];
+        hash = linux_preview_composition_mix(hash, node.id.value);
+        hash = linux_preview_composition_mix(hash, node.id.generation);
+        hash = linux_preview_composition_mix(hash, node.parent.value);
+        hash = linux_preview_composition_mix(hash, node.parent.generation);
+        hash = linux_preview_composition_mix(hash, node.bounds.x);
+        hash = linux_preview_composition_mix(hash, node.bounds.y);
+        hash = linux_preview_composition_mix(hash, node.bounds.width);
+        hash = linux_preview_composition_mix(hash, node.bounds.height);
+        hash = linux_preview_composition_mix(hash, node.clip.x);
+        hash = linux_preview_composition_mix(hash, node.clip.y);
+        hash = linux_preview_composition_mix(hash, node.clip.width);
+        hash = linux_preview_composition_mix(hash, node.clip.height);
+        hash = linux_preview_composition_mix(hash, node.has_clip as i64);
+        hash = linux_preview_composition_mix(hash, node.z_order);
+        hash = linux_preview_composition_mix(hash, node.enabled as i64);
+        hash = linux_preview_composition_mix(hash, node.focusable as i64);
+        index = index + 1;
+    }
+    return hash;
+}
+
+fn linux_preview_composition_hash(
+    artifact: LinuxPreviewCompositionArtifact) i64 {
+    let hash: i64 = linux_preview_composition_mix(17,
+        artifact.layout.mode as i64);
+    hash = linux_preview_composition_mix(hash, artifact.layout.error as i64);
+    hash = linux_preview_composition_mix(hash, artifact.layout.viewport.width);
+    hash = linux_preview_composition_mix(hash, artifact.layout.viewport.height);
+    hash = linux_preview_composition_mix(hash, artifact.layout.navigation.x);
+    hash = linux_preview_composition_mix(hash, artifact.layout.navigation.y);
+    hash = linux_preview_composition_mix(hash, artifact.layout.navigation.width);
+    hash = linux_preview_composition_mix(hash, artifact.layout.navigation.height);
+    hash = linux_preview_composition_mix(hash, artifact.layout.main.x);
+    hash = linux_preview_composition_mix(hash, artifact.layout.main.y);
+    hash = linux_preview_composition_mix(hash, artifact.layout.main.width);
+    hash = linux_preview_composition_mix(hash, artifact.layout.main.height);
+    hash = linux_preview_composition_mix(hash,
+        artifact.layout.route_content.x);
+    hash = linux_preview_composition_mix(hash,
+        artifact.layout.route_content.y);
+    hash = linux_preview_composition_mix(hash,
+        artifact.layout.route_content.width);
+    hash = linux_preview_composition_mix(hash,
+        artifact.layout.route_content.height);
+    hash = linux_preview_composition_mix(hash, artifact.layout.status_visible as i64);
+    hash = linux_preview_composition_mix(hash,
+        artifact.layout.status_heading.y);
+    hash = linux_preview_composition_mix(hash,
+        artifact.layout.status_heading.height);
+    hash = linux_preview_composition_mix(hash,
+        artifact.layout.status_list.y);
+    hash = linux_preview_composition_mix(hash,
+        artifact.layout.status_list.height);
+    hash = linux_preview_composition_mix(hash, artifact.layout.chart_visible as i64);
+    hash = linux_preview_composition_mix(hash, artifact.selected_navigation as i64);
+    hash = linux_preview_composition_mix(hash,
+        artifact.components_available as i64);
+    hash = linux_preview_composition_mix(hash,
+        artifact.typography_available as i64);
+    hash = linux_preview_composition_mix(hash,
+        artifact.interaction.hovered.value);
+    hash = linux_preview_composition_mix(hash,
+        artifact.interaction.hovered.generation);
+    hash = linux_preview_composition_mix(hash,
+        artifact.interaction.pressed.value);
+    hash = linux_preview_composition_mix(hash,
+        artifact.interaction.pressed.generation);
+    hash = linux_preview_composition_mix(hash,
+        artifact.interaction.focused.value);
+    hash = linux_preview_composition_mix(hash,
+        artifact.interaction.focused.generation);
+    hash = linux_preview_composition_mix(hash,
+        artifact.interaction.focus_visible as i64);
+    hash = linux_preview_composition_mix(hash,
+        artifact.segmented_model.segment_count as i64);
+    hash = linux_preview_composition_mix(hash,
+        artifact.segmented_model.selected_index as i64);
+    hash = linux_preview_composition_mix(hash,
+        artifact.segmented_model.roving_index as i64);
+    hash = linux_preview_composition_mix(hash,
+        artifact.segmented_model.has_focus as i64);
+    hash = linux_preview_composition_mix(hash,
+        artifact.segmented_model.focus_visible as i64);
+    hash = linux_preview_composition_mix(hash,
+        artifact.segmented_model.hovered_index as i64);
+    hash = linux_preview_composition_mix(hash,
+        artifact.segmented_model.pressed_index as i64);
+    hash = linux_preview_composition_mix(hash,
+        artifact.segmented_model.enabled_mask);
+    hash = linux_preview_composition_mix(hash,
+        artifact.token_inspector_open as i64);
+    hash = linux_preview_composition_mix(hash,
+        artifact.navigation_items_composed as i64);
+    hash = linux_preview_composition_mix(hash, artifact.inspect_composed as i64);
+    hash = linux_preview_composition_mix(hash,
+        artifact.token_inspector_composed as i64);
+    hash = linux_preview_composition_mix(hash,
+        artifact.token_inspector_text_instances as i64);
+    hash = linux_preview_composition_mix(hash,
+        artifact.segmented_control_composed as i64);
+    hash = linux_preview_composition_mix(hash,
+        artifact.segmented_items_composed as i64);
+    hash = linux_preview_composition_mix(hash,
+        artifact.surfaces_composed as i64);
+    hash = linux_preview_composition_mix(hash, artifact.chart_composed as i64);
+    hash = linux_preview_composition_mix(hash,
+        artifact.chart_text_slots_composed as i64);
+    hash = linux_preview_composition_mix(hash,
+        artifact.typography_composed as i64);
+    hash = linux_preview_composition_mix(hash,
+        artifact.typography_rows_composed as i64);
+    hash = linux_preview_composition_mix(hash,
+        artifact.typography_display_operations as i64);
+    hash = linux_preview_composition_mix(hash,
+        artifact.typography_display_resources as i64);
+    hash = linux_preview_composition_mix(hash,
+        artifact.typography_semantic_nodes as i64);
+    hash = linux_preview_composition_mix(hash,
+        artifact.component_gallery_composed as i64);
+    hash = linux_preview_composition_mix(hash,
+        artifact.component_gallery_display_operations as i64);
+    hash = linux_preview_composition_mix(hash,
+        artifact.component_gallery_display_resources as i64);
+    hash = linux_preview_composition_mix(hash,
+        artifact.component_gallery_hit_nodes as i64);
+    hash = linux_preview_composition_mix(hash,
+        artifact.component_gallery_semantic_nodes as i64);
+    hash = linux_preview_composition_mix(hash,
+        artifact.component_gallery_evidence_hash);
+    hash = linux_preview_composition_mix(hash,
+        artifact.component_viewport_composed as i64);
+    hash = linux_preview_composition_mix(hash,
+        artifact.component_viewport_display_operations as i64);
+    hash = linux_preview_composition_mix(hash,
+        artifact.component_viewport_display_resources as i64);
+    hash = linux_preview_composition_mix(hash,
+        artifact.component_viewport_hit_nodes as i64);
+    hash = linux_preview_composition_mix(hash,
+        artifact.component_viewport_semantic_nodes as i64);
+    hash = linux_preview_composition_mix(hash,
+        artifact.component_viewport_state_hash);
+    hash = linux_preview_composition_mix(hash,
+        artifact.component_viewport_evidence_hash);
+    hash = linux_preview_composition_mix(hash,
+        artifact.compact_summary_composed as i64);
+    hash = linux_preview_composition_mix(hash,
+        artifact.unsupported_size_composed as i64);
+    hash = linux_preview_composition_mix(hash,
+        artifact.status_items_composed as i64);
+    hash = linux_preview_composition_mix(hash,
+        artifact.text_instances_composed as i64);
+    hash = linux_preview_composition_mix(hash, artifact.component_evidence_hash);
+    hash = linux_preview_composition_mix(hash,
+        linux_preview_app_state_hash(artifact.app_state));
+    hash = linux_preview_composition_mix(hash, artifact.display.content_hash);
+    hash = linux_preview_composition_mix(hash,
+        talkback_tree_hash(artifact.semantics));
+    hash = linux_preview_composition_mix(hash,
+        linux_preview_composition_hit_hash(artifact.hits));
+    if (hash == 0) { return 1; }
+    return hash;
+}
+
+fn linux_preview_composition_push_op(
+    artifact:  *LinuxPreviewCompositionArtifact,
+    op: DisplayOp) i32 {
+    let error: DisplayError = display_list_push(&artifact.*.display, op);
+    if (error != DisplayError.none) {
+        artifact.*.error = LinuxPreviewCompositionError.display_error;
+        artifact.*.diagnostics.display_error = error;
+        return 0;
+    }
+    return 1;
+}
+
+fn linux_preview_composition_push_round(
+    artifact:  *LinuxPreviewCompositionArtifact,
+    id: NodeKey, bounds: Rect, radius: i64, paint: Paint) i32 {
+    let op: DisplayOp = display_op(DisplayOpKind.fill_rounded_rect, id);
+    op.bounds = bounds;
+    op.parameter = radius;
+    op.paint = paint;
+    return linux_preview_composition_push_op(artifact, op);
+}
+
+fn linux_preview_composition_surface_group(
+    artifact:  *LinuxPreviewCompositionArtifact,
+    id: NodeKey, parent: NodeKey, bounds: Rect,
+    name:  []u8, description:  []u8,
+    tier: SurfaceTier, z_order: i64) SurfaceBuildResult {
+    let spec: SurfaceSpec = surface_spec(id, parent, bounds, name, tier);
+    spec.description = description;
+    spec.z_order = z_order;
+    let result: SurfaceBuildResult = surface_emit(spec,
+        &artifact.*.display, &artifact.*.hits, &artifact.*.semantics);
+    if (result.error != SurfaceBuildError.none) {
+        artifact.*.error = LinuxPreviewCompositionError.surface_error;
+        artifact.*.diagnostics.surface_error = result.error;
+        artifact.*.diagnostics.surface_capacity_error =
+            result.capacity_error;
+        artifact.*.diagnostics.display_error = result.display_error;
+        artifact.*.diagnostics.hit_error = result.hit_error;
+        artifact.*.diagnostics.semantics_error = result.semantics_error;
+        return result;
+    }
+    artifact.*.component_evidence_hash = linux_preview_composition_mix(
+        artifact.*.component_evidence_hash,
+        result.artifact.evidence_hash);
+    artifact.*.surfaces_composed = artifact.*.surfaces_composed + 1;
+    return result;
+}
+
+fn linux_preview_composition_add_semantic(
+    artifact:  *LinuxPreviewCompositionArtifact,
+    spec: SemanticsSpec) i32 {
+    let error: SemanticsError = semantics_add(&artifact.*.semantics, spec);
+    if (error != SemanticsError.none) {
+        artifact.*.error = LinuxPreviewCompositionError.semantics_error;
+        artifact.*.diagnostics.semantics_error = error;
+        return 0;
+    }
+    return 1;
+}
+
+fn linux_preview_composition_add_hit_parent(
+    artifact:  *LinuxPreviewCompositionArtifact,
+    id: NodeKey, parent: NodeKey, bounds: Rect) i32 {
+    let node: HitNode = hit_node(id, parent, bounds);
+    node.clip = bounds;
+    node.has_clip = 1;
+    node.enabled = 0;
+    let error: HitTreeError = hit_tree_add(&artifact.*.hits, node);
+    if (error != HitTreeError.none) {
+        artifact.*.error = LinuxPreviewCompositionError.hit_error;
+        artifact.*.diagnostics.hit_error = error;
+        return 0;
+    }
+    return 1;
+}
+
+fn linux_preview_composition_add_group(
+    artifact:  *LinuxPreviewCompositionArtifact,
+    id: NodeKey, parent: NodeKey, hit_parent: NodeKey,
+    role: SemanticRole, name: []u8, description: []u8,
+    bounds: Rect, add_hit_parent: i32) i32 {
+    let semantic: SemanticsSpec = semantics_spec(id, parent, role, name);
+    semantic.description = description;
+    semantic.has_bounds = 1;
+    semantic.bounds = bounds;
+    if (linux_preview_composition_add_semantic(artifact, semantic) == 0) {
+        return 0;
+    }
+    if (add_hit_parent != 0) {
+        return linux_preview_composition_add_hit_parent(
+            artifact, id, hit_parent, bounds);
+    }
+    return 1;
+}
+
+fn linux_preview_composition_add_text_visual(
+    artifact:  *LinuxPreviewCompositionArtifact,
+    face: OpenTypeFace, id: NodeKey, semantic_parent: NodeKey,
+    bounds: Rect, text: []u8, type_token: SemanticTypeToken,
+    color_token: SemanticColorToken, alignment: TextAlignment,
+    disabled: i32) i32 {
+    let spec: TextSpec = text_spec(id, semantic_parent, bounds, text,
+        type_token, color_token);
+    spec.alignment = alignment;
+    spec.overflow = TextOverflowPolicy.clip;
+    spec.semantics_mode = TextSemanticsMode.parent_owned;
+    spec.disabled = disabled;
+    let text_artifact: TextArtifact = text_build(face, spec);
+    if (text_artifact.error != TextError.none) {
+        artifact.*.error = LinuxPreviewCompositionError.text_error;
+        artifact.*.diagnostics.text_error = text_artifact.error;
+        text_free(&text_artifact);
+        return 0;
+    }
+    let contribution: TextContributionResult = text_contribute(
+        &text_artifact, &artifact.*.display, &artifact.*.semantics);
+    if (contribution.error != TextContributionError.none) {
+        artifact.*.error = LinuxPreviewCompositionError.text_contribution_error;
+        artifact.*.diagnostics.text_contribution_error = contribution.error;
+        artifact.*.diagnostics.display_error = contribution.display_error;
+        artifact.*.diagnostics.semantics_error = contribution.semantics_error;
+        text_free(&text_artifact);
+        return 0;
+    }
+    artifact.*.component_evidence_hash = linux_preview_composition_mix(
+        artifact.*.component_evidence_hash, text_artifact.evidence_hash);
+    artifact.*.text_instances_composed =
+        artifact.*.text_instances_composed + 1;
+    text_free(&text_artifact);
+    return 1;
+}
+
+fn linux_preview_composition_add_static_text(
+    artifact:  *LinuxPreviewCompositionArtifact,
+    face: OpenTypeFace, id: NodeKey, parent: NodeKey,
+    bounds: Rect, name: []u8, description: []u8, value: []u8,
+    type_token: SemanticTypeToken, color_token: SemanticColorToken,
+    alignment: TextAlignment) i32 {
+    let semantic: SemanticsSpec = semantics_spec(
+        id, parent, SemanticRole.text, name);
+    semantic.description = description;
+    semantic.value = value;
+    semantic.has_bounds = 1;
+    semantic.bounds = bounds;
+    if (linux_preview_composition_add_semantic(artifact, semantic) == 0) {
+        return 0;
+    }
+    return linux_preview_composition_add_text_visual(artifact, face,
+        id, parent, bounds, name, type_token, color_token, alignment, 0);
+}
+
+fn linux_preview_composition_backdrop(
+    artifact:  *LinuxPreviewCompositionArtifact) i32 {
+    // Until the retained gradient operation lands, use enough deterministic
+    // bands that the CPU oracle does not turn the ambient backdrop into four
+    // visibly stepped stripes. The token resolver uses this same 48-sample
+    // fallback in its conformance test.
+    //
+    // Material choice: the backdrop uses SemanticMaterialToken.veil because
+    // semantic_material_band_paint only reads the tint_alpha_start/end
+    // gradient range.  veil has tint_alpha 0→12000, producing visible
+    // per-band variation.  solid has tint_alpha 0→0 (no gradient), which
+    // would make all 48 bands identical and fail the conformance check.
+    // The fill, edge, radius, and elevation tokens of the material are not
+    // consumed by the band painter — only the tint gradient matters here.
+    let band_count: i32 = 48;
+    let band_height: i64 = artifact.*.layout.viewport.height /
+        (band_count as i64);
+    let index: i32 = 0;
+    while (index < band_count) {
+        let y: i64 = band_height * (index as i64);
+        let height: i64 = band_height;
+        if (index == band_count - 1) {
+            height = artifact.*.layout.viewport.height - y;
+        }
+        let op: DisplayOp = display_op(DisplayOpKind.fill_rect,
+            linux_preview_composition_root_id());
+        op.bounds = rect(0, y, artifact.*.layout.viewport.width, height);
+        op.paint = semantic_material_band_paint(
+            SemanticMaterialToken.veil, index, band_count);
+        if (linux_preview_composition_push_op(artifact, op) == 0) { return 0; }
+        index = index + 1;
+    }
+    return 1;
+}
+
+fn linux_preview_composition_header(
+    artifact:  *LinuxPreviewCompositionArtifact,
+    face: OpenTypeFace) i32 {
+    let surface: SurfaceBuildResult =
+        linux_preview_composition_surface_group(artifact,
+        linux_preview_composition_header_id(),
+        linux_preview_composition_root_id(), artifact.*.layout.header,
+        "Showcase header",
+        "Zagkit experimental Linux composition status",
+        SurfaceTier.base, 10);
+    if (surface.error != SurfaceBuildError.none) { return 0; }
+    let title_x: i64 = artifact.*.layout.header.x +
+        artifact.*.layout.panel_padding;
+    let title_right: i64 = artifact.*.layout.header_status.x -
+        artifact.*.layout.content_gap;
+    let title_bounds: Rect = rect(title_x, artifact.*.layout.header.y,
+        title_right - title_x, artifact.*.layout.header.height);
+    if (linux_preview_composition_add_static_text(artifact, face,
+        linux_preview_composition_header_title_id(),
+        linux_preview_composition_header_id(), title_bounds,
+        "Zagkit Studio", "First-party design-system composition", "",
+        SemanticTypeToken.display, SemanticColorToken.text_primary,
+        TextAlignment.start) == 0) { return 0; }
+    return linux_preview_composition_add_static_text(artifact, face,
+        linux_preview_composition_header_status_id(),
+        linux_preview_composition_header_id(),
+        artifact.*.layout.header_status,
+        "Linux preview - experimental",
+        "CPU renderer is the visual oracle", "Experimental",
+        SemanticTypeToken.caption, SemanticColorToken.status_experimental,
+        TextAlignment.center);
+}
+
+fn linux_preview_composition_navigation(
+    artifact:  *LinuxPreviewCompositionArtifact,
+    face: OpenTypeFace) i32 {
+    let surface: SurfaceBuildResult =
+        linux_preview_composition_surface_group(artifact,
+        linux_preview_composition_navigation_surface_id(),
+        linux_preview_composition_root_id(),
+        artifact.*.layout.navigation,
+        "Navigation surface", "Canonical primary navigation container",
+        SurfaceTier.panel, 20);
+    if (surface.error != SurfaceBuildError.none) { return 0; }
+    if (linux_preview_composition_add_group(artifact,
+        linux_preview_composition_navigation_id(),
+        linux_preview_composition_navigation_surface_id(),
+        linux_preview_composition_navigation_surface_id(),
+        SemanticRole.tab_list,
+        "Primary navigation",
+        "Only routes with composed native content are enabled",
+        surface.artifact.content_bounds, 1) == 0) { return 0; }
+    let index: i32 = 0;
+    while (index < linux_preview_navigation_count()) {
+        let id: NodeKey = linux_preview_composition_nav_id(index);
+        let spec: NavigationItemSpec = navigation_item_spec(id,
+            linux_preview_composition_navigation_id(),
+            linux_preview_navigation_item_bounds(artifact.*.layout, index,
+                linux_preview_navigation_count()),
+            linux_preview_navigation_name(index));
+        spec.description = linux_preview_composition_navigation_value(
+            index, artifact.*.components_available,
+            artifact.*.typography_available);
+        spec.z_order = 40 + index as i64;
+        spec.set_size = linux_preview_navigation_count();
+        spec.position_in_set = index + 1;
+        let enabled: i32 = linux_preview_composition_navigation_enabled(
+            index, artifact.*.components_available,
+            artifact.*.typography_available);
+        spec.interaction = linux_preview_interaction_for(
+            artifact.*.interaction, id, enabled,
+            (index == artifact.*.selected_navigation) as i32);
+        if (spec.interaction.enabled != 0) { spec.focus_order = index + 1; }
+        let result: NavigationItemBuildResult = navigation_item_emit(
+            spec, &artifact.*.display, &artifact.*.hits,
+            &artifact.*.semantics);
+        if (result.error != NavigationItemBuildError.none) {
+            artifact.*.error = LinuxPreviewCompositionError.navigation_error;
+            artifact.*.diagnostics.navigation_error = result.error;
+            artifact.*.diagnostics.display_error = result.display_error;
+            artifact.*.diagnostics.hit_error = result.hit_error;
+            artifact.*.diagnostics.semantics_error = result.semantics_error;
+            return 0;
+        }
+        artifact.*.component_evidence_hash = linux_preview_composition_mix(
+            artifact.*.component_evidence_hash,
+            result.artifact.evidence_hash);
+        artifact.*.navigation_items_composed =
+            artifact.*.navigation_items_composed + 1;
+        if (linux_preview_composition_add_text_visual(artifact, face, id,
+            linux_preview_composition_navigation_id(),
+            result.artifact.label_content_bounds,
+            linux_preview_navigation_name(index),
+            result.artifact.label_type_token,
+            result.artifact.label_color_token, TextAlignment.start,
+            (result.artifact.effectively_enabled == 0) as i32) == 0) {
+            return 0;
+        }
+        index = index + 1;
+    }
+    return 1;
+}
+
+fn linux_preview_composition_inspect(
+    artifact:  *LinuxPreviewCompositionArtifact,
+    face: OpenTypeFace) i32 {
+    let available: i32 = linux_preview_token_inspector_available(
+        artifact.*.layout);
+    let label: []u8 = "Inspect tokens";
+    if (available == 0) { label = "Unavailable"; }
+    else if (artifact.*.token_inspector_open != 0) {
+        label = "Close inspector";
+    }
+    let spec: ButtonSpec = button_spec(
+        linux_preview_composition_inspect_id(),
+        linux_preview_composition_main_id(),
+        linux_preview_inspect_bounds(artifact.*.layout), label);
+    spec.description =
+        "Toggle exact semantic token provenance for the selected main surface";
+    spec.focus_order = 0;
+    spec.z_order = 70;
+    spec.variant = ButtonVariant.primary;
+    spec.interaction = linux_preview_interaction_for(
+        artifact.*.interaction, spec.id, available,
+        artifact.*.token_inspector_open);
+    if (available != 0) { spec.focus_order = 7; }
+    let result: ButtonBuildResult = button_emit(spec,
+        &artifact.*.display, &artifact.*.hits, &artifact.*.semantics);
+    if (result.error != ButtonBuildError.none) {
+        artifact.*.error = LinuxPreviewCompositionError.button_error;
+        artifact.*.diagnostics.button_error = result.error;
+        artifact.*.diagnostics.display_error = result.display_error;
+        artifact.*.diagnostics.hit_error = result.hit_error;
+        artifact.*.diagnostics.semantics_error = result.semantics_error;
+        return 0;
+    }
+    artifact.*.component_evidence_hash = linux_preview_composition_mix(
+        artifact.*.component_evidence_hash, result.artifact.evidence_hash);
+    artifact.*.inspect_composed = 1;
+    return linux_preview_composition_add_text_visual(artifact, face,
+        spec.id, spec.parent, result.artifact.content_bounds, spec.label,
+        SemanticTypeToken.label, result.artifact.style.text_token,
+        TextAlignment.center, (available == 0) as i32);
+}
+
+fn linux_preview_composition_segment_name(index: i32) []u8 {
+    if (index == 1) { return "Layout"; }
+    if (index == 2) { return "Motion"; }
+    if (index == 3) { return "Render"; }
+    return "State";
+}
+
+fn linux_preview_composition_segment_description(index: i32) []u8 {
+    if (index == 1) { return "Flex layout and placement evidence"; }
+    if (index == 2) { return "Interruptible motion continuity evidence"; }
+    if (index == 3) { return "Renderer transport evidence is unavailable"; }
+    return "Declarative state dependency evidence";
+}
+
+fn linux_preview_composition_segmented_model_for(
+    selected_segment: i32) SegmentedControlModel {
+    let selected: i32 = selected_segment;
+    if (selected < 0 || selected > 2) { selected = 0; }
+    let model: SegmentedControlModel = segmented_control_model(4, selected);
+    // Resting native UI reports only retained truth. Hover and focus are
+    // supplied by actual X11 events; Render remains explicitly unavailable.
+    model.enabled_mask = model.enabled_mask &
+        (0 - 1 - segmented_control_bit(3));
+    return model;
+}
+
+fn linux_preview_composition_segmented_model() SegmentedControlModel {
+    return linux_preview_composition_segmented_model_for(0);
+}
+
+fn linux_preview_composition_segmented_spec_for(layout: LinuxPreviewLayout,
+    selected_segment: i32)
+    SegmentedControlSpec {
+    let spec: SegmentedControlSpec = segmented_control_spec(
+        linux_preview_composition_segmented_id(),
+        linux_preview_composition_main_id(), layout.segmented_control,
+        "Pipeline stage",
+        linux_preview_composition_segmented_model_for(selected_segment));
+    spec.description =
+        "Select the evidence stage displayed by the performance chart";
+    spec.focus_order_base = 8;
+    spec.z_order = 60;
+    spec.purpose = SegmentedControlPurpose.view_switcher;
+    return spec;
+}
+
+fn linux_preview_composition_segmented_spec(layout: LinuxPreviewLayout)
+    SegmentedControlSpec {
+    return linux_preview_composition_segmented_spec_for(layout, 0);
+}
+
+fn linux_preview_composition_segments(
+    artifact:  *LinuxPreviewCompositionArtifact,
+    face: OpenTypeFace) i32 {
+    if (artifact.*.layout.segmented_control_visible == 0) { return 1; }
+    let options: ArrayList[SegmentedControlOption] =
+        make[SegmentedControlOption](4);
+    let index: i32 = 0;
+    while (index < 4) {
+        push[SegmentedControlOption](&options, SegmentedControlOption{
+            .id = linux_preview_composition_segment_id(index),
+            .label = linux_preview_composition_segment_name(index),
+            .description =
+                linux_preview_composition_segment_description(index),
+        });
+        index = index + 1;
+    }
+    let spec: SegmentedControlSpec =
+        linux_preview_composition_segmented_spec_for(
+            artifact.*.layout,
+            artifact.*.segmented_model.selected_index);
+    spec.model = artifact.*.segmented_model;
+    let result: SegmentedControlBuildResult = segmented_control_emit(
+        spec, &options, &artifact.*.display, &artifact.*.hits,
+        &artifact.*.semantics);
+    if (result.error != SegmentedControlBuildError.none) {
+        artifact.*.error = LinuxPreviewCompositionError.segmented_error;
+        artifact.*.diagnostics.segmented_error = result.error;
+        artifact.*.diagnostics.display_error = result.display_error;
+        artifact.*.diagnostics.hit_error = result.hit_error;
+        artifact.*.diagnostics.semantics_error = result.semantics_error;
+        free[SegmentedControlOption](&options);
+        return 0;
+    }
+    artifact.*.component_evidence_hash = linux_preview_composition_mix(
+        artifact.*.component_evidence_hash, result.artifact.evidence_hash);
+    artifact.*.segmented_control_composed = 1;
+    artifact.*.segmented_items_composed = 4;
+    index = 0;
+    while (index < 4) {
+        let style: SegmentedControlResolvedStyle =
+            segmented_control_style(spec, index);
+        if (linux_preview_composition_add_text_visual(artifact, face,
+            linux_preview_composition_segment_id(index),
+            linux_preview_composition_segmented_id(),
+            segmented_control_content_bounds(spec, index),
+            linux_preview_composition_segment_name(index),
+            result.artifact.label_type_token, style.label_color_token,
+            TextAlignment.center,
+            (segmented_control_index_enabled(spec.model, index) == 0) as i32) == 0) {
+            free[SegmentedControlOption](&options);
+            return 0;
+        }
+        index = index + 1;
+    }
+    free[SegmentedControlOption](&options);
+    return 1;
+}
+
+fn linux_preview_composition_chart_points(y0: i64, y1: i64,
+    y2: i64, y3: i64, t0: []u8, t1: []u8, t2: []u8,
+    t3: []u8) ArrayList[PerformanceChartPoint] {
+    let points: ArrayList[PerformanceChartPoint] =
+        make[PerformanceChartPoint](4);
+    push[PerformanceChartPoint](&points,
+        performance_chart_point(0, y0, "0 s", t0));
+    push[PerformanceChartPoint](&points,
+        performance_chart_point(10, y1, "10 s", t1));
+    push[PerformanceChartPoint](&points,
+        performance_chart_point(20, y2, "20 s", t2));
+    push[PerformanceChartPoint](&points,
+        performance_chart_point(30, y3, "30 s", t3));
+    return points;
+}
+
+fn linux_preview_composition_chart(
+    artifact:  *LinuxPreviewCompositionArtifact,
+    face: OpenTypeFace) i32 {
+    if (artifact.*.layout.chart_visible == 0) { return 1; }
+    let state_points: ArrayList[PerformanceChartPoint] =
+        linux_preview_composition_chart_points(
+            3, 4, 3, 5, "3 ms", "4 ms", "3 ms", "5 ms");
+    let layout_points: ArrayList[PerformanceChartPoint] =
+        linux_preview_composition_chart_points(
+            9, 8, 10, 9, "9 ms", "8 ms", "10 ms", "9 ms");
+    let motion_points: ArrayList[PerformanceChartPoint] =
+        linux_preview_composition_chart_points(
+            6, 7, 5, 6, "6 ms", "7 ms", "5 ms", "6 ms");
+    let series: ArrayList[PerformanceChartSeries] =
+        make[PerformanceChartSeries](3);
+    let x_ticks: ArrayList[[]u8] = make[[]u8](7);
+    push[[]u8](&x_ticks, "0 s"); push[[]u8](&x_ticks, "5 s");
+    push[[]u8](&x_ticks, "10 s"); push[[]u8](&x_ticks, "15 s");
+    push[[]u8](&x_ticks, "20 s"); push[[]u8](&x_ticks, "25 s");
+    push[[]u8](&x_ticks, "30 s");
+    let y_ticks: ArrayList[[]u8] = make[[]u8](7);
+    push[[]u8](&y_ticks, "24 ms"); push[[]u8](&y_ticks, "20 ms");
+    push[[]u8](&y_ticks, "16 ms"); push[[]u8](&y_ticks, "12 ms");
+    push[[]u8](&y_ticks, "8 ms"); push[[]u8](&y_ticks, "4 ms");
+    push[[]u8](&y_ticks, "0 ms");
+
+    let state_series: PerformanceChartSeries = performance_chart_series_role(
+        linux_preview_composition_chart_series_id(0), "State propagation",
+        state_points,
+        PerformanceChartSeriesToken.reference);
+    state_series.description = "Deterministic state dependency fixture";
+    state_series.selected =
+        (artifact.*.segmented_model.selected_index == 0) as i32;
+    push[PerformanceChartSeries](&series, state_series);
+    let layout_series: PerformanceChartSeries = performance_chart_series_role(
+        linux_preview_composition_chart_series_id(1), "Layout and paint",
+        layout_points,
+        PerformanceChartSeriesToken.comparison);
+    layout_series.description = "Deterministic Flex and paint fixture";
+    layout_series.selected =
+        (artifact.*.segmented_model.selected_index == 1) as i32;
+    push[PerformanceChartSeries](&series, layout_series);
+    let motion_series: PerformanceChartSeries = performance_chart_series_role(
+        linux_preview_composition_chart_series_id(2),
+        "Motion scheduler", motion_points,
+        PerformanceChartSeriesToken.diagnostic);
+    motion_series.description = "Deterministic spring scheduling fixture";
+    motion_series.selected =
+        (artifact.*.segmented_model.selected_index == 2) as i32;
+    push[PerformanceChartSeries](&series, motion_series);
+
+    let spec: PerformanceChartSpec = performance_chart_spec(
+        linux_preview_composition_chart_id(), artifact.*.layout.chart,
+        series, x_ticks, y_ticks);
+    spec.title = "Pipeline frame-cost fixture";
+    spec.description =
+        "Deterministic conformance data; not measured benchmark results";
+    spec.x_axis_name = "Elapsed time";
+    spec.x_axis_unit = "seconds";
+    spec.y_axis_name = "Frame time";
+    spec.y_axis_unit = "milliseconds";
+    spec.x_min = 0; spec.x_max = 30;
+    spec.y_min = 0; spec.y_max = 24;
+    spec.x_tick_count = 7; spec.y_tick_count = 7;
+    spec.baseline_value = 8;
+    spec.baseline_name = "Eight millisecond review baseline";
+    spec.deadline_value = 16;
+    spec.deadline_name = "Sixteen millisecond deadline";
+    let chart: PerformanceChartArtifact = performance_chart_build(spec);
+
+    free[PerformanceChartSeries](&series);
+    free[PerformanceChartPoint](&motion_points);
+    free[PerformanceChartPoint](&layout_points);
+    free[PerformanceChartPoint](&state_points);
+    free[[]u8](&y_ticks);
+    free[[]u8](&x_ticks);
+
+    if (chart.error != PerformanceChartError.none ||
+        chart.text_slots.len != 24) {
+        artifact.*.error = LinuxPreviewCompositionError.chart_error;
+        artifact.*.diagnostics.chart_error = chart.error;
+        performance_chart_free(&chart);
+        return 0;
+    }
+    let hosted: PerformanceChartHostResult =
+        performance_chart_contribute_hosted(&chart,
+            performance_chart_host_spec(
+                linux_preview_composition_main_id(),
+                linux_preview_composition_main_id(), 20),
+            &artifact.*.display, &artifact.*.semantics,
+            &artifact.*.hits);
+    if (hosted.error != PerformanceChartHostError.none) {
+        artifact.*.error = LinuxPreviewCompositionError.chart_host_error;
+        artifact.*.diagnostics.chart_host_error = hosted.error;
+        artifact.*.diagnostics.display_error = hosted.display_error;
+        artifact.*.diagnostics.semantics_error = hosted.semantics_error;
+        artifact.*.diagnostics.hit_error = hosted.hit_error;
+        performance_chart_free(&chart);
+        return 0;
+    }
+    artifact.*.chart_composed = 1;
+    artifact.*.component_evidence_hash = linux_preview_composition_mix(
+        artifact.*.component_evidence_hash, chart.evidence_hash);
+    let slot_index: i32 = 0;
+    while (slot_index < chart.text_slots.len) {
+        let slot: PerformanceChartTextSlot = chart.text_slots.data[slot_index];
+        if (linux_preview_composition_add_text_visual(artifact, face,
+            slot.id, chart.canvas.key, slot.bounds,
+            slot.text.data[0..slot.text.len], slot.type_token,
+            slot.color_token, TextAlignment.start, 0) == 0) {
+            performance_chart_free(&chart);
+            return 0;
+        }
+        artifact.*.chart_text_slots_composed =
+            artifact.*.chart_text_slots_composed + 1;
+        slot_index = slot_index + 1;
+    }
+    performance_chart_free(&chart);
+    return 1;
+}
+
+fn linux_preview_composition_compact_summary(
+    artifact:  *LinuxPreviewCompositionArtifact,
+    face: OpenTypeFace) i32 {
+    if (artifact.*.layout.chart_visible != 0) { return 1; }
+    let id: NodeKey = linux_preview_composition_summary_id();
+    let surface: SurfaceBuildResult =
+        linux_preview_composition_surface_group(artifact,
+        linux_preview_composition_summary_surface_id(),
+        linux_preview_composition_main_id(),
+        artifact.*.layout.compact_summary,
+        "Compact performance surface",
+        "Accessible summary used when the chart cannot fit",
+        SurfaceTier.panel, 30);
+    if (surface.error != SurfaceBuildError.none) { return 0; }
+    let summary: SemanticsSpec = semantics_spec(id,
+        linux_preview_composition_summary_surface_id(), SemanticRole.text,
+        "Frame pacing summary");
+    summary.description =
+        "The full chart is unavailable because its accessible minimum size does not fit";
+    let visible_value: []u8 = "State peak 5 ms · deadline 16 ms";
+    summary.value = "Selected fixture peak 5 milliseconds; deadline 16 milliseconds";
+    if (artifact.*.segmented_model.selected_index == 1) {
+        visible_value = "Layout peak 10 ms · deadline 16 ms";
+        summary.value =
+            "Selected fixture peak 10 milliseconds; deadline 16 milliseconds";
+    } else if (artifact.*.segmented_model.selected_index == 2) {
+        visible_value = "Motion peak 7 ms · deadline 16 ms";
+        summary.value =
+            "Selected fixture peak 7 milliseconds; deadline 16 milliseconds";
+    }
+    summary.has_bounds = 1;
+    summary.bounds = artifact.*.layout.compact_summary;
+    if (linux_preview_composition_add_semantic(artifact, summary) == 0) {
+        return 0;
+    }
+    let inset: i64 = artifact.*.layout.panel_padding;
+    let line_height: i64 = flex_spacing(
+        FlexSpacingToken.xxlarge, FlexDensity.standard);
+    let title_bounds: Rect = rect(summary.bounds.x + inset,
+        summary.bounds.y + inset,
+        summary.bounds.width - inset * 2, line_height);
+    let value_bounds: Rect = rect(title_bounds.x,
+        title_bounds.y + line_height + artifact.*.layout.section_gap,
+        title_bounds.width, line_height);
+    if (linux_preview_composition_add_text_visual(artifact, face, id,
+        linux_preview_composition_summary_surface_id(), title_bounds,
+        "Frame chart unavailable at this width", SemanticTypeToken.heading,
+        SemanticColorToken.text_primary, TextAlignment.start, 0) == 0) {
+        return 0;
+    }
+    if (linux_preview_composition_add_text_visual(artifact, face,
+        semantic_generated_key(id, SemanticRole.text, 1), id,
+        value_bounds, visible_value,
+        SemanticTypeToken.body, SemanticColorToken.text_secondary,
+        TextAlignment.start, 0) == 0) { return 0; }
+    artifact.*.compact_summary_composed = 1;
+    return 1;
+}
+
+fn linux_preview_composition_status(
+    artifact:  *LinuxPreviewCompositionArtifact,
+    face: OpenTypeFace) i32 {
+    if (artifact.*.layout.status_visible == 0) { return 1; }
+    let surface: SurfaceBuildResult =
+        linux_preview_composition_surface_group(artifact,
+        linux_preview_composition_status_surface_id(),
+        linux_preview_composition_root_id(), artifact.*.layout.status,
+        "Status surface", "Read-only system evidence container",
+        SurfaceTier.panel, 20);
+    if (surface.error != SurfaceBuildError.none) { return 0; }
+    let heading_height: i64 = flex_spacing(
+        FlexSpacingToken.xlarge, FlexDensity.standard);
+    let caption_top: i64 = heading_height + flex_spacing(
+        FlexSpacingToken.tiny, FlexDensity.standard);
+    if (linux_preview_composition_add_static_text(artifact, face,
+        linux_preview_composition_status_heading_id(),
+        linux_preview_composition_status_surface_id(),
+        rect(artifact.*.layout.status_heading.x,
+            artifact.*.layout.status_heading.y,
+            artifact.*.layout.status_heading.width, heading_height),
+        "System status", "Read-only evidence rail", "",
+        SemanticTypeToken.heading, SemanticColorToken.text_primary,
+        TextAlignment.start) == 0) { return 0; }
+    if (linux_preview_composition_add_static_text(artifact, face,
+        linux_preview_composition_status_caption_id(),
+        linux_preview_composition_status_surface_id(),
+        rect(artifact.*.layout.status_heading.x,
+            artifact.*.layout.status_heading.y + caption_top,
+            artifact.*.layout.status_heading.width,
+            artifact.*.layout.status_heading.height - caption_top),
+        "Read-only evidence", "Contains no navigation actions", "",
+        SemanticTypeToken.caption, SemanticColorToken.text_secondary,
+        TextAlignment.start) == 0) { return 0; }
+    let group: SemanticsSpec = semantics_spec(
+        linux_preview_composition_status_id(),
+        linux_preview_composition_status_surface_id(), SemanticRole.list,
+        "System status");
+    group.description = "Read-only runtime capability and conformance status";
+    group.row_count = 5;
+    group.column_count = 1;
+    group.has_bounds = 1;
+    group.bounds = artifact.*.layout.status_list;
+    if (linux_preview_composition_add_semantic(artifact, group) == 0) {
+        return 0;
+    }
+    let index: i32 = 0;
+    while (index < 5) {
+        let category: ShowcaseCategory = showcase_category_at(index);
+        let id: NodeKey = linux_preview_composition_status_item_id(index);
+        let bounds: Rect = linux_preview_status_item_bounds(
+            artifact.*.layout, index, 5);
+        if (linux_preview_composition_push_round(artifact, id, bounds,
+            semantic_radius(SemanticRadiusToken.card),
+            semantic_color_paint(SemanticColorToken.surface_inset)) == 0) {
+            return 0;
+        }
+        let item: SemanticsSpec = semantics_spec(id,
+            linux_preview_composition_status_id(), SemanticRole.list_item,
+            showcase_category_name(category));
+        item.description = showcase_category_description(category);
+        item.value = showcase_category_value(category);
+        item.row_index = index;
+        item.column_index = 0;
+        item.row_span = 1;
+        item.column_span = 1;
+        item.has_bounds = 1;
+        item.bounds = bounds;
+        if (linux_preview_composition_add_semantic(artifact, item) == 0) {
+            return 0;
+        }
+        // This is a documented category swatch, not an avatar or status dot.
+        // The adjacent visible category name carries the same semantic role;
+        // runtime health remains a separate status-token family.
+        let marker_width: i64 = flex_spacing(
+            FlexSpacingToken.tiny, FlexDensity.standard);
+        let marker_height: i64 = flex_spacing(
+            FlexSpacingToken.xlarge, FlexDensity.standard);
+        let marker_x: i64 = bounds.x +
+            flex_spacing(FlexSpacingToken.large, FlexDensity.standard);
+        let marker_y: i64 = bounds.y +
+            (bounds.height - marker_height) / 2;
+        if (linux_preview_composition_push_round(artifact, id,
+            rect(marker_x, marker_y, marker_width, marker_height),
+            marker_width / 2,
+            semantic_color_paint(showcase_category_color(category))) == 0) {
+            return 0;
+        }
+        let text_x: i64 = marker_x + marker_width +
+            flex_spacing(FlexSpacingToken.small, FlexDensity.standard);
+        let text_width: i64 = bounds.x + bounds.width -
+            flex_spacing(FlexSpacingToken.large, FlexDensity.standard) - text_x;
+        let title_top: i64 = flex_spacing(
+            FlexSpacingToken.small, FlexDensity.standard) +
+            flex_spacing(FlexSpacingToken.micro, FlexDensity.standard);
+        let line_height: i64 = flex_spacing(
+            FlexSpacingToken.xlarge, FlexDensity.standard);
+        let line_gap: i64 = flex_spacing(
+            FlexSpacingToken.tiny, FlexDensity.standard);
+        let title_bounds: Rect = rect(text_x,
+            bounds.y + title_top, text_width, line_height);
+        let value_bounds: Rect = rect(text_x,
+            bounds.y + title_top + line_height + line_gap,
+            text_width, line_height);
+        if (linux_preview_composition_add_text_visual(artifact, face,
+            id, linux_preview_composition_status_id(), title_bounds,
+            showcase_category_name(category), SemanticTypeToken.label,
+            SemanticColorToken.text_primary, TextAlignment.start, 0) == 0) {
+            return 0;
+        }
+        if (linux_preview_composition_add_text_visual(artifact, face,
+            semantic_generated_key(id, SemanticRole.text, 1), id,
+            value_bounds, showcase_category_value(category),
+            SemanticTypeToken.caption, SemanticColorToken.text_secondary,
+            TextAlignment.start, 0) == 0) { return 0; }
+        artifact.*.status_items_composed =
+            artifact.*.status_items_composed + 1;
+        index = index + 1;
+    }
+    return 1;
+}
+
+fn linux_preview_composition_token_inspector_line(index: i32) []u8 {
+    if (index == 1) { return "Selected NodeKey · 20300:0"; }
+    if (index == 2) { return "Component · Surface / raised"; }
+    if (index == 3) { return "Material · material.glass.raised"; }
+    if (index == 4) { return "Color · color.surface.raised"; }
+    if (index == 5) { return "Type · type.title + type.body"; }
+    if (index == 6) { return "Spacing · spacing.xlarge"; }
+    if (index == 7) { return "Shape · radius.card · elevation.raised"; }
+    if (index == 8) { return "Environment · dark · 1.0x · standard density"; }
+    if (index == 9) {
+        return semantic_material(
+            SemanticMaterialToken.glass).cpu_fallback_reason;
+    }
+    return "Token inspector";
+}
+
+fn linux_preview_composition_token_inspector_description(index: i32) []u8 {
+    if (index == 1) { return "Selected retained node identity"; }
+    if (index == 2) { return "Canonical component and hierarchy tier"; }
+    if (index == 3) { return "Resolved semantic material token ID"; }
+    if (index == 4) { return "Resolved semantic fill token ID"; }
+    if (index == 5) { return "Visible semantic type token IDs"; }
+    if (index == 6) { return "Flex content spacing token ID"; }
+    if (index == 7) { return "Resolved radius and elevation token IDs"; }
+    if (index == 8) { return "Current showcase environment inputs"; }
+    if (index == 9) { return "Honest deterministic CPU material fallback"; }
+    return "Exact token provenance for the selected retained node";
+}
+
+fn linux_preview_composition_token_inspector(
+    artifact:  *LinuxPreviewCompositionArtifact,
+    face: OpenTypeFace) i32 {
+    if (artifact.*.token_inspector_open == 0) { return 1; }
+    let surface: SurfaceBuildResult =
+        linux_preview_composition_surface_group(artifact,
+        linux_preview_composition_token_inspector_id(),
+        linux_preview_composition_main_id(),
+        linux_preview_token_inspector_bounds(artifact.*.layout),
+        "Token inspector",
+        "Exact provenance for the selected main Surface",
+        SurfaceTier.overlay, 100);
+    if (surface.error != SurfaceBuildError.none) { return 0; }
+
+    let title_height: i64 = flex_spacing(
+        FlexSpacingToken.xxlarge, FlexDensity.standard);
+    let row_height: i64 = flex_spacing(
+        FlexSpacingToken.xlarge, FlexDensity.standard);
+    let gap: i64 = flex_spacing(
+        FlexSpacingToken.tiny, FlexDensity.standard);
+    let y: i64 = surface.artifact.content_bounds.y;
+    let index: i32 = 0;
+    while (index < 10) {
+        let height: i64 = row_height;
+        let type_token: SemanticTypeToken = SemanticTypeToken.caption;
+        let color_token: SemanticColorToken =
+            SemanticColorToken.text_secondary;
+        if (index == 0) {
+            height = title_height;
+            type_token = SemanticTypeToken.title;
+            color_token = SemanticColorToken.text_primary;
+        } else if (index == 1 || index == 2) {
+            type_token = SemanticTypeToken.label;
+            color_token = SemanticColorToken.text_primary;
+        } else if (index == 9) {
+            color_token = SemanticColorToken.status_experimental;
+        }
+        if (linux_preview_composition_add_static_text(artifact, face,
+            linux_preview_composition_token_inspector_line_id(index),
+            linux_preview_composition_token_inspector_id(),
+            rect(surface.artifact.content_bounds.x, y,
+                surface.artifact.content_bounds.width, height),
+            linux_preview_composition_token_inspector_line(index),
+            linux_preview_composition_token_inspector_description(index),
+            "", type_token, color_token,
+            TextAlignment.start) == 0) { return 0; }
+        artifact.*.token_inspector_text_instances =
+            artifact.*.token_inspector_text_instances + 1;
+        y = y + height + gap;
+        index = index + 1;
+    }
+    artifact.*.token_inspector_composed = 1;
+    return 1;
+}
+
+fn linux_preview_composition_typography(
+    artifact:  *LinuxPreviewCompositionArtifact,
+    light_face:  *OpenTypeFace,
+    regular_face:  *OpenTypeFace,
+    bold_face:  *OpenTypeFace) i32 {
+    if (artifact.*.selected_navigation != 3) { return 1; }
+    if (artifact.*.typography_available == 0) {
+        artifact.*.error = LinuxPreviewCompositionError.typography_error;
+        artifact.*.diagnostics.typography_error =
+            TypographySpecimenError.invalid_spec;
+        return 0;
+    }
+    let spec: TypographySpecimenSpec = typography_specimen_spec(
+        linux_preview_composition_typography_id(),
+        linux_preview_typography_bounds(artifact.*.layout));
+    let specimen: TypographySpecimenArtifact = typography_specimen_build(
+        spec, light_face, regular_face, bold_face);
+    if (typography_specimen_valid(&specimen) == 0) {
+        artifact.*.error = LinuxPreviewCompositionError.typography_error;
+        artifact.*.diagnostics.typography_error = specimen.error;
+        typography_specimen_free(&specimen);
+        return 0;
+    }
+    let hosted: TypographySpecimenHostResult =
+        typography_specimen_contribute_hosted(&specimen,
+            typography_specimen_host_spec(
+                linux_preview_composition_main_id()),
+            &artifact.*.display, &artifact.*.semantics);
+    if (hosted.error != TypographySpecimenHostError.none) {
+        artifact.*.error = LinuxPreviewCompositionError.typography_host_error;
+        artifact.*.diagnostics.typography_host_error = hosted.error;
+        artifact.*.diagnostics.display_error = hosted.display_error;
+        artifact.*.diagnostics.semantics_error = hosted.semantics_error;
+        typography_specimen_free(&specimen);
+        return 0;
+    }
+    artifact.*.typography_composed = 1;
+    artifact.*.typography_rows_composed = specimen.rows.len;
+    artifact.*.typography_display_operations =
+        hosted.display_operations_added;
+    artifact.*.typography_display_resources =
+        hosted.display_resources_added;
+    artifact.*.typography_semantic_nodes = hosted.semantic_nodes_added;
+    artifact.*.component_evidence_hash = linux_preview_composition_mix(
+        artifact.*.component_evidence_hash, specimen.evidence_hash);
+    typography_specimen_free(&specimen);
+    return 1;
+}
+
+fn linux_preview_composition_components_host_available(
+    layout: LinuxPreviewLayout, face:  *OpenTypeFace,
+    state:  LinuxPreviewAppState) i32 {
+    if (layout.error != LinuxPreviewLayoutError.none ||
+        layout.route_content.width <= 0 ||
+        layout.route_content.height <= 0 ||
+        text_font_valid(face.*) == 0 ||
+        scroll_state_valid(state.components_scroll) != ScrollError.none) {
+        return 0;
+    }
+    let content: Size = linux_preview_composition_component_content_size();
+    let gallery_spec: ComponentStateGallerySpec =
+        component_state_gallery_spec(
+            linux_preview_composition_component_gallery_id(),
+            rect(0, 0, content.width, content.height));
+    let gallery: ComponentStateGalleryArtifact =
+        component_state_gallery_build_with_state(
+            gallery_spec, face, state.gallery_runtime);
+    let available: i32 = 0;
+    if (component_state_gallery_valid(&gallery) != 0) {
+        let viewport_spec: ScrollViewportSpec =
+            linux_preview_composition_components_viewport_spec(
+                layout, state.interaction);
+        let geometry: ScrollViewportGeometry = scroll_viewport_geometry(
+            viewport_spec, state.components_scroll);
+        available = (scroll_viewport_spec_valid(viewport_spec) != 0 &&
+            geometry.valid != 0 &&
+            scroll_viewport_content_valid(&gallery.display,
+                &gallery.semantics, &gallery.hits) != 0 &&
+            scroll_viewport_capacity_error(viewport_spec, geometry,
+                &gallery.display, &gallery.semantics,
+                &gallery.hits) == ScrollViewportCapacityError.none) as i32;
+    }
+    component_state_gallery_free(&gallery);
+    return available;
+}
+
+fn linux_preview_composition_components(
+    artifact:  *LinuxPreviewCompositionArtifact,
+    face:  *OpenTypeFace) i32 {
+    if (artifact.*.selected_navigation != 1) { return 1; }
+    if (artifact.*.components_available == 0) {
+        artifact.*.error = LinuxPreviewCompositionError.gallery_error;
+        artifact.*.diagnostics.gallery_error =
+            ComponentStateGalleryError.invalid_spec;
+        return 0;
+    }
+    let content: Size = linux_preview_composition_component_content_size();
+    let gallery_spec: ComponentStateGallerySpec =
+        component_state_gallery_spec(
+            linux_preview_composition_component_gallery_id(),
+            rect(0, 0, content.width, content.height));
+    let gallery: ComponentStateGalleryArtifact =
+        component_state_gallery_build_with_state(gallery_spec, face,
+            artifact.*.app_state.gallery_runtime);
+    if (component_state_gallery_valid(&gallery) == 0) {
+        artifact.*.error = LinuxPreviewCompositionError.gallery_error;
+        artifact.*.diagnostics.gallery_error = gallery.error;
+        artifact.*.diagnostics.display_error = gallery.display_error;
+        artifact.*.diagnostics.hit_error = gallery.hit_error;
+        artifact.*.diagnostics.semantics_error = gallery.semantics_error;
+        component_state_gallery_free(&gallery);
+        return 0;
+    }
+
+    let viewport_spec: ScrollViewportSpec =
+        linux_preview_composition_components_viewport_spec(
+            artifact.*.layout, artifact.*.interaction);
+    let hosted: ScrollViewportBuildResult = scroll_viewport_contribute(
+        viewport_spec, artifact.*.app_state.components_scroll,
+        &gallery.display, &gallery.semantics, &gallery.hits,
+        &artifact.*.display, &artifact.*.semantics, &artifact.*.hits);
+    if (hosted.error != ScrollViewportBuildError.none) {
+        artifact.*.error = LinuxPreviewCompositionError.scroll_viewport_error;
+        artifact.*.diagnostics.scroll_viewport_error = hosted.error;
+        artifact.*.diagnostics.scroll_viewport_capacity_error =
+            hosted.capacity_error;
+        artifact.*.diagnostics.scroll_viewport_resource_error =
+            hosted.resource_error;
+        artifact.*.diagnostics.display_error = hosted.display_error;
+        artifact.*.diagnostics.hit_error = hosted.hit_error;
+        artifact.*.diagnostics.semantics_error = hosted.semantics_error;
+        component_state_gallery_free(&gallery);
+        return 0;
+    }
+
+    artifact.*.component_gallery_composed = 1;
+    artifact.*.component_gallery_display_operations = gallery.display.ops.len;
+    artifact.*.component_gallery_display_resources =
+        gallery.display.resources.resources.len;
+    artifact.*.component_gallery_hit_nodes = gallery.hits.nodes.len;
+    artifact.*.component_gallery_semantic_nodes = gallery.semantics.nodes.len;
+    artifact.*.component_gallery_evidence_hash = gallery.evidence_hash;
+    artifact.*.component_viewport_composed = 1;
+    artifact.*.component_viewport_display_operations =
+        hosted.artifact.display_operations_added;
+    artifact.*.component_viewport_display_resources =
+        hosted.artifact.display_resources_added;
+    artifact.*.component_viewport_hit_nodes =
+        hosted.artifact.hit_node_end - hosted.artifact.hit_node_start;
+    artifact.*.component_viewport_semantic_nodes =
+        hosted.artifact.semantic_node_end - hosted.artifact.semantic_node_start;
+    artifact.*.component_viewport_state_hash = hosted.artifact.state_hash;
+    artifact.*.component_viewport_evidence_hash = hosted.artifact.evidence_hash;
+    artifact.*.component_viewport = hosted.artifact;
+    artifact.*.component_evidence_hash = linux_preview_composition_mix(
+        artifact.*.component_evidence_hash, gallery.evidence_hash);
+    artifact.*.component_evidence_hash = linux_preview_composition_mix(
+        artifact.*.component_evidence_hash, hosted.artifact.evidence_hash);
+    component_state_gallery_free(&gallery);
+    return 1;
+}
+
+fn linux_preview_composition_main(
+    artifact:  *LinuxPreviewCompositionArtifact,
+    light_face:  *OpenTypeFace,
+    regular_face:  *OpenTypeFace,
+    bold_face:  *OpenTypeFace) i32 {
+    let face: OpenTypeFace = regular_face.*;
+    let surface: SurfaceBuildResult =
+        linux_preview_composition_surface_group(artifact,
+        linux_preview_composition_main_id(),
+        linux_preview_composition_root_id(),
+        artifact.*.layout.main,
+        linux_preview_main_heading(artifact.*.selected_navigation),
+        linux_preview_main_description(artifact.*.selected_navigation),
+        SurfaceTier.raised, 30);
+    if (surface.error != SurfaceBuildError.none) { return 0; }
+    let inspect_bounds: Rect = linux_preview_inspect_bounds(artifact.*.layout);
+    let heading_width: i64 = inspect_bounds.x -
+        artifact.*.layout.section_gap - artifact.*.layout.page_heading.x;
+    let heading_bounds: Rect = rect(artifact.*.layout.page_heading.x,
+        artifact.*.layout.page_heading.y, heading_width,
+        artifact.*.layout.page_heading.height);
+    let title_height: i64 = semantic_type_size(SemanticTypeToken.title) +
+        flex_spacing(FlexSpacingToken.tiny, FlexDensity.standard);
+    let title_bounds: Rect = rect(heading_bounds.x, heading_bounds.y,
+        heading_bounds.width, title_height);
+    let description_bounds: Rect = rect(heading_bounds.x,
+        heading_bounds.y + title_height, heading_bounds.width,
+        heading_bounds.height - title_height);
+    if (linux_preview_composition_add_static_text(artifact, face,
+        linux_preview_composition_heading_id(),
+        linux_preview_composition_main_id(), title_bounds,
+        linux_preview_main_heading(artifact.*.selected_navigation),
+        linux_preview_main_description(artifact.*.selected_navigation), "",
+        SemanticTypeToken.title, SemanticColorToken.text_primary,
+        TextAlignment.start) == 0) { return 0; }
+    if (linux_preview_composition_add_static_text(artifact, face,
+        linux_preview_composition_heading_description_id(),
+        linux_preview_composition_main_id(), description_bounds,
+        linux_preview_main_description(artifact.*.selected_navigation),
+        "Current route scope", "",
+        SemanticTypeToken.body, SemanticColorToken.text_secondary,
+        TextAlignment.start) == 0) { return 0; }
+    if (artifact.*.selected_navigation == 1) {
+        return linux_preview_composition_components(artifact, regular_face);
+    }
+    if (artifact.*.selected_navigation == 3) {
+        if (linux_preview_composition_typography(artifact,
+            light_face, regular_face, bold_face) == 0) { return 0; }
+        return 1;
+    }
+    if (artifact.*.selected_navigation != 0) { return 0; }
+    if (linux_preview_composition_inspect(artifact, face) == 0) { return 0; }
+    if (linux_preview_composition_segments(artifact, face) == 0) { return 0; }
+    if (linux_preview_composition_chart(artifact, face) == 0) { return 0; }
+    if (linux_preview_composition_compact_summary(artifact, face) == 0) {
+        return 0;
+    }
+    return linux_preview_composition_token_inspector(artifact, face);
+}
+
+fn linux_preview_composition_can_show_unsupported_size(
+    width: i32, height: i32) i32 {
+    // The X11 shell clamps interactive resize to this transport minimum. A
+    // smaller or impossible surface cannot fit two truthful text lines, so it
+    // remains a hard error instead of publishing clipped accessibility truth.
+    return (width >= 320 && height >= 240 &&
+        width <= 4096 && height <= 2160) as i32;
+}
+
+fn linux_preview_composition_unsupported_size(
+    artifact:  *LinuxPreviewCompositionArtifact,
+    face: OpenTypeFace, width: i32, height: i32) i32 {
+    artifact.*.layout.viewport = rect(0, 0,
+        (width as i64) * unit_scale(), (height as i64) * unit_scale());
+    if (linux_preview_composition_backdrop(artifact) == 0) { return 0; }
+
+    let root: SemanticsSpec = semantics_spec(
+        linux_preview_composition_root_id(), semantic_root_key(),
+        SemanticRole.window, "Zagkit Studio Linux Preview");
+    root.description =
+        "The window is below the supported desktop composition size";
+    root.has_bounds = 1;
+    root.bounds = artifact.*.layout.viewport;
+    if (linux_preview_composition_add_semantic(artifact, root) == 0) {
+        return 0;
+    }
+    if (linux_preview_composition_add_hit_parent(artifact,
+        linux_preview_composition_root_id(), hit_root_key(),
+        artifact.*.layout.viewport) == 0) { return 0; }
+
+    let outer: i64 = flex_spacing(
+        FlexSpacingToken.large, FlexDensity.standard);
+    let panel: Rect = rect(outer, outer,
+        artifact.*.layout.viewport.width - outer * 2,
+        artifact.*.layout.viewport.height - outer * 2);
+    let id: NodeKey = linux_preview_composition_unsupported_id();
+    let surface: SurfaceBuildResult =
+        linux_preview_composition_surface_group(artifact,
+        linux_preview_composition_unsupported_surface_id(),
+        linux_preview_composition_root_id(), panel,
+        "Unsupported viewport surface",
+        "Resize guidance for the desktop showcase",
+        SurfaceTier.raised, 20);
+    if (surface.error != SurfaceBuildError.none) { return 0; }
+    let message: SemanticsSpec = semantics_spec(id,
+        linux_preview_composition_unsupported_surface_id(),
+        SemanticRole.dialog,
+        "Window size unsupported");
+    message.description =
+        "Resize the window to at least 480 by 360 logical pixels";
+    message.value = "Minimum 480 by 360";
+    message.live_region = LiveRegion.polite;
+    message.has_bounds = 1;
+    message.bounds = panel;
+    if (linux_preview_composition_add_semantic(artifact, message) == 0) {
+        return 0;
+    }
+
+    let padding: i64 = flex_spacing(
+        FlexSpacingToken.xlarge, FlexDensity.standard);
+    let title_height: i64 = semantic_type_size(SemanticTypeToken.title) +
+        flex_spacing(FlexSpacingToken.xlarge, FlexDensity.standard);
+    let title: Rect = rect(panel.x + padding, panel.y + padding,
+        panel.width - padding * 2, title_height);
+    let body: Rect = rect(title.x,
+        title.y + title.height +
+            flex_spacing(FlexSpacingToken.small, FlexDensity.standard),
+        title.width,
+        panel.y + panel.height - padding -
+            (title.y + title.height +
+                flex_spacing(FlexSpacingToken.small,
+                    FlexDensity.standard)));
+    if (linux_preview_composition_add_static_text(artifact, face,
+        linux_preview_composition_unsupported_title_id(), id, title,
+        "Resize required", "The desktop showcase needs more space", "",
+        SemanticTypeToken.title, SemanticColorToken.text_primary,
+        TextAlignment.start) == 0) { return 0; }
+    if (linux_preview_composition_add_static_text(artifact, face,
+        linux_preview_composition_unsupported_body_id(), id, body,
+        "Minimum 480 x 360 logical pixels",
+        "No chart or controls are published while the window is too small",
+        "480 x 360", SemanticTypeToken.body,
+        SemanticColorToken.text_secondary,
+        TextAlignment.start) == 0) { return 0; }
+
+    artifact.*.unsupported_size_composed = 1;
+    let sealed: DisplayError = display_list_seal(&artifact.*.display);
+    if (sealed != DisplayError.none) {
+        artifact.*.error = LinuxPreviewCompositionError.seal_error;
+        artifact.*.diagnostics.display_error = sealed;
+        return 0;
+    }
+    return 1;
+}
+
+fn linux_preview_composition_build_internal(width: i32, height: i32,
+    light_face:  *OpenTypeFace,
+    regular_face:  *OpenTypeFace,
+    bold_face:  *OpenTypeFace,
+    typography_fonts_available: i32, state: LinuxPreviewAppState)
+    LinuxPreviewCompositionArtifact {
+    let face: OpenTypeFace = regular_face.*;
+    let layout: LinuxPreviewLayout = linux_preview_layout(width, height);
+    let normalized_state: LinuxPreviewAppState = state;
+    let state_valid: i32 = linux_preview_app_state_valid(state);
+    let components_available: i32 = 0;
+    if (state_valid != 0 &&
+        layout.error == LinuxPreviewLayoutError.none) {
+        let reconciled: ScrollMutation =
+            linux_preview_app_state_reconcile_components(
+                &normalized_state, layout);
+        if (reconciled.error == ScrollError.none) {
+            components_available =
+                linux_preview_composition_components_host_available(
+                    layout, regular_face, normalized_state);
+        }
+    }
+    let artifact: LinuxPreviewCompositionArtifact =
+        linux_preview_composition_empty(
+            layout, normalized_state, components_available,
+            typography_fonts_available);
+    if (state_valid == 0 ||
+        (layout.error == LinuxPreviewLayoutError.none &&
+            scroll_state_valid(
+                normalized_state.components_scroll) != ScrollError.none)) {
+        artifact.error = LinuxPreviewCompositionError.invalid_layout;
+        return artifact;
+    }
+    if (layout.error != LinuxPreviewLayoutError.none) {
+        if (layout.error == LinuxPreviewLayoutError.invalid_viewport &&
+            linux_preview_composition_can_show_unsupported_size(
+                width, height) != 0) {
+            if (linux_preview_composition_unsupported_size(
+                &artifact, face, width, height) != 0) {
+                artifact.evidence_hash =
+                    linux_preview_composition_hash(artifact);
+            }
+            return artifact;
+        }
+        artifact.error = LinuxPreviewCompositionError.invalid_layout;
+        return artifact;
+    }
+    if (linux_preview_composition_backdrop(&artifact) == 0) { return artifact; }
+    let root: SemanticsSpec = semantics_spec(
+        linux_preview_composition_root_id(), semantic_root_key(),
+        SemanticRole.window, "Zagkit Studio Linux Preview");
+    root.description =
+        "Experimental first-party Zagkit component composition";
+    root.has_bounds = 1;
+    root.bounds = layout.viewport;
+    if (linux_preview_composition_add_semantic(&artifact, root) == 0) {
+        return artifact;
+    }
+    if (linux_preview_composition_add_hit_parent(&artifact,
+        linux_preview_composition_root_id(), hit_root_key(),
+        layout.viewport) == 0) { return artifact; }
+    if (linux_preview_composition_header(&artifact, face) == 0) {
+        return artifact;
+    }
+    if (linux_preview_composition_navigation(&artifact, face) == 0) {
+        return artifact;
+    }
+    if (linux_preview_composition_main(&artifact,
+        light_face, regular_face, bold_face) == 0) {
+        return artifact;
+    }
+    if (linux_preview_composition_status(&artifact, face) == 0) {
+        return artifact;
+    }
+    let sealed: DisplayError = display_list_seal(&artifact.display);
+    if (sealed != DisplayError.none) {
+        artifact.error = LinuxPreviewCompositionError.seal_error;
+        artifact.diagnostics.display_error = sealed;
+        return artifact;
+    }
+    artifact.evidence_hash = linux_preview_composition_hash(artifact);
+    return artifact;
+}
+
+fn linux_preview_composition_build_with_fonts_state(
+    width: i32, height: i32,
+    light_face:  *OpenTypeFace,
+    regular_face:  *OpenTypeFace,
+    bold_face:  *OpenTypeFace,
+    selected_navigation: i32, segmented_model: SegmentedControlModel,
+    token_inspector_open: i32) LinuxPreviewCompositionArtifact {
+    let state: LinuxPreviewAppState = linux_preview_app_state();
+    if (linux_preview_navigation_index_valid(selected_navigation) != 0) {
+        state.selected_navigation = selected_navigation;
+    }
+    if (segmented_control_model_valid(segmented_model) != 0 &&
+        segmented_model.segment_count == 4 &&
+        segmented_control_index_enabled(segmented_model, 3) == 0) {
+        state.overview_segmented = segmented_model;
+    }
+    state.token_inspector_open = (token_inspector_open != 0) as i32;
+    return linux_preview_composition_build_internal(width, height,
+        light_face, regular_face, bold_face, 1, state);
+}
+
+fn linux_preview_composition_build_with_fonts_interaction_state(
+    width: i32, height: i32,
+    light_face:  *OpenTypeFace,
+    regular_face:  *OpenTypeFace,
+    bold_face:  *OpenTypeFace,
+    selected_navigation: i32, segmented_model: SegmentedControlModel,
+    token_inspector_open: i32, interaction: LinuxPreviewInteractionState)
+    LinuxPreviewCompositionArtifact {
+    let state: LinuxPreviewAppState = linux_preview_app_state();
+    if (linux_preview_navigation_index_valid(selected_navigation) != 0) {
+        state.selected_navigation = selected_navigation;
+    }
+    if (segmented_control_model_valid(segmented_model) != 0 &&
+        segmented_model.segment_count == 4 &&
+        segmented_control_index_enabled(segmented_model, 3) == 0) {
+        state.overview_segmented = segmented_model;
+    }
+    state.token_inspector_open = (token_inspector_open != 0) as i32;
+    state.interaction = interaction;
+    return linux_preview_composition_build_internal(width, height,
+        light_face, regular_face, bold_face, 1, state);
+}
+
+fn linux_preview_composition_build_with_fonts_app_state(
+    width: i32, height: i32,
+    light_face:  *OpenTypeFace,
+    regular_face:  *OpenTypeFace,
+    bold_face:  *OpenTypeFace,
+    state: LinuxPreviewAppState) LinuxPreviewCompositionArtifact {
+    return linux_preview_composition_build_internal(width, height,
+        light_face, regular_face, bold_face, 1, state);
+}
+
+fn linux_preview_composition_build_with_state(width: i32, height: i32,
+    face: OpenTypeFace, selected_navigation: i32,
+    segmented_model: SegmentedControlModel, token_inspector_open: i32)
+    LinuxPreviewCompositionArtifact {
+    let state: LinuxPreviewAppState = linux_preview_app_state();
+    if (linux_preview_navigation_index_valid(selected_navigation) != 0) {
+        state.selected_navigation = selected_navigation;
+    }
+    if (segmented_control_model_valid(segmented_model) != 0 &&
+        segmented_model.segment_count == 4 &&
+        segmented_control_index_enabled(segmented_model, 3) == 0) {
+        state.overview_segmented = segmented_model;
+    }
+    state.token_inspector_open = (token_inspector_open != 0) as i32;
+    return linux_preview_composition_build_internal(width, height,
+        &face, &face, &face, 0, state);
+}
+
+fn linux_preview_composition_build_with_interaction_state(
+    width: i32, height: i32, face: OpenTypeFace,
+    selected_navigation: i32, segmented_model: SegmentedControlModel,
+    token_inspector_open: i32, interaction: LinuxPreviewInteractionState)
+    LinuxPreviewCompositionArtifact {
+    let state: LinuxPreviewAppState = linux_preview_app_state();
+    if (linux_preview_navigation_index_valid(selected_navigation) != 0) {
+        state.selected_navigation = selected_navigation;
+    }
+    if (segmented_control_model_valid(segmented_model) != 0 &&
+        segmented_model.segment_count == 4 &&
+        segmented_control_index_enabled(segmented_model, 3) == 0) {
+        state.overview_segmented = segmented_model;
+    }
+    state.token_inspector_open = (token_inspector_open != 0) as i32;
+    state.interaction = interaction;
+    return linux_preview_composition_build_internal(width, height,
+        &face, &face, &face, 0, state);
+}
+
+fn linux_preview_composition_build_with_app_state(
+    width: i32, height: i32, face: OpenTypeFace,
+    state: LinuxPreviewAppState) LinuxPreviewCompositionArtifact {
+    return linux_preview_composition_build_internal(width, height,
+        &face, &face, &face, 0, state);
+}
+
+fn linux_preview_composition_build_with_model(width: i32, height: i32,
+    face: OpenTypeFace, selected_navigation: i32,
+    segmented_model: SegmentedControlModel)
+    LinuxPreviewCompositionArtifact {
+    return linux_preview_composition_build_with_state(width, height, face,
+        selected_navigation, segmented_model, 0);
+}
+
+fn linux_preview_composition_build_with_segment(width: i32, height: i32,
+    face: OpenTypeFace, selected_navigation: i32, selected_segment: i32)
+    LinuxPreviewCompositionArtifact {
+    return linux_preview_composition_build_with_model(width, height, face,
+        selected_navigation,
+        linux_preview_composition_segmented_model_for(selected_segment));
+}
+
+fn linux_preview_composition_build(width: i32, height: i32,
+    face: OpenTypeFace, selected_navigation: i32)
+    LinuxPreviewCompositionArtifact {
+    return linux_preview_composition_build_with_segment(
+        width, height, face, selected_navigation, 0);
+}
+
+fn linux_preview_composition_valid(
+    artifact: LinuxPreviewCompositionArtifact) i32 {
+    if (artifact.error != LinuxPreviewCompositionError.none ||
+        linux_preview_app_state_valid(artifact.app_state) == 0 ||
+        linux_preview_interaction_state_valid(artifact.interaction) == 0 ||
+        artifact.selected_navigation !=
+            artifact.app_state.selected_navigation ||
+        artifact.token_inspector_open !=
+            artifact.app_state.token_inspector_open ||
+        component_state_gallery_segmented_model_equal(
+            artifact.segmented_model,
+            artifact.app_state.overview_segmented) == 0 ||
+        node_key_equal(artifact.interaction.hovered,
+            artifact.app_state.interaction.hovered) == 0 ||
+        node_key_equal(artifact.interaction.pressed,
+            artifact.app_state.interaction.pressed) == 0 ||
+        node_key_equal(artifact.interaction.focused,
+            artifact.app_state.interaction.focused) == 0 ||
+        artifact.interaction.focus_visible !=
+            artifact.app_state.interaction.focus_visible ||
+        artifact.evidence_hash == 0 ||
+        artifact.evidence_hash != linux_preview_composition_hash(artifact) ||
+        display_list_verify(&artifact.display) != DisplayError.none ||
+        artifact.semantics.last_error != SemanticsError.none ||
+        artifact.hits.last_error != HitTreeError.none ||
+        semantics_find_index(artifact.semantics,
+            linux_preview_composition_root_id()) < 0 ||
+        hit_tree_find_index(artifact.hits,
+            linux_preview_composition_root_id()) < 0) { return 0; }
+    if (artifact.layout.error != LinuxPreviewLayoutError.none) {
+        return (artifact.layout.error ==
+                LinuxPreviewLayoutError.invalid_viewport &&
+            artifact.unsupported_size_composed == 1 &&
+            artifact.navigation_items_composed == 0 &&
+            artifact.components_available == 0 &&
+            artifact.inspect_composed == 0 &&
+            artifact.token_inspector_open == 0 &&
+            artifact.token_inspector_composed == 0 &&
+            artifact.token_inspector_text_instances == 0 &&
+            artifact.segmented_control_composed == 0 &&
+            artifact.segmented_items_composed == 0 &&
+            artifact.surfaces_composed == 1 &&
+            artifact.chart_composed == 0 &&
+            artifact.chart_text_slots_composed == 0 &&
+            artifact.typography_available == 0 &&
+            artifact.typography_composed == 0 &&
+            artifact.typography_rows_composed == 0 &&
+            artifact.typography_display_operations == 0 &&
+            artifact.typography_display_resources == 0 &&
+            artifact.typography_semantic_nodes == 0 &&
+            artifact.component_gallery_composed == 0 &&
+            artifact.component_gallery_display_operations == 0 &&
+            artifact.component_gallery_display_resources == 0 &&
+            artifact.component_gallery_hit_nodes == 0 &&
+            artifact.component_gallery_semantic_nodes == 0 &&
+            artifact.component_gallery_evidence_hash == 0 &&
+            artifact.component_viewport_composed == 0 &&
+            artifact.component_viewport_display_operations == 0 &&
+            artifact.component_viewport_display_resources == 0 &&
+            artifact.component_viewport_hit_nodes == 0 &&
+            artifact.component_viewport_semantic_nodes == 0 &&
+            artifact.component_viewport_state_hash == 0 &&
+            artifact.component_viewport_evidence_hash == 0 &&
+            artifact.compact_summary_composed == 0 &&
+            artifact.status_items_composed == 0 &&
+            artifact.text_instances_composed == 2 &&
+            semantics_find_index(artifact.semantics,
+                linux_preview_composition_unsupported_id()) >= 0) as i32;
+    }
+    if (artifact.unsupported_size_composed != 0 ||
+        artifact.components_available != 1 ||
+        segmented_control_model_valid(artifact.segmented_model) == 0 ||
+        artifact.segmented_model.segment_count != 4 ||
+        segmented_control_index_enabled(artifact.segmented_model, 3) != 0 ||
+        artifact.navigation_items_composed !=
+            linux_preview_navigation_count()) { return 0; }
+    if (node_key_equal(artifact.interaction.focused,
+            hit_root_key()) == 0) {
+        let semantic_index: i32 = semantics_find_index(
+            artifact.semantics, artifact.interaction.focused);
+        let hit_index: i32 = hit_tree_find_index(
+            artifact.hits, artifact.interaction.focused);
+        if (semantic_index < 0 || hit_index < 0 ||
+            artifact.semantics.nodes.data[semantic_index].focused == 0 ||
+            artifact.semantics.nodes.data[semantic_index].disabled != 0 ||
+            artifact.semantics.nodes.data[semantic_index].focus_order <= 0 ||
+            artifact.hits.nodes.data[hit_index].enabled == 0 ||
+            artifact.hits.nodes.data[hit_index].focusable == 0) {
+            return 0;
+        }
+    }
+    if (artifact.selected_navigation != 0 &&
+        (artifact.inspect_composed != 0 ||
+            artifact.token_inspector_open != 0)) { return 0; }
+    if (artifact.selected_navigation == 0 &&
+        artifact.inspect_composed != 1) { return 0; }
+    if (artifact.token_inspector_open != 0) {
+        if (linux_preview_token_inspector_available(artifact.layout) == 0 ||
+            artifact.token_inspector_composed != 1 ||
+            artifact.token_inspector_text_instances != 10 ||
+            semantics_find_index(artifact.semantics,
+                linux_preview_composition_token_inspector_id()) < 0) {
+            return 0;
+        }
+    } else if (artifact.token_inspector_composed != 0 ||
+        artifact.token_inspector_text_instances != 0 ||
+        semantics_find_index(artifact.semantics,
+            linux_preview_composition_token_inspector_id()) >= 0) {
+        return 0;
+    }
+    let expected_surfaces: i32 = 3;
+    if (artifact.layout.status_visible != 0) {
+        expected_surfaces = expected_surfaces + 1;
+    }
+    if (artifact.selected_navigation == 0 &&
+        artifact.layout.chart_visible == 0) {
+        expected_surfaces = expected_surfaces + 1;
+    }
+    expected_surfaces = expected_surfaces + artifact.token_inspector_open;
+    if (artifact.surfaces_composed != expected_surfaces) { return 0; }
+    if (artifact.selected_navigation != 1 &&
+        (artifact.component_gallery_composed != 0 ||
+            artifact.component_gallery_display_operations != 0 ||
+            artifact.component_gallery_display_resources != 0 ||
+            artifact.component_gallery_hit_nodes != 0 ||
+            artifact.component_gallery_semantic_nodes != 0 ||
+            artifact.component_gallery_evidence_hash != 0 ||
+            artifact.component_viewport_composed != 0 ||
+            artifact.component_viewport_display_operations != 0 ||
+            artifact.component_viewport_display_resources != 0 ||
+            artifact.component_viewport_hit_nodes != 0 ||
+            artifact.component_viewport_semantic_nodes != 0 ||
+            artifact.component_viewport_state_hash != 0 ||
+            artifact.component_viewport_evidence_hash != 0)) { return 0; }
+    if (artifact.selected_navigation == 1) {
+        let expected_viewport_ops: i32 =
+            artifact.component_gallery_display_operations + 4 +
+            artifact.component_viewport.geometry.horizontal_track_visible * 2 +
+            artifact.component_viewport.geometry.vertical_track_visible * 2 +
+            (artifact.component_viewport.focused != 0 &&
+                artifact.component_viewport.focus_ring_visible != 0) as i32;
+        let expected_viewport_semantics: i32 =
+            artifact.component_gallery_semantic_nodes + 1 +
+            artifact.component_viewport.geometry.horizontal_track_visible +
+            artifact.component_viewport.geometry.vertical_track_visible;
+        if (artifact.component_gallery_composed != 1 ||
+            artifact.component_gallery_display_operations !=
+                component_state_gallery_expected_display_operations() ||
+            artifact.component_gallery_display_resources !=
+                component_state_gallery_expected_display_resources() ||
+            artifact.component_gallery_hit_nodes !=
+                component_state_gallery_expected_hit_nodes() ||
+            artifact.component_gallery_semantic_nodes !=
+                component_state_gallery_expected_semantic_nodes() ||
+            artifact.component_gallery_evidence_hash == 0 ||
+            artifact.component_viewport_composed != 1 ||
+            node_key_equal(artifact.component_viewport.id,
+                linux_preview_composition_components_viewport_id()) == 0 ||
+            artifact.component_viewport.geometry.valid == 0 ||
+            artifact.component_viewport.geometry.viewport_bounds.x !=
+                artifact.layout.route_content.x ||
+            artifact.component_viewport.geometry.viewport_bounds.y !=
+                artifact.layout.route_content.y ||
+            artifact.component_viewport.geometry.viewport_bounds.width !=
+                artifact.layout.route_content.width ||
+            artifact.component_viewport.geometry.viewport_bounds.height !=
+                artifact.layout.route_content.height ||
+            artifact.component_viewport_display_operations !=
+                expected_viewport_ops ||
+            artifact.component_viewport_display_resources !=
+                artifact.component_gallery_display_resources ||
+            artifact.component_viewport_hit_nodes !=
+                artifact.component_gallery_hit_nodes + 1 ||
+            artifact.component_viewport_semantic_nodes !=
+                expected_viewport_semantics ||
+            artifact.component_viewport_state_hash !=
+                scroll_state_hash(artifact.app_state.components_scroll) ||
+            artifact.component_viewport_state_hash !=
+                artifact.component_viewport.state_hash ||
+            artifact.component_viewport_evidence_hash == 0 ||
+            artifact.component_viewport_evidence_hash !=
+                artifact.component_viewport.evidence_hash ||
+            artifact.typography_composed != 0 ||
+            artifact.typography_rows_composed != 0 ||
+            artifact.typography_display_operations != 0 ||
+            artifact.typography_display_resources != 0 ||
+            artifact.typography_semantic_nodes != 0 ||
+            artifact.chart_composed != 0 ||
+            artifact.chart_text_slots_composed != 0 ||
+            artifact.segmented_control_composed != 0 ||
+            artifact.segmented_items_composed != 0 ||
+            artifact.compact_summary_composed != 0 ||
+            semantics_find_index(artifact.semantics,
+                linux_preview_composition_components_viewport_id()) < 0 ||
+            semantics_find_index(artifact.semantics,
+                linux_preview_composition_component_gallery_id()) < 0 ||
+            semantics_find_index(artifact.semantics,
+                linux_preview_composition_chart_id()) >= 0 ||
+            semantics_find_index(artifact.semantics,
+                linux_preview_composition_segmented_id()) >= 0 ||
+            semantics_find_index(artifact.semantics,
+                linux_preview_composition_typography_id()) >= 0 ||
+            semantics_find_index(artifact.semantics,
+                linux_preview_composition_inspect_id()) >= 0) { return 0; }
+    } else if (artifact.selected_navigation == 3) {
+        if (artifact.typography_available == 0 ||
+            artifact.layout.mode != LinuxPreviewLayoutMode.expanded ||
+            artifact.typography_composed != 1 ||
+            artifact.typography_rows_composed !=
+                typography_specimen_row_count() ||
+            artifact.typography_display_operations !=
+                typography_specimen_row_count() * 10 ||
+            artifact.typography_display_resources !=
+                typography_specimen_row_count() * 2 ||
+            artifact.typography_semantic_nodes !=
+                1 + typography_specimen_row_count() * 3 ||
+            artifact.chart_composed != 0 ||
+            artifact.chart_text_slots_composed != 0 ||
+            artifact.segmented_control_composed != 0 ||
+            artifact.segmented_items_composed != 0 ||
+            artifact.compact_summary_composed != 0 ||
+            artifact.component_gallery_composed != 0 ||
+            artifact.component_viewport_composed != 0 ||
+            semantics_find_index(artifact.semantics,
+                linux_preview_composition_typography_id()) < 0 ||
+            semantics_find_index(artifact.semantics,
+                linux_preview_composition_components_viewport_id()) >= 0 ||
+            semantics_find_index(artifact.semantics,
+                linux_preview_composition_inspect_id()) >= 0) { return 0; }
+    } else {
+        if (artifact.selected_navigation != 0 ||
+            artifact.typography_composed != 0 ||
+            artifact.typography_rows_composed != 0 ||
+            artifact.typography_display_operations != 0 ||
+            artifact.typography_display_resources != 0 ||
+            artifact.typography_semantic_nodes != 0 ||
+            artifact.component_gallery_composed != 0 ||
+            artifact.component_viewport_composed != 0 ||
+            semantics_find_index(artifact.semantics,
+                linux_preview_composition_components_viewport_id()) >= 0 ||
+            semantics_find_index(artifact.semantics,
+                linux_preview_composition_component_gallery_id()) >= 0 ||
+            semantics_find_index(artifact.semantics,
+                linux_preview_composition_typography_id()) >= 0) { return 0; }
+        if (artifact.layout.chart_visible != 0) {
+            if (artifact.chart_composed != 1 ||
+                artifact.chart_text_slots_composed != 24 ||
+                artifact.segmented_control_composed != 1 ||
+                artifact.segmented_items_composed != 4 ||
+                artifact.compact_summary_composed != 0) { return 0; }
+        } else if (artifact.chart_composed != 0 ||
+            artifact.chart_text_slots_composed != 0 ||
+            artifact.segmented_control_composed != 0 ||
+            artifact.segmented_items_composed != 0 ||
+            artifact.compact_summary_composed != 1) { return 0; }
+    }
+    if (artifact.layout.status_visible != 0) {
+        if (artifact.status_items_composed != 5) { return 0; }
+    } else if (artifact.status_items_composed != 0) { return 0; }
+    let expected_text_instances: i32 = 10;
+    if (artifact.selected_navigation == 0) {
+        expected_text_instances = expected_text_instances + 1;
+        if (artifact.layout.chart_visible != 0) {
+            expected_text_instances = expected_text_instances + 28;
+        } else {
+            expected_text_instances = expected_text_instances + 2;
+        }
+    }
+    if (artifact.layout.status_visible != 0) {
+        expected_text_instances = expected_text_instances + 12;
+    }
+    expected_text_instances = expected_text_instances +
+        artifact.token_inspector_text_instances;
+    if (artifact.text_instances_composed != expected_text_instances) {
+        return 0;
+    }
+    return 1;
+}
+
+fn linux_preview_composition_free(
+    artifact:  *LinuxPreviewCompositionArtifact) void {
+    hit_tree_free(&artifact.*.hits);
+    semantics_tree_free(&artifact.*.semantics);
+    display_list_free(&artifact.*.display);
+    artifact.*.app_state = linux_preview_app_state();
+    artifact.*.interaction = linux_preview_interaction_state();
+    artifact.*.selected_navigation = linux_preview_initial_navigation();
+    artifact.*.components_available = 0;
+    artifact.*.segmented_model = linux_preview_composition_segmented_model();
+    artifact.*.navigation_items_composed = 0;
+    artifact.*.inspect_composed = 0;
+    artifact.*.token_inspector_open = 0;
+    artifact.*.token_inspector_composed = 0;
+    artifact.*.token_inspector_text_instances = 0;
+    artifact.*.segmented_control_composed = 0;
+    artifact.*.segmented_items_composed = 0;
+    artifact.*.surfaces_composed = 0;
+    artifact.*.chart_composed = 0;
+    artifact.*.chart_text_slots_composed = 0;
+    artifact.*.typography_available = 0;
+    artifact.*.typography_composed = 0;
+    artifact.*.typography_rows_composed = 0;
+    artifact.*.typography_display_operations = 0;
+    artifact.*.typography_display_resources = 0;
+    artifact.*.typography_semantic_nodes = 0;
+    artifact.*.component_gallery_composed = 0;
+    artifact.*.component_gallery_display_operations = 0;
+    artifact.*.component_gallery_display_resources = 0;
+    artifact.*.component_gallery_hit_nodes = 0;
+    artifact.*.component_gallery_semantic_nodes = 0;
+    artifact.*.component_gallery_evidence_hash = 0;
+    artifact.*.component_viewport_composed = 0;
+    artifact.*.component_viewport_display_operations = 0;
+    artifact.*.component_viewport_display_resources = 0;
+    artifact.*.component_viewport_hit_nodes = 0;
+    artifact.*.component_viewport_semantic_nodes = 0;
+    artifact.*.component_viewport_state_hash = 0;
+    artifact.*.component_viewport_evidence_hash = 0;
+    let viewport_spec: ScrollViewportSpec =
+        linux_preview_composition_components_viewport_spec(
+            artifact.*.layout, artifact.*.interaction);
+    artifact.*.component_viewport = scroll_viewport_empty_artifact(
+        viewport_spec, artifact.*.app_state.components_scroll);
+    artifact.*.compact_summary_composed = 0;
+    artifact.*.unsupported_size_composed = 0;
+    artifact.*.status_items_composed = 0;
+    artifact.*.text_instances_composed = 0;
+    artifact.*.component_evidence_hash = 0;
+    artifact.*.evidence_hash = 0;
+}

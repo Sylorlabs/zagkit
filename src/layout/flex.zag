@@ -1,0 +1,369 @@
+@import("std:list")
+@import("../core/geometry.zag")
+@import("common.zag")
+@import("measure.zag")
+
+enum FlexAxis { row, column }
+enum MainAlignment { start, center, end, space_between, space_around, space_evenly }
+enum CrossAlignment { start, center, end, stretch, baseline }
+enum FlexError { none, invalid_constraints, invalid_style, invalid_item, arithmetic_overflow }
+enum FlexPriority { lowest, low, normal, high, required }
+
+struct FlexItem {
+    id: i64,
+    basis: i64,
+    grow: i64,
+    shrink: i64,
+    min_main: i64,
+    max_main: i64,
+    cross: i64,
+    baseline: i64,
+}
+
+struct FlexStyle {
+    axis: FlexAxis,
+    direction: LayoutDirection,
+    main_alignment: MainAlignment,
+    cross_alignment: CrossAlignment,
+    gap: i64,
+    padding: Insets,
+}
+
+struct FlexPlacement {
+    id: i64,
+    frame: Rect,
+    baseline: i64,
+}
+
+struct FlexResult {
+    placements: ArrayList[FlexPlacement],
+    container: Size,
+    overflow: i64,
+    duplicate_ids: i32,
+    error: FlexError,
+    error_index: i32,
+}
+
+fn flex_item(id: i64, basis: i64, cross: i64) FlexItem {
+    return FlexItem{
+        .id = id,
+        .basis = basis,
+        .grow = 0,
+        .shrink = 1,
+        .min_main = 0,
+        .max_main = unbounded_extent(),
+        .cross = cross,
+        .baseline = cross,
+    };
+}
+
+fn flex_item_intrinsic(
+    id: i64,
+    metrics: IntrinsicMetrics,
+    axis: FlexAxis,
+    priority: FlexPriority,
+) FlexItem {
+    let item: FlexItem = switch (axis) {
+        .row => flex_item(id, metrics.preferred.width, metrics.preferred.height),
+        .column => flex_item(id, metrics.preferred.height, metrics.preferred.width),
+    };
+    if (axis == FlexAxis.row) {
+        item.min_main = metrics.minimum.width;
+        item.max_main = metrics.maximum.width;
+        item.baseline = metrics.baseline;
+    } else {
+        item.min_main = metrics.minimum.height;
+        item.max_main = metrics.maximum.height;
+        item.baseline = metrics.preferred.width;
+    }
+    switch (priority) {
+        .lowest => { item.grow = 0; item.shrink = 8; }
+        .low => { item.grow = 1; item.shrink = 4; }
+        .normal => { item.grow = 2; item.shrink = 2; }
+        .high => { item.grow = 4; item.shrink = 1; }
+        .required => { item.grow = 0; item.shrink = 0; }
+    }
+    return item;
+}
+
+fn flex_style(axis: FlexAxis, gap: i64, padding: Insets) FlexStyle {
+    let actual_gap: i64 = gap;
+    if (actual_gap < 0) { actual_gap = 0; }
+    return FlexStyle{
+        .axis = axis,
+        .direction = LayoutDirection.ltr,
+        .main_alignment = MainAlignment.start,
+        .cross_alignment = CrossAlignment.start,
+        .gap = actual_gap,
+        .padding = padding,
+    };
+}
+
+fn flex_free(result: *FlexResult) void {
+    free[FlexPlacement](&result.*.placements);
+}
+
+fn flex_error_result(error: FlexError, error_index: i32) FlexResult {
+    return FlexResult{
+        .placements = make[FlexPlacement](1),
+        .container = size(0, 0),
+        .overflow = 0,
+        .duplicate_ids = 0,
+        .error = error,
+        .error_index = error_index,
+    };
+}
+
+fn flex_checked_add(a: i64, b: i64) i64 {
+    if (a < 0 || b < 0 || a > unbounded_extent() - b) { return 0 - 1; }
+    return a + b;
+}
+
+fn flex_item_valid(item: FlexItem) i32 {
+    return (item.id > 0 && item.basis >= 0 && item.basis <= unbounded_extent() &&
+        item.grow >= 0 && item.grow <= 4096 && item.shrink >= 0 && item.shrink <= 4096 &&
+        item.min_main >= 0 && item.max_main >= item.min_main && item.max_main <= unbounded_extent() &&
+        item.cross >= 0 && item.cross <= unbounded_extent() / 4 &&
+        item.baseline >= 0 && item.baseline <= item.cross) as i32;
+}
+
+fn flex_main_min(c: Constraints, axis: FlexAxis) i64 {
+    return switch (axis) { .row => c.min_width, .column => c.min_height };
+}
+
+fn flex_main_max(c: Constraints, axis: FlexAxis) i64 {
+    return switch (axis) { .row => c.max_width, .column => c.max_height };
+}
+
+fn flex_cross_min(c: Constraints, axis: FlexAxis) i64 {
+    return switch (axis) { .row => c.min_height, .column => c.min_width };
+}
+
+fn flex_cross_max(c: Constraints, axis: FlexAxis) i64 {
+    return switch (axis) { .row => c.max_height, .column => c.max_width };
+}
+
+fn flex_main_padding(p: Insets, axis: FlexAxis) i64 {
+    return switch (axis) { .row => p.left + p.right, .column => p.top + p.bottom };
+}
+
+fn flex_cross_padding(p: Insets, axis: FlexAxis) i64 {
+    return switch (axis) { .row => p.top + p.bottom, .column => p.left + p.right };
+}
+
+fn flex_has_duplicate_id(items: ArrayList[FlexItem]) i32 {
+    let i: i32 = 0;
+    while (i < items.len) {
+        let j: i32 = i + 1;
+        while (j < items.len) {
+            if (items.data[i].id == items.data[j].id) { return 1; }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    return 0;
+}
+
+fn flex_item_main(item: FlexItem) i64 {
+    return clamp_i64(item.basis, item.min_main, item.max_main);
+}
+
+fn flex_layout(items: ArrayList[FlexItem], raw_constraints: Constraints, raw_style: FlexStyle) FlexResult {
+    let constraints: Constraints = normalize_constraints(raw_constraints);
+    let style: FlexStyle = raw_style;
+    if (constraints.min_width > unbounded_extent() || constraints.max_width > unbounded_extent() ||
+        constraints.min_height > unbounded_extent() || constraints.max_height > unbounded_extent()) {
+        return flex_error_result(FlexError.invalid_constraints, 0 - 1);
+    }
+    if (style.gap > unbounded_extent() / 4 || style.padding.top > unbounded_extent() / 4 ||
+        style.padding.right > unbounded_extent() / 4 || style.padding.bottom > unbounded_extent() / 4 ||
+        style.padding.left > unbounded_extent() / 4) {
+        return flex_error_result(FlexError.invalid_style, 0 - 1);
+    }
+    let invalid_index: i32 = 0;
+    while (invalid_index < items.len && flex_item_valid(items.data[invalid_index]) != 0) {
+        invalid_index = invalid_index + 1;
+    }
+    if (invalid_index < items.len) { return flex_error_result(FlexError.invalid_item, invalid_index); }
+    if (style.gap < 0) { style.gap = 0; }
+    if (style.padding.top < 0) { style.padding.top = 0; }
+    if (style.padding.right < 0) { style.padding.right = 0; }
+    if (style.padding.bottom < 0) { style.padding.bottom = 0; }
+    if (style.padding.left < 0) { style.padding.left = 0; }
+
+    let main_padding: i64 = flex_main_padding(style.padding, style.axis);
+    let cross_padding: i64 = flex_cross_padding(style.padding, style.axis);
+    let gap_total: i64 = 0;
+    let gap_index: i32 = 1;
+    while (gap_index < items.len) {
+        gap_total = flex_checked_add(gap_total, style.gap);
+        if (gap_total < 0) { return flex_error_result(FlexError.arithmetic_overflow, gap_index); }
+        gap_index = gap_index + 1;
+    }
+
+    let base_total: i64 = flex_checked_add(main_padding, gap_total);
+    if (base_total < 0) { return flex_error_result(FlexError.arithmetic_overflow, 0 - 1); }
+    let desired_cross: i64 = cross_padding;
+    let grow_total: i64 = 0;
+    let shrink_total: i64 = 0;
+    let i: i32 = 0;
+    while (i < items.len) {
+        base_total = flex_checked_add(base_total, flex_item_main(items.data[i]));
+        if (base_total < 0) { return flex_error_result(FlexError.arithmetic_overflow, i); }
+        if (items.data[i].grow > 0) { grow_total = grow_total + items.data[i].grow; }
+        if (items.data[i].shrink > 0) { shrink_total = shrink_total + items.data[i].shrink; }
+        let item_cross: i64 = items.data[i].cross;
+        if (item_cross > desired_cross - cross_padding) { desired_cross = cross_padding + item_cross; }
+        i = i + 1;
+    }
+
+    let main_limit: i64 = flex_main_max(constraints, style.axis);
+    let container_main: i64 = base_total;
+    if (main_limit < unbounded_extent()) { container_main = main_limit; }
+    container_main = clamp_i64(container_main, flex_main_min(constraints, style.axis), main_limit);
+    let container_cross: i64 = clamp_i64(desired_cross, flex_cross_min(constraints, style.axis), flex_cross_max(constraints, style.axis));
+
+    let main_sizes: ArrayList[i64] = make[i64](items.len);
+    i = 0;
+    while (i < items.len) { push[i64](&main_sizes, flex_item_main(items.data[i])); i = i + 1; }
+
+    let delta: i64 = container_main - base_total;
+    if (delta > 0 && grow_total > 0) {
+        let distributed: i64 = 0;
+        let last_grow: i32 = 0 - 1;
+        i = 0;
+        while (i < items.len) { if (items.data[i].grow > 0) { last_grow = i; } i = i + 1; }
+        i = 0;
+        while (i < items.len) {
+            if (items.data[i].grow > 0) {
+                let share: i64 = 0;
+                if (i == last_grow) { share = delta - distributed; }
+                else { share = (delta * items.data[i].grow) / grow_total; }
+                let old_size: i64 = main_sizes.data[i];
+                main_sizes.data[i] = clamp_i64(old_size + share, items.data[i].min_main, items.data[i].max_main);
+                distributed = distributed + (main_sizes.data[i] - old_size);
+            }
+            i = i + 1;
+        }
+    }
+    if (delta < 0 && shrink_total > 0) {
+        let need: i64 = 0 - delta;
+        let removed: i64 = 0;
+        let last_shrink: i32 = 0 - 1;
+        i = 0;
+        while (i < items.len) { if (items.data[i].shrink > 0) { last_shrink = i; } i = i + 1; }
+        i = 0;
+        while (i < items.len) {
+            if (items.data[i].shrink > 0) {
+                let share: i64 = 0;
+                if (i == last_shrink) { share = need - removed; }
+                else { share = (need * items.data[i].shrink) / shrink_total; }
+                let old_size: i64 = main_sizes.data[i];
+                main_sizes.data[i] = clamp_i64(old_size - share, items.data[i].min_main, items.data[i].max_main);
+                removed = removed + (old_size - main_sizes.data[i]);
+            }
+            i = i + 1;
+        }
+    }
+
+    let used_main: i64 = flex_checked_add(main_padding, gap_total);
+    if (used_main < 0) {
+        free[i64](&main_sizes);
+        return flex_error_result(FlexError.arithmetic_overflow, 0 - 1);
+    }
+    i = 0;
+    while (i < main_sizes.len) {
+        used_main = flex_checked_add(used_main, main_sizes.data[i]);
+        if (used_main < 0) {
+            free[i64](&main_sizes);
+            return flex_error_result(FlexError.arithmetic_overflow, i);
+        }
+        i = i + 1;
+    }
+    let remaining: i64 = container_main - used_main;
+    let positive_remaining: i64 = remaining;
+    if (positive_remaining < 0) { positive_remaining = 0; }
+    let leading: i64 = 0;
+    let extra_gap: i64 = 0;
+    switch (style.main_alignment) {
+        .start => { }
+        .center => { leading = positive_remaining / 2; }
+        .end => { leading = positive_remaining; }
+        .space_between => { if (items.len > 1) { extra_gap = positive_remaining / ((items.len - 1) as i64); } }
+        .space_around => {
+            if (items.len > 0) { extra_gap = positive_remaining / (items.len as i64); leading = extra_gap / 2; }
+        }
+        .space_evenly => {
+            if (items.len > 0) { extra_gap = positive_remaining / ((items.len + 1) as i64); leading = extra_gap; }
+        }
+    }
+
+    let max_baseline: i64 = 0;
+    if (style.axis == FlexAxis.row && style.cross_alignment == CrossAlignment.baseline) {
+        i = 0;
+        while (i < items.len) {
+            let baseline: i64 = clamp_i64(items.data[i].baseline, 0, items.data[i].cross);
+            if (baseline > max_baseline) { max_baseline = baseline; }
+            i = i + 1;
+        }
+    }
+
+    let placements: ArrayList[FlexPlacement] = make[FlexPlacement](items.len);
+    let cursor: i64 = leading;
+    i = 0;
+    while (i < items.len) {
+        let item: FlexItem = items.data[i];
+        let main_size: i64 = main_sizes.data[i];
+        let inner_cross: i64 = container_cross - cross_padding;
+        let cross_size: i64 = clamp_i64(item.cross, 0, inner_cross);
+        if (style.cross_alignment == CrossAlignment.stretch) { cross_size = inner_cross; }
+        let cross_offset: i64 = 0;
+        switch (style.cross_alignment) {
+            .start => { }
+            .center => { cross_offset = (inner_cross - cross_size) / 2; }
+            .end => { cross_offset = inner_cross - cross_size; }
+            .stretch => { }
+            .baseline => {
+                if (style.axis == FlexAxis.row) {
+                    cross_offset = max_baseline - clamp_i64(item.baseline, 0, cross_size);
+                }
+            }
+        }
+
+        let frame: Rect = rect(0, 0, 0, 0);
+        if (style.axis == FlexAxis.row) {
+            frame.width = main_size;
+            frame.height = cross_size;
+            frame.y = style.padding.top + cross_offset;
+            if (style.direction == LayoutDirection.ltr) { frame.x = style.padding.left + cursor; }
+            else { frame.x = container_main - style.padding.right - cursor - main_size; }
+        } else {
+            frame.width = cross_size;
+            frame.height = main_size;
+            frame.y = style.padding.top + cursor;
+            let logical_cross: i64 = cross_offset;
+            if (style.direction == LayoutDirection.ltr) { frame.x = style.padding.left + logical_cross; }
+            else { frame.x = container_cross - style.padding.right - logical_cross - cross_size; }
+        }
+        push[FlexPlacement](&placements, FlexPlacement{ .id = item.id, .frame = frame, .baseline = frame.y + clamp_i64(item.baseline, 0, frame.height) });
+        cursor = cursor + main_size;
+        if (i + 1 < items.len) { cursor = cursor + style.gap + extra_gap; }
+        i = i + 1;
+    }
+
+    free[i64](&main_sizes);
+    let output_size: Size = switch (style.axis) {
+        .row => Size{ .width = container_main, .height = container_cross },
+        .column => Size{ .width = container_cross, .height = container_main },
+    };
+    let overflow: i64 = used_main - container_main;
+    if (overflow < 0) { overflow = 0; }
+    return FlexResult{
+        .placements = placements,
+        .container = output_size,
+        .overflow = overflow,
+        .duplicate_ids = flex_has_duplicate_id(items),
+        .error = FlexError.none,
+        .error_index = 0 - 1,
+    };
+}

@@ -1,0 +1,265 @@
+@import("../src/showcase/button_gallery.zag")
+@import("../src/automation/talkback.zag")
+@import("../src/render/cpu_raster.zag")
+
+struct TestState { passed: i32, failed: i32 }
+
+fn expect(state: *TestState, condition: i32, name: []u8) void {
+    if (condition != 0) {
+        state.*.passed = state.*.passed + 1;
+        _zag_print("ok  "); _zag_println(name);
+    } else {
+        state.*.failed = state.*.failed + 1;
+        _zag_print("FAIL "); _zag_println(name);
+    }
+}
+
+fn same_rect(left: Rect, right: Rect) i32 {
+    return (left.x == right.x && left.y == right.y &&
+        left.width == right.width && left.height == right.height) as i32;
+}
+
+fn owner_has_path(list: DisplayList, owner: NodeKey) i32 {
+    let index: i32 = 0;
+    while (index < list.ops.len) {
+        if (list.ops.data[index].kind == DisplayOpKind.draw_path &&
+            node_key_equal(list.ops.data[index].owner, owner) != 0) { return 1; }
+        index = index + 1;
+    }
+    return 0;
+}
+
+fn gallery_face(path: []u8) OpenTypeFace {
+    let bytes: []u8 = _zag_read_file(path);
+    if (bytes.len <= 0) { return opentype_face_empty(); }
+    let face: OpenTypeFace = opentype_parse(bytes);
+    _zag_free(_zag_slice_ptr(bytes));
+    return face;
+}
+
+fn tree_contract(state: *TestState, gallery: *ButtonGallery) void {
+    expect(state, gallery.*.error == ButtonGalleryError.none &&
+        gallery.*.button_count == 12 && gallery.*.artifacts.len == 12,
+        "gallery builds all twelve examples through Button emission");
+    expect(state, gallery.*.hits.nodes.len == 12 &&
+        gallery.*.semantics.nodes.len == 16 &&
+        gallery.*.semantics.revision == 16,
+        "one retained hit tree and semantics tree cover controls and headings");
+    expect(state, gallery.*.visible_button_label_count == 11 &&
+        gallery.*.text_run_count == 38 && gallery.*.glyph_path_count > 38 &&
+        gallery.*.display.resources.resources.len == gallery.*.glyph_path_count,
+        "every visible label and heading is an owned OpenType path resource");
+    let draw_paths: i32 = 0;
+    let index: i32 = 0;
+    while (index < gallery.*.display.ops.len) {
+        if (gallery.*.display.ops.data[index].kind == DisplayOpKind.draw_path) {
+            draw_paths = draw_paths + 1;
+        }
+        index = index + 1;
+    }
+    expect(state, draw_paths == gallery.*.glyph_path_count,
+        "gallery text uses real draw_path operations without placeholder bars");
+    let metrics: ButtonGalleryLayoutMetrics = button_gallery_layout_metrics();
+    expect(state, metrics.canvas_inset ==
+            flex_spacing(FlexSpacingToken.xxlarge, FlexDensity.standard) +
+            flex_spacing(FlexSpacingToken.small, FlexDensity.standard) &&
+        metrics.card_gap == flex_spacing(FlexSpacingToken.xlarge,
+            FlexDensity.standard) &&
+        metrics.card_padding == flex_spacing(FlexSpacingToken.large,
+            FlexDensity.standard) &&
+        metrics.column_stride == metrics.card_width + metrics.card_gap,
+        "repeated gallery rhythm resolves through named Flex spacing tokens");
+    expect(state, gallery.*.elevation_tier_count == 3 &&
+        gallery.*.artifacts.data[8].style.elevation == SemanticElevationToken.raised &&
+        gallery.*.artifacts.data[9].style.elevation == SemanticElevationToken.panel &&
+        gallery.*.artifacts.data[10].style.elevation == SemanticElevationToken.base,
+        "base panel and raised elevation tiers remain inspectable token truth");
+
+    let state_index: i32 = 0;
+    let state_truth: i32 = 1;
+    let geometry_truth: i32 = 1;
+    while (state_index < button_gallery_state_count()) {
+        let artifact: ButtonArtifact = gallery.*.artifacts.data[state_index];
+        if (node_key_equal(artifact.id,
+            button_gallery_state_id(state_index)) == 0 ||
+            button_interaction_equal(artifact.interaction,
+                button_canonical_state(button_gallery_state(state_index))) == 0) {
+            state_truth = 0;
+        }
+        let hit_index: i32 = hit_tree_find_index(
+            gallery.*.hits, button_gallery_state_id(state_index));
+        let semantic_index: i32 = semantics_find_index(
+            gallery.*.semantics, button_gallery_state_id(state_index));
+        if (hit_index < 0 || semantic_index < 0 ||
+            same_rect(gallery.*.hits.nodes.data[hit_index].bounds,
+                artifact.bounds) == 0 ||
+            same_rect(gallery.*.semantics.nodes.data[semantic_index].bounds,
+                artifact.bounds) == 0) {
+            geometry_truth = 0;
+        }
+        state_index = state_index + 1;
+    }
+    expect(state, state_truth != 0,
+        "the same secondary Button exposes all eight canonical interactions");
+    expect(state, geometry_truth != 0,
+        "display artifacts hit targets semantics and Talkback share exact geometry");
+    expect(state, gallery.*.artifacts.data[5].effectively_enabled == 0 &&
+        gallery.*.artifacts.data[6].effectively_enabled == 0 &&
+        gallery.*.artifacts.data[6].content_visible == 0 &&
+        gallery.*.artifacts.data[4].interaction.selected == 1,
+        "disabled loading selected and content substitution remain explicit state");
+    let focus: ButtonArtifact = gallery.*.artifacts.data[2];
+    let loading: ButtonArtifact = gallery.*.artifacts.data[6];
+    let error_semantic_index: i32 = semantics_find_index(
+        gallery.*.semantics, button_gallery_state_id(7));
+    expect(state,
+        gallery.*.display.ops.data[focus.display_op_start].bounds.width >
+            focus.bounds.width &&
+        gallery.*.display.ops.data[loading.display_op_end - 1].bounds.width <
+            loading.bounds.width &&
+        error_semantic_index >= 0 && semantic_text_equal(
+            gallery.*.semantics.nodes.data[error_semantic_index].value,
+            "Error") != 0 && owner_has_path(gallery.*.display,
+            node_key(9307)) != 0,
+        "focus loading and error carry ring progress and text evidence beyond color");
+    expect(state, gallery.*.artifacts.data[8].style.fill_token ==
+            SemanticColorToken.accent &&
+        gallery.*.artifacts.data[9].style.fill_token ==
+            SemanticColorToken.surface_interactive &&
+        gallery.*.artifacts.data[10].style.fill_alpha == 0 &&
+        gallery.*.artifacts.data[11].style.fill_token ==
+            SemanticColorToken.status_error,
+        "primary secondary quiet and destructive variants resolve semantic roles");
+    expect(state, semantics_find_index(gallery.*.semantics,
+            button_gallery_title_id()) >= 0 &&
+        semantics_find_index(gallery.*.semantics,
+            button_gallery_experimental_id()) >= 0,
+        "title and experimental visual-direction truth are semantic text");
+    let title_index: i32 = semantics_find_index(gallery.*.semantics,
+        button_gallery_title_id());
+    let experimental_index: i32 = semantics_find_index(gallery.*.semantics,
+        button_gallery_experimental_id());
+    let state_heading_index: i32 = semantics_find_index(gallery.*.semantics,
+        button_gallery_state_heading_id());
+    let variant_heading_index: i32 = semantics_find_index(gallery.*.semantics,
+        button_gallery_variant_heading_id());
+    expect(state, title_index >= 0 && experimental_index >= 0 &&
+        state_heading_index >= 0 && variant_heading_index >= 0 &&
+        same_rect(gallery.*.semantics.nodes.data[title_index].bounds,
+            metrics.title_semantic_bounds) != 0 &&
+        same_rect(gallery.*.semantics.nodes.data[experimental_index].bounds,
+            metrics.experimental_bounds) != 0 &&
+        same_rect(gallery.*.semantics.nodes.data[state_heading_index].bounds,
+            metrics.state_heading_bounds) != 0 &&
+        same_rect(gallery.*.semantics.nodes.data[variant_heading_index].bounds,
+            metrics.variant_heading_bounds) != 0,
+        "visible headings and semantic bounds share the named gallery metrics");
+    expect(state, gallery.*.display.sealed != 0 &&
+        display_list_verify(gallery.*.display) == DisplayError.none &&
+        gallery.*.evidence_hash != 0,
+        "gallery seals into one immutable deterministic DisplayList");
+}
+
+fn talkback_contract(state: *TestState, gallery: *ButtonGallery) void {
+    let session: TalkbackSession = talkback_session_make(talkback_capabilities());
+    let viewport: Rect = rect(0, 0,
+        (button_gallery_width() as i64) * unit_scale(),
+        (button_gallery_height() as i64) * unit_scale());
+    let rest: TalkbackResponse = talkback_dispatch(&session,
+        gallery.*.semantics, viewport, talkback_request(1,
+            TalkbackCommand.click, button_gallery_state_id(0),
+            gallery.*.semantics.revision));
+    let disabled: TalkbackResponse = talkback_dispatch(&session,
+        gallery.*.semantics, viewport, talkback_request(2,
+            TalkbackCommand.click, button_gallery_state_id(5),
+            gallery.*.semantics.revision));
+    let loading: TalkbackResponse = talkback_dispatch(&session,
+        gallery.*.semantics, viewport, talkback_request(3,
+            TalkbackCommand.click, button_gallery_state_id(6),
+            gallery.*.semantics.revision));
+    let destructive: TalkbackResponse = talkback_dispatch(&session,
+        gallery.*.semantics, viewport, talkback_request(4,
+            TalkbackCommand.query, button_gallery_variant_id(3),
+            gallery.*.semantics.revision));
+    expect(state, rest.status == TalkbackStatus.accepted &&
+        rest.target_id.value == 4100 && rest.emitted_action == 1,
+        "Talkback activates the rest Button by its stable ID");
+    expect(state, disabled.status == TalkbackStatus.action_unavailable &&
+        loading.status == TalkbackStatus.action_unavailable,
+        "Talkback observes shared disabled and loading action truth");
+    expect(state, destructive.status == TalkbackStatus.accepted &&
+        destructive.target_id.value == 4203 &&
+        destructive.resolved_role == SemanticRole.button,
+        "variant IDs remain stable semantic query targets");
+    let pixel: TalkbackRequest = talkback_pixel_request(5,
+        TalkbackCommand.click, 100, 100, 1, 1);
+    let pixel_response: TalkbackResponse = talkback_dispatch(&session,
+        gallery.*.semantics, viewport, pixel);
+    expect(state, pixel_response.status == TalkbackStatus.pixel_fallback_disabled,
+        "the conformance surface proves ID targeting without hiding behind pixels");
+    talkback_session_free(&session);
+}
+
+fn deterministic_cpu_contract(state: *TestState, face: OpenTypeFace,
+    first: *ButtonGallery) void {
+    let second: ButtonGallery = button_gallery_build(face);
+    expect(state, second.error == ButtonGalleryError.none &&
+        second.evidence_hash == first.*.evidence_hash &&
+        second.display.content_hash == first.*.display.content_hash,
+        "rebuilding with the same owned font produces identical retained evidence");
+    let first_raster: CpuRasterResult = cpu_rasterize(first.*.display,
+        button_gallery_width(), button_gallery_height());
+    let second_raster: CpuRasterResult = cpu_rasterize(second.display,
+        button_gallery_width(), button_gallery_height());
+    if (first_raster.error != CpuRasterError.none ||
+        second_raster.error != CpuRasterError.none) {
+        _zag_print("first CPU error/op: ");
+        _zag_print_i64(first_raster.error as i64); _zag_print(" / ");
+        _zag_print_i64(first_raster.error_op as i64); _zag_println("");
+        _zag_print("second CPU error/op: ");
+        _zag_print_i64(second_raster.error as i64); _zag_print(" / ");
+        _zag_print_i64(second_raster.error_op as i64); _zag_println("");
+    }
+    expect(state, first_raster.error == CpuRasterError.none &&
+        second_raster.error == CpuRasterError.none &&
+        first_raster.pixels_touched > 0 && second_raster.pixels_touched > 0,
+        "the complete gallery executes through the deterministic CPU oracle");
+    let first_hash: i64 = 0;
+    let second_hash: i64 = 1;
+    if (first_raster.error == CpuRasterError.none) {
+        first_hash = cpu_surface_hash(first_raster.surface);
+    }
+    if (second_raster.error == CpuRasterError.none) {
+        second_hash = cpu_surface_hash(second_raster.surface);
+    }
+    expect(state, first_hash != 0 && first_hash == second_hash,
+        "two CPU renders are pixel-identical for the same font and display list");
+    _zag_print("button gallery evidence hash: ");
+    _zag_print_i64(first.*.evidence_hash); _zag_println("");
+    _zag_print("button gallery CPU hash: ");
+    _zag_print_i64(first_hash); _zag_println("");
+    cpu_raster_free(&second_raster); cpu_raster_free(&first_raster);
+    button_gallery_free(&second);
+}
+
+fn main() i32 {
+    if (_zag_argc() != 2) {
+        _zag_eprintln("usage: button_gallery_contract <font.ttf>");
+        return 2;
+    }
+    let state: TestState = TestState{ .passed = 0, .failed = 0 };
+    let face: OpenTypeFace = gallery_face(_zag_arg(1));
+    expect(&state, face.error == OpenTypeError.none,
+        "test font parses through the Zag-owned OpenType reader");
+    let gallery: ButtonGallery = button_gallery_build(face);
+    tree_contract(&state, &gallery);
+    talkback_contract(&state, &gallery);
+    deterministic_cpu_contract(&state, face, &gallery);
+    button_gallery_free(&gallery); opentype_face_free(&face);
+    _zag_print("Button gallery contract: pass=");
+    _zag_print_i64(state.passed as i64);
+    _zag_print(" fail="); _zag_print_i64(state.failed as i64);
+    _zag_println("");
+    if (state.failed == 0) { return 0; }
+    return 1;
+}

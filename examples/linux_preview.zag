@@ -1,0 +1,681 @@
+@import("../src/platform/linux/x11.zag")
+@import("../src/showcase/linux_preview_composition.zag")
+@import("../src/render/png_encode.zag")
+
+fn preview_present(host: @borrows_mut *LinuxX11Window,
+    frame: @borrows *LinuxPreviewCompositionArtifact,
+    width: i32, height: i32, capture_path: []u8) i32 {
+    if (linux_preview_composition_valid(frame.*) == 0) {
+        _zag_eprintln("zagkit: retained Linux composition validation failed");
+        return 0;
+    }
+    let raster: CpuRasterResult = cpu_rasterize(
+        frame.*.display, width, height);
+    if (raster.error != CpuRasterError.none) {
+        cpu_raster_free(&raster);
+        _zag_eprintln("zagkit: Linux preview CPU raster failed");
+        return 0;
+    }
+    let presented: i32 = linux_x11_present(host, raster.surface);
+    if (presented != 0 && capture_path.len > 0) {
+        let png: PngEncodeResult = png_encode_surface(raster.surface);
+        if (png.error == PngEncodeError.none) {
+            if (_zag_write_file(capture_path, png.bytes.data[0..png.bytes.len]) != 0) {
+                _zag_eprintln("zagkit: failed to write Linux preview capture");
+            }
+        }
+        png_encode_free(&png);
+    }
+    cpu_raster_free(&raster);
+    return presented;
+}
+
+fn preview_navigation_index(id: NodeKey) i32 {
+    let index: i32 = 0;
+    while (index < linux_preview_navigation_count()) {
+        if (node_key_equal(id,
+            linux_preview_composition_nav_id(index)) != 0) { return index; }
+        index = index + 1;
+    }
+    return 0 - 1;
+}
+
+fn preview_segment_index(id: NodeKey) i32 {
+    let index: i32 = 0;
+    while (index < 4) {
+        if (node_key_equal(id,
+            linux_preview_composition_segment_id(index)) != 0) {
+            return index;
+        }
+        index = index + 1;
+    }
+    return 0 - 1;
+}
+
+fn preview_focus_order(
+    frame: @borrows *LinuxPreviewCompositionArtifact,
+    id: NodeKey) i64 {
+    let index: i32 = semantics_find_index(frame.*.semantics, id);
+    if (index < 0) { return 0; }
+    return frame.*.semantics.nodes.data[index].focus_order;
+}
+
+fn preview_next_focus(
+    frame: @borrows *LinuxPreviewCompositionArtifact,
+    current: NodeKey, reverse: i32) NodeKey {
+    let current_order: i64 = preview_focus_order(frame, current);
+    let candidate: NodeKey = semantic_root_key();
+    let candidate_order: i64 = 0;
+    let wrapped: NodeKey = semantic_root_key();
+    let wrapped_order: i64 = 0;
+    let index: i32 = 0;
+    while (index < frame.*.semantics.nodes.len) {
+        let node: SemanticsNode = frame.*.semantics.nodes.data[index];
+        if (node.disabled == 0 && node.focus_order > 0) {
+            if (reverse == 0) {
+                if (wrapped_order == 0 || node.focus_order < wrapped_order) {
+                    wrapped = node.id;
+                    wrapped_order = node.focus_order;
+                }
+                if (node.focus_order > current_order &&
+                    (candidate_order == 0 ||
+                     node.focus_order < candidate_order)) {
+                    candidate = node.id;
+                    candidate_order = node.focus_order;
+                }
+            } else {
+                if (node.focus_order > wrapped_order) {
+                    wrapped = node.id;
+                    wrapped_order = node.focus_order;
+                }
+                if ((current_order == 0 || node.focus_order < current_order) &&
+                    node.focus_order > candidate_order) {
+                    candidate = node.id;
+                    candidate_order = node.focus_order;
+                }
+            }
+        }
+        index = index + 1;
+    }
+    if (candidate_order > 0) { return candidate; }
+    return wrapped;
+}
+
+fn preview_general_interactive(id: NodeKey) i32 {
+    return (preview_navigation_index(id) >= 0 ||
+        node_key_equal(id,
+            linux_preview_composition_inspect_id()) != 0) as i32;
+}
+
+fn preview_trace_hit(frame: @borrows *LinuxPreviewCompositionArtifact,
+    hit: HitResult) void {
+    if (hit.found == 0 || hit.node_index < 0) {
+        _zag_println("zagkit: hit target=none");
+        return;
+    }
+    _zag_print("zagkit: hit target-id=");
+    _zag_print_i64(hit.id.value);
+    _zag_print(" enabled=");
+    _zag_print_i64(
+        frame.*.hits.nodes.data[hit.node_index].enabled as i64);
+    _zag_println("");
+}
+
+fn preview_trace_target(
+    frame: @borrows *LinuxPreviewCompositionArtifact,
+    id: NodeKey) void {
+    let target: TalkbackPixelFallbackTarget =
+        talkback_pixel_fallback_for_id(&frame.*.semantics,
+            frame.*.layout.viewport, id, TalkbackCommand.click, 1, 1);
+    if (target.status != TalkbackStatus.accepted) { return; }
+    _zag_print("zagkit: talkback pixel-fallback target-id=");
+    _zag_print_i64(id.value);
+    _zag_print(" x=");
+    _zag_print_i64(target.logical_bounds.x / unit_scale());
+    _zag_print(" y=");
+    _zag_print_i64(target.logical_bounds.y / unit_scale());
+    _zag_print(" width=");
+    _zag_print_i64(target.logical_bounds.width / unit_scale());
+    _zag_print(" height=");
+    _zag_print_i64(target.logical_bounds.height / unit_scale());
+    _zag_print(" scale=1/1 enabled=");
+    _zag_print_i64(target.action_available as i64);
+    _zag_println("");
+}
+
+fn preview_trace_targets(
+    frame: @borrows *LinuxPreviewCompositionArtifact) void {
+    preview_trace_target(frame, linux_preview_composition_nav_id(0));
+    preview_trace_target(frame, linux_preview_composition_nav_id(1));
+    preview_trace_target(frame, linux_preview_composition_nav_id(3));
+    preview_trace_target(frame, linux_preview_composition_segment_id(2));
+    preview_trace_target(frame, linux_preview_composition_inspect_id());
+    _zag_print("zagkit: frame selected-segment=");
+    _zag_print_i64(frame.*.segmented_model.selected_index as i64);
+    _zag_print(" roving-segment=");
+    _zag_print_i64(frame.*.segmented_model.roving_index as i64);
+    _zag_print(" has-focus=");
+    _zag_print_i64(frame.*.segmented_model.has_focus as i64);
+    _zag_print(" focus-visible=");
+    _zag_print_i64(frame.*.segmented_model.focus_visible as i64);
+    _zag_print(" hovered-segment=");
+    _zag_print_i64(frame.*.segmented_model.hovered_index as i64);
+    _zag_print(" token-inspector-open=");
+    _zag_print_i64(frame.*.token_inspector_open as i64);
+    _zag_print(" hovered-id=");
+    _zag_print_i64(frame.*.interaction.hovered.value);
+    _zag_print(" pressed-id=");
+    _zag_print_i64(frame.*.interaction.pressed.value);
+    _zag_print(" focused-id=");
+    _zag_print_i64(frame.*.interaction.focused.value);
+    _zag_print(" general-focus-visible=");
+    _zag_print_i64(frame.*.interaction.focus_visible as i64);
+    _zag_print(" evidence-hash=");
+    _zag_print_i64(frame.*.evidence_hash);
+    _zag_println("");
+    _zag_print("zagkit: route selected-navigation=");
+    _zag_print_i64(frame.*.selected_navigation as i64);
+    _zag_print(" typography-composed=");
+    _zag_print_i64(frame.*.typography_composed as i64);
+    _zag_print(" typography-rows=");
+    _zag_print_i64(frame.*.typography_rows_composed as i64);
+    _zag_println("");
+    if (frame.*.unsupported_size_composed != 0) {
+        _zag_print("zagkit: unsupported-size target-id=");
+        _zag_print_i64(linux_preview_composition_unsupported_id().value);
+        _zag_println(" minimum=480x360");
+    }
+}
+
+fn preview_event_hit(
+    frame: @borrows *LinuxPreviewCompositionArtifact,
+    event: LinuxX11Event) HitResult {
+    return hit_test_including_disabled(frame.*.hits,
+        (event.x as i64) * unit_scale(),
+        (event.y as i64) * unit_scale());
+}
+
+fn preview_segment_model_equal(
+    left: SegmentedControlModel, right: SegmentedControlModel) i32 {
+    return (left.segment_count == right.segment_count &&
+        left.selected_index == right.selected_index &&
+        left.roving_index == right.roving_index &&
+        left.has_focus == right.has_focus &&
+        left.focus_visible == right.focus_visible &&
+        left.hovered_index == right.hovered_index &&
+        left.pressed_index == right.pressed_index &&
+        left.enabled_mask == right.enabled_mask) as i32;
+}
+
+fn preview_apply_segment_event(
+    model: @borrows_mut *SegmentedControlModel,
+    event: SegmentedControlEvent) SegmentedControlTransition {
+    let transition: SegmentedControlTransition =
+        segmented_control_reduce(model.*, event);
+    if (transition.rejected == 0) { model.* = transition.model; }
+    return transition;
+}
+
+fn preview_trace_selection(transition: SegmentedControlTransition,
+    target_id: NodeKey, input_trace: i32) void {
+    if (transition.selection_changed == 0 || input_trace == 0) { return; }
+    _zag_print("zagkit: segment selection target-id=");
+    _zag_print_i64(target_id.value);
+    _zag_print(" selected-index=");
+    _zag_print_i64(transition.selected_index as i64);
+    _zag_println("");
+}
+
+fn preview_clamp_dimension(value: i32, minimum: i32, maximum: i32) i32 {
+    if (value < minimum) { return minimum; }
+    if (value > maximum) { return maximum; }
+    return value;
+}
+
+fn preview_load_face(path: []u8) OpenTypeFace {
+    let bytes: []u8 = _zag_read_file(path);
+    if (bytes.len <= 0) {
+        if (bytes.len >= 0) { _zag_free(_zag_slice_ptr(bytes)); }
+        let unavailable: OpenTypeFace = opentype_face_empty();
+        unavailable.error = OpenTypeError.empty;
+        return unavailable;
+    }
+    let face: OpenTypeFace = opentype_parse(bytes);
+    _zag_free(_zag_slice_ptr(bytes));
+    return face;
+}
+
+fn main() i32 {
+    let capture_once: i32 = 0;
+    let capture_path: []u8 = "";
+    if (_zag_argc() > 1 && _zag_strcmp(_zag_arg(1), "--capture-once") == 1) {
+        if (_zag_argc() != 3) {
+            _zag_eprintln("usage: linux-preview [--capture-once output.png]");
+            return 2;
+        }
+        capture_once = 1;
+        capture_path = _zag_arg(2);
+    }
+
+    let light_font_path: []u8 = _zag_getenv("ZAGKIT_FONT_LIGHT_FILE");
+    let regular_font_path: []u8 = _zag_getenv("ZAGKIT_FONT_FILE");
+    let bold_font_path: []u8 = _zag_getenv("ZAGKIT_FONT_BOLD_FILE");
+    if (light_font_path.len == 0 || regular_font_path.len == 0 ||
+        bold_font_path.len == 0) {
+        _zag_eprintln("zagkit: light, regular, and bold font files are required for truthful native typography");
+        return 3;
+    }
+    let light_face: OpenTypeFace = preview_load_face(light_font_path);
+    let face: OpenTypeFace = preview_load_face(regular_font_path);
+    let bold_face: OpenTypeFace = preview_load_face(bold_font_path);
+    if (light_face.error != OpenTypeError.none ||
+        face.error != OpenTypeError.none ||
+        bold_face.error != OpenTypeError.none) {
+        _zag_eprintln("zagkit: configured font weights failed owned OpenType validation");
+        opentype_face_free(&bold_face);
+        opentype_face_free(&face);
+        opentype_face_free(&light_face);
+        return 3;
+    }
+
+    let wayland_available: i32 = (_zag_getenv("WAYLAND_DISPLAY").len > 0) as i32;
+    let input_trace: i32 = (_zag_getenv("ZAGKIT_INPUT_TRACE").len > 0) as i32;
+    let host: LinuxX11Window = linux_x11_open(
+        linux_preview_reference_width(), linux_preview_reference_height(),
+        "Zagkit — Linux Preview", wayland_available);
+    _zag_print("zagkit: requested backend=auto active backend=");
+    _zag_println(platform_backend_name(host.capabilities.active));
+    if (host.capabilities.fallback_recorded != 0) {
+        _zag_print("zagkit: backend fallback: ");
+        _zag_println(host.capabilities.fallback_reason);
+    }
+    if (host.open == 0) {
+        _zag_eprintln("zagkit: native Linux window unavailable; capability report remains fail-closed");
+        linux_x11_close(&host);
+        opentype_face_free(&bold_face);
+        opentype_face_free(&face);
+        opentype_face_free(&light_face);
+        return 3;
+    }
+    let selected_navigation: i32 = linux_preview_initial_navigation();
+    let segmented_model: SegmentedControlModel =
+        linux_preview_composition_segmented_model_for(0);
+    let token_inspector_open: i32 = 0;
+    let interaction: LinuxPreviewInteractionState =
+        linux_preview_interaction_state();
+    let frame: LinuxPreviewCompositionArtifact =
+        linux_preview_composition_build_with_fonts_interaction_state(
+            linux_preview_reference_width(), linux_preview_reference_height(),
+            &light_face, &face, &bold_face,
+            selected_navigation, segmented_model, token_inspector_open,
+            interaction);
+    if (preview_present(&host, &frame,
+        linux_preview_reference_width(), linux_preview_reference_height(),
+        capture_path) == 0) {
+        linux_preview_composition_free(&frame);
+        linux_x11_close(&host);
+        opentype_face_free(&bold_face);
+        opentype_face_free(&face);
+        opentype_face_free(&light_face);
+        return 4;
+    }
+    if (input_trace != 0) { preview_trace_targets(&frame); }
+    if (capture_once != 0) {
+        linux_preview_composition_free(&frame);
+        linux_x11_close(&host);
+        opentype_face_free(&bold_face);
+        opentype_face_free(&face);
+        opentype_face_free(&light_face);
+        return 0;
+    }
+
+    let runtime_error: i32 = 0;
+    let pointer_pressed: NodeKey = hit_root_key();
+    while (host.open != 0) {
+        let target_width: i32 = host.width;
+        let target_height: i32 = host.height;
+        let needs_present: i32 = 0;
+        let needs_rebuild: i32 = 0;
+        let draining: i32 = 1;
+        while (draining != 0 && host.open != 0) {
+            let event: LinuxX11Event = linux_x11_next_event(&host);
+            if (event.kind == LinuxX11EventKind.close) {
+                host.open = 0;
+            } else if (event.kind == LinuxX11EventKind.expose) {
+                needs_present = 1;
+            } else if (event.kind == LinuxX11EventKind.resize) {
+                target_width = preview_clamp_dimension(event.width, 320, 4096);
+                target_height = preview_clamp_dimension(event.height, 240, 2160);
+                needs_rebuild = 1;
+                // Preserve event order: rebuild shared geometry before any
+                // later queued pointer event is resolved against it.
+                draining = 0;
+            } else if (event.kind == LinuxX11EventKind.pointer_move) {
+                let hit: HitResult = preview_event_hit(&frame, event);
+                let segment_index: i32 = preview_segment_index(hit.id);
+                let before: SegmentedControlModel = segmented_model;
+                let previous_hover: NodeKey = interaction.hovered;
+                let previous_pressed: NodeKey = interaction.pressed;
+                interaction.hovered = hit_root_key();
+                if (hit.node_index >= 0 &&
+                    frame.hits.nodes.data[hit.node_index].enabled != 0 &&
+                    preview_general_interactive(hit.id) != 0) {
+                    interaction.hovered = hit.id;
+                }
+                interaction.pressed = hit_root_key();
+                if (preview_general_interactive(pointer_pressed) != 0 &&
+                    node_key_equal(pointer_pressed,
+                        interaction.hovered) != 0) {
+                    interaction.pressed = pointer_pressed;
+                }
+                if (segment_index >= 0 && hit.node_index >= 0 &&
+                    frame.hits.nodes.data[hit.node_index].enabled != 0) {
+                    if (segmented_model.hovered_index != segment_index) {
+                        _ = preview_apply_segment_event(&segmented_model,
+                            segmented_control_event(
+                                SegmentedControlEventKind.pointer_enter,
+                                segment_index));
+                    }
+                } else if (segmented_model.hovered_index >= 0) {
+                    _ = preview_apply_segment_event(&segmented_model,
+                        segmented_control_event(
+                            SegmentedControlEventKind.pointer_leave,
+                            segmented_model.hovered_index));
+                }
+                if (preview_segment_model_equal(
+                    before, segmented_model) == 0) {
+                    needs_rebuild = 1;
+                    if (input_trace != 0) {
+                        _zag_print("zagkit: segment hover index=");
+                        _zag_print_i64(
+                            segmented_model.hovered_index as i64);
+                        _zag_println("");
+                    }
+                }
+                if (node_key_equal(previous_hover,
+                        interaction.hovered) == 0 ||
+                    node_key_equal(previous_pressed,
+                        interaction.pressed) == 0) {
+                    needs_rebuild = 1;
+                }
+            } else if (event.kind == LinuxX11EventKind.pointer_down) {
+                if (input_trace != 0) {
+                    _zag_print("zagkit: pointer down x=");
+                    _zag_print_i64(event.x as i64);
+                    _zag_print(" y="); _zag_print_i64(event.y as i64);
+                    _zag_print(" button="); _zag_print_i64(event.button as i64);
+                    _zag_println("");
+                }
+                if (event.button == 1) {
+                    let hit: HitResult = preview_event_hit(&frame, event);
+                    if (input_trace != 0) { preview_trace_hit(&frame, hit); }
+                    if (hit.found != 0 && hit.node_index >= 0) {
+                        let enabled: i32 =
+                            frame.hits.nodes.data[hit.node_index].enabled;
+                        let navigation_index: i32 =
+                            preview_navigation_index(hit.id);
+                        let segment_index: i32 =
+                            preview_segment_index(hit.id);
+                        if (navigation_index >= 0 && enabled == 0 &&
+                            input_trace != 0) {
+                            _zag_print("zagkit: navigation unavailable route=");
+                            _zag_println(linux_preview_navigation_name(
+                                navigation_index));
+                        } else if (segment_index >= 0 && enabled != 0) {
+                            pointer_pressed = hit.id;
+                            interaction.pressed = hit_root_key();
+                            interaction.focused = hit_root_key();
+                            interaction.focus_visible = 0;
+                            let before: SegmentedControlModel =
+                                segmented_model;
+                            let transition: SegmentedControlTransition =
+                                preview_apply_segment_event(&segmented_model,
+                                    segmented_control_event(
+                                        SegmentedControlEventKind.pointer_down,
+                                        segment_index));
+                            if (transition.rejected == 0 &&
+                                preview_segment_model_equal(
+                                    before, segmented_model) == 0) {
+                                needs_rebuild = 1;
+                                draining = 0;
+                            }
+                        } else if (enabled != 0) {
+                            pointer_pressed = hit.id;
+                            interaction.pressed = hit.id;
+                            interaction.focused = hit.id;
+                            interaction.focus_visible = 0;
+                            if (segmented_model.has_focus != 0) {
+                                _ = preview_apply_segment_event(
+                                    &segmented_model,
+                                    segmented_control_event(
+                                        SegmentedControlEventKind.focus_lost,
+                                        segmented_model.roving_index));
+                            }
+                            needs_rebuild = 1;
+                            draining = 0;
+                        }
+                    }
+                }
+            } else if (event.kind == LinuxX11EventKind.pointer_up) {
+                if (event.button == 1) {
+                    let hit: HitResult = preview_event_hit(&frame, event);
+                    let segment_index: i32 = preview_segment_index(hit.id);
+                    if (segmented_model.pressed_index >= 0) {
+                        let before: SegmentedControlModel = segmented_model;
+                        let transition: SegmentedControlTransition =
+                            segmented_control_transition(segmented_model);
+                        let target_id: NodeKey = hit_root_key();
+                        if (segment_index ==
+                            segmented_model.pressed_index &&
+                            hit.node_index >= 0 &&
+                            frame.hits.nodes.data[hit.node_index].enabled != 0) {
+                            target_id = hit.id;
+                            transition = preview_apply_segment_event(
+                                &segmented_model,
+                                segmented_control_event(
+                                    SegmentedControlEventKind.pointer_up_inside,
+                                    segment_index));
+                        } else {
+                            transition = preview_apply_segment_event(
+                                &segmented_model,
+                                segmented_control_event(
+                                    SegmentedControlEventKind.pointer_cancel,
+                                    segmented_control_no_index()));
+                        }
+                        if (preview_segment_model_equal(
+                            before, segmented_model) == 0) {
+                            needs_rebuild = 1;
+                        }
+                        preview_trace_selection(
+                            transition, target_id, input_trace);
+                    } else if (hit.found != 0 && hit.node_index >= 0 &&
+                        frame.hits.nodes.data[hit.node_index].enabled != 0 &&
+                        node_key_equal(pointer_pressed, hit.id) != 0) {
+                        let navigation_index: i32 =
+                            preview_navigation_index(hit.id);
+                        if (navigation_index >= 0 &&
+                            navigation_index != selected_navigation) {
+                            selected_navigation = navigation_index;
+                            needs_rebuild = 1;
+                            if (input_trace != 0) {
+                                _zag_print("zagkit: navigation selection target-id=");
+                                _zag_print_i64(hit.id.value);
+                                _zag_print(" selected-navigation=");
+                                _zag_print_i64(selected_navigation as i64);
+                                _zag_println("");
+                            }
+                        } else if (node_key_equal(hit.id,
+                            linux_preview_composition_inspect_id()) != 0) {
+                            token_inspector_open =
+                                (token_inspector_open == 0) as i32;
+                            needs_rebuild = 1;
+                            if (input_trace != 0) {
+                                _zag_print("zagkit: token inspector open=");
+                                _zag_print_i64(token_inspector_open as i64);
+                                _zag_println("");
+                            }
+                        }
+                    }
+                    pointer_pressed = hit_root_key();
+                    interaction.pressed = hit_root_key();
+                    interaction.hovered = hit_root_key();
+                    if (hit.node_index >= 0 &&
+                        frame.hits.nodes.data[hit.node_index].enabled != 0 &&
+                        preview_general_interactive(hit.id) != 0) {
+                        interaction.hovered = hit.id;
+                    }
+                    needs_rebuild = 1;
+                }
+            } else if (event.kind == LinuxX11EventKind.key_down) {
+                let before: SegmentedControlModel = segmented_model;
+                let transition: SegmentedControlTransition =
+                    segmented_control_transition(segmented_model);
+                if (event.keysym == 65289) {
+                    let current: NodeKey = interaction.focused;
+                    if (segmented_model.has_focus != 0) {
+                        current = linux_preview_composition_segment_id(
+                            segmented_model.roving_index);
+                    }
+                    let next: NodeKey = preview_next_focus(
+                        &frame, current,
+                        ((event.modifiers & 1) != 0) as i32);
+                    let next_segment: i32 = preview_segment_index(next);
+                    interaction.focused = hit_root_key();
+                    interaction.focus_visible = 0;
+                    if (segmented_model.has_focus != 0) {
+                        _ = preview_apply_segment_event(&segmented_model,
+                            segmented_control_event(
+                                SegmentedControlEventKind.focus_lost,
+                                segmented_model.roving_index));
+                    }
+                    if (next_segment >= 0) {
+                        transition = preview_apply_segment_event(
+                            &segmented_model,
+                            segmented_control_event(
+                                SegmentedControlEventKind.focus_target,
+                                next_segment));
+                    } else if (node_key_equal(next,
+                        semantic_root_key()) == 0) {
+                        interaction.focused = next;
+                        interaction.focus_visible = 1;
+                    }
+                    needs_rebuild = 1;
+                } else if (event.keysym == 65361 &&
+                    segmented_model.has_focus != 0) {
+                    transition = preview_apply_segment_event(&segmented_model,
+                        segmented_control_event(
+                            SegmentedControlEventKind.key_previous,
+                            segmented_control_no_index()));
+                } else if (event.keysym == 65363 &&
+                    segmented_model.has_focus != 0) {
+                    transition = preview_apply_segment_event(&segmented_model,
+                        segmented_control_event(
+                            SegmentedControlEventKind.key_next,
+                            segmented_control_no_index()));
+                } else if (event.keysym == 65360 &&
+                    segmented_model.has_focus != 0) {
+                    transition = preview_apply_segment_event(&segmented_model,
+                        segmented_control_event(
+                            SegmentedControlEventKind.key_home,
+                            segmented_control_no_index()));
+                } else if (event.keysym == 65367 &&
+                    segmented_model.has_focus != 0) {
+                    transition = preview_apply_segment_event(&segmented_model,
+                        segmented_control_event(
+                            SegmentedControlEventKind.key_end,
+                            segmented_control_no_index()));
+                } else if ((event.keysym == 65293 || event.keysym == 32) &&
+                    segmented_model.has_focus != 0) {
+                    transition = preview_apply_segment_event(&segmented_model,
+                        segmented_control_event(
+                            SegmentedControlEventKind.activate_focused,
+                            segmented_control_no_index()));
+                } else if ((event.keysym == 65293 || event.keysym == 32) &&
+                    node_key_equal(interaction.focused,
+                        hit_root_key()) == 0) {
+                    let navigation_index: i32 = preview_navigation_index(
+                        interaction.focused);
+                    if (navigation_index >= 0 &&
+                        navigation_index != selected_navigation) {
+                        selected_navigation = navigation_index;
+                        needs_rebuild = 1;
+                        if (input_trace != 0) {
+                            _zag_print("zagkit: keyboard navigation selection target-id=");
+                            _zag_print_i64(interaction.focused.value);
+                            _zag_print(" selected-navigation=");
+                            _zag_print_i64(selected_navigation as i64);
+                            _zag_println("");
+                        }
+                    } else if (node_key_equal(interaction.focused,
+                        linux_preview_composition_inspect_id()) != 0) {
+                        token_inspector_open =
+                            (token_inspector_open == 0) as i32;
+                        needs_rebuild = 1;
+                        if (input_trace != 0) {
+                            _zag_print("zagkit: keyboard token inspector open=");
+                            _zag_print_i64(token_inspector_open as i64);
+                            _zag_println("");
+                        }
+                    }
+                }
+                if (preview_segment_model_equal(
+                    before, segmented_model) == 0) {
+                    needs_rebuild = 1;
+                    preview_trace_selection(transition,
+                        linux_preview_composition_segment_id(
+                            transition.selected_index), input_trace);
+                }
+            } else if (event.kind == LinuxX11EventKind.focus_out) {
+                interaction.hovered = hit_root_key();
+                interaction.pressed = hit_root_key();
+                interaction.focused = hit_root_key();
+                interaction.focus_visible = 0;
+                needs_rebuild = 1;
+                if (segmented_model.has_focus != 0) {
+                    let before: SegmentedControlModel = segmented_model;
+                    _ = preview_apply_segment_event(&segmented_model,
+                        segmented_control_event(
+                            SegmentedControlEventKind.focus_lost,
+                            segmented_model.roving_index));
+                    if (preview_segment_model_equal(
+                        before, segmented_model) == 0) { needs_rebuild = 1; }
+                }
+            }
+            if (draining != 0) { draining = linux_x11_pending(&host); }
+        }
+        if (host.open != 0 && needs_rebuild != 0) {
+            let next_frame: LinuxPreviewCompositionArtifact =
+                linux_preview_composition_build_with_fonts_interaction_state(
+                    target_width, target_height,
+                    &light_face, &face, &bold_face,
+                    selected_navigation, segmented_model,
+                    token_inspector_open, interaction);
+            if (preview_present(&host, &next_frame,
+                target_width, target_height, "") == 0) {
+                linux_preview_composition_free(&next_frame);
+                runtime_error = 1;
+                host.open = 0;
+            } else {
+                linux_preview_composition_free(&frame);
+                frame = next_frame;
+                selected_navigation = frame.selected_navigation;
+                segmented_model = frame.segmented_model;
+                token_inspector_open = frame.token_inspector_open;
+                interaction = frame.interaction;
+                if (input_trace != 0) { preview_trace_targets(&frame); }
+            }
+        } else if (host.open != 0 && needs_present != 0 &&
+            preview_present(&host, &frame,
+                target_width, target_height, "") == 0) {
+            runtime_error = 1;
+            host.open = 0;
+        }
+    }
+    linux_preview_composition_free(&frame);
+    linux_x11_close(&host);
+    opentype_face_free(&bold_face);
+    opentype_face_free(&face);
+    opentype_face_free(&light_face);
+    if (runtime_error != 0) { return 4; }
+    return 0;
+}

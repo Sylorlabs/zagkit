@@ -1,0 +1,104 @@
+// Deterministic layout geometry. All values are signed 26.6 fixed-point units:
+// 64 units equal one density-independent logical pixel.
+
+fn unit_scale() i64 { return 64; }
+fn unbounded_extent() i64 { return 1125899906842624; }
+
+struct Size {
+    width: i64,
+    height: i64,
+}
+
+struct Rect {
+    x: i64,
+    y: i64,
+    width: i64,
+    height: i64,
+}
+
+struct Insets {
+    top: i64,
+    right: i64,
+    bottom: i64,
+    left: i64,
+}
+
+struct Constraints {
+    min_width: i64,
+    max_width: i64,
+    min_height: i64,
+    max_height: i64,
+}
+
+fn size(width: i64, height: i64) Size {
+    return Size{ .width = width, .height = height };
+}
+
+fn rect(x: i64, y: i64, width: i64, height: i64) Rect {
+    return Rect{ .x = x, .y = y, .width = width, .height = height };
+}
+
+fn insets_all(value: i64) Insets {
+    let v: i64 = value;
+    if (v < 0) { v = 0; }
+    return Insets{ .top = v, .right = v, .bottom = v, .left = v };
+}
+
+fn clamp_i64(value: i64, minimum: i64, maximum: i64) i64 {
+    let lo: i64 = minimum;
+    let hi: i64 = maximum;
+    if (lo < 0) { lo = 0; }
+    if (hi < lo) { hi = lo; }
+    if (value < lo) { return lo; }
+    if (value > hi) { return hi; }
+    return value;
+}
+
+fn normalize_constraints(value: Constraints) Constraints {
+    let min_width: i64 = value.min_width;
+    let min_height: i64 = value.min_height;
+    if (min_width < 0) { min_width = 0; }
+    if (min_height < 0) { min_height = 0; }
+
+    let max_width: i64 = value.max_width;
+    let max_height: i64 = value.max_height;
+    if (max_width < min_width) { max_width = min_width; }
+    if (max_height < min_height) { max_height = min_height; }
+
+    return Constraints{
+        .min_width = min_width,
+        .max_width = max_width,
+        .min_height = min_height,
+        .max_height = max_height,
+    };
+}
+
+fn tight_constraints(width: i64, height: i64) Constraints {
+    let w: i64 = width;
+    let h: i64 = height;
+    if (w < 0) { w = 0; }
+    if (h < 0) { h = 0; }
+    return Constraints{ .min_width = w, .max_width = w, .min_height = h, .max_height = h };
+}
+
+fn constrain_size(value: Size, raw: Constraints) Size {
+    let c: Constraints = normalize_constraints(raw);
+    return Size{
+        .width = clamp_i64(value.width, c.min_width, c.max_width),
+        .height = clamp_i64(value.height, c.min_height, c.max_height),
+    };
+}
+
+fn rect_contains(value: Rect, x: i64, y: i64) i32 {
+    if (value.width <= 0 || value.height <= 0) { return 0; }
+    if (x < value.x || y < value.y) { return 0; }
+    if (x >= value.x + value.width || y >= value.y + value.height) { return 0; }
+    return 1;
+}
+
+fn rect_intersects(a: Rect, b: Rect) i32 {
+    if (a.width <= 0 || a.height <= 0 || b.width <= 0 || b.height <= 0) { return 0; }
+    if (a.x + a.width <= b.x || b.x + b.width <= a.x) { return 0; }
+    if (a.y + a.height <= b.y || b.y + b.height <= a.y) { return 0; }
+    return 1;
+}

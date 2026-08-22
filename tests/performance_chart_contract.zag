@@ -1,0 +1,382 @@
+@import("../src/components/performance_chart.zag")
+@import("../src/automation/talkback.zag")
+@import("../src/render/cpu_raster.zag")
+
+struct TestState { passed: i32, failed: i32 }
+
+fn expect(state: *TestState, condition: i32, name: []u8) void {
+    if (condition != 0) {
+        state.*.passed = state.*.passed + 1;
+        _zag_print("ok  "); _zag_println(name);
+    } else {
+        state.*.failed = state.*.failed + 1;
+        _zag_print("FAIL "); _zag_println(name);
+    }
+}
+
+fn chart_points(y0: i64, y1: i64, y2: i64,
+    y3: i64, t0: []u8, t1: []u8, t2: []u8,
+    t3: []u8) ArrayList[PerformanceChartPoint] {
+    let points: ArrayList[PerformanceChartPoint] =
+        make[PerformanceChartPoint](4);
+    push[PerformanceChartPoint](&points,
+        performance_chart_point(0, y0, "0 s", t0));
+    push[PerformanceChartPoint](&points,
+        performance_chart_point(10, y1, "10 s", t1));
+    push[PerformanceChartPoint](&points,
+        performance_chart_point(20, y2, "20 s", t2));
+    push[PerformanceChartPoint](&points,
+        performance_chart_point(30, y3, "30 s", t3));
+    return points;
+}
+
+fn chart_spec(series: ArrayList[PerformanceChartSeries],
+    x_ticks: ArrayList[[]u8], y_ticks: ArrayList[[]u8]) PerformanceChartSpec {
+    let spec: PerformanceChartSpec = performance_chart_spec(node_key(7000),
+        rect(0, 0, 960 * unit_scale(), 560 * unit_scale()),
+        series, x_ticks, y_ticks);
+    spec.title = "Frame pacing performance";
+    spec.description = "CPU and GPU frame times across a thirty-second run";
+    spec.x_axis_name = "Elapsed time"; spec.x_axis_unit = "seconds";
+    spec.y_axis_name = "Frame time"; spec.y_axis_unit = "milliseconds";
+    spec.x_min = 0; spec.x_max = 30;
+    spec.y_min = 0; spec.y_max = 24;
+    spec.x_tick_count = 7; spec.y_tick_count = 7;
+    spec.baseline_value = 8; spec.baseline_name = "Eight millisecond baseline";
+    spec.deadline_value = 16; spec.deadline_name = "Sixteen millisecond deadline";
+    return spec;
+}
+
+fn slot_count(artifact: *PerformanceChartArtifact,
+    kind: PerformanceChartTextSlotKind) i32 {
+    let count: i32 = 0;
+    let i: i32 = 0;
+    while (i < artifact.*.text_slots.len) {
+        if (artifact.*.text_slots.data[i].kind == kind) { count = count + 1; }
+        i = i + 1;
+    }
+    return count;
+}
+
+fn slot_index(artifact: *PerformanceChartArtifact, id: NodeKey,
+    kind: PerformanceChartTextSlotKind) i32 {
+    let i: i32 = 0;
+    while (i < artifact.*.text_slots.len) {
+        if (node_key_equal(artifact.*.text_slots.data[i].id, id) != 0 &&
+            artifact.*.text_slots.data[i].kind == kind) { return i; }
+        i = i + 1;
+    }
+    return 0 - 1;
+}
+
+fn paint_rgb_equal(left: Paint, right: Paint) i32 {
+    return (left.red == right.red && left.green == right.green &&
+        left.blue == right.blue) as i32;
+}
+
+fn display_has_token(canvas: Canvas, token: SemanticColorToken) i32 {
+    let expected: Paint = semantic_color_paint(token);
+    let i: i32 = 0;
+    while (i < canvas.display.ops.len) {
+        if (paint_rgb_equal(canvas.display.ops.data[i].paint, expected) != 0) {
+            return 1;
+        }
+        i = i + 1;
+    }
+    return 0;
+}
+
+fn display_kind_count(canvas: Canvas, kind: DisplayOpKind) i32 {
+    let count: i32 = 0;
+    let i: i32 = 0;
+    while (i < canvas.display.ops.len) {
+        if (canvas.display.ops.data[i].kind == kind) { count = count + 1; }
+        i = i + 1;
+    }
+    return count;
+}
+
+fn component_contract(state: *TestState,
+    artifact: *PerformanceChartArtifact) void {
+    expect(state, artifact.*.error == PerformanceChartError.none &&
+        artifact.*.canvas.sealed != 0 &&
+        canvas_verify(&artifact.*.canvas) == CanvasError.none,
+        "bounded performance chart seals through first-party Canvas");
+    expect(state, artifact.*.canvas.display.resources.resources.len == 3 &&
+        display_kind_count(artifact.*.canvas, DisplayOpKind.draw_path) == 3 &&
+        display_kind_count(artifact.*.canvas,
+            DisplayOpKind.fill_rounded_rect) >= 17,
+        "three line paths and twelve scatter marks are retained display content");
+    expect(state, artifact.*.metrics.outer_padding ==
+            flex_spacing(FlexSpacingToken.xlarge, FlexDensity.standard) &&
+        artifact.*.metrics.legend_gap ==
+            flex_spacing(FlexSpacingToken.small, FlexDensity.standard) &&
+        artifact.*.legend.len == 3,
+        "chart rhythm and legend placement resolve named Flex spacing");
+    let title_slot: i32 = slot_index(artifact,
+        performance_chart_title_id(artifact.*.canvas.key),
+        PerformanceChartTextSlotKind.title);
+    let deadline_slot: i32 = slot_index(artifact,
+        performance_chart_deadline_id(artifact.*.canvas.key),
+        PerformanceChartTextSlotKind.deadline);
+    expect(state, artifact.*.text_slots.len == 24 && title_slot >= 0 &&
+        deadline_slot >= 0 &&
+        slot_count(artifact, PerformanceChartTextSlotKind.x_axis_name) == 1 &&
+        slot_count(artifact, PerformanceChartTextSlotKind.x_axis_unit) == 1 &&
+        slot_count(artifact, PerformanceChartTextSlotKind.y_axis_name) == 1 &&
+        slot_count(artifact, PerformanceChartTextSlotKind.y_axis_unit) == 1 &&
+        slot_count(artifact, PerformanceChartTextSlotKind.x_tick) == 7 &&
+        slot_count(artifact, PerformanceChartTextSlotKind.y_tick) == 7 &&
+        slot_count(artifact, PerformanceChartTextSlotKind.legend_name) == 3 &&
+        slot_count(artifact, PerformanceChartTextSlotKind.baseline) == 1 &&
+        slot_count(artifact, PerformanceChartTextSlotKind.deadline) == 1,
+        "owned typography slots cover title axes units ticks legend and references");
+    expect(state,
+        artifact.*.text_slots.data[title_slot].type_token ==
+            SemanticTypeToken.title &&
+        artifact.*.text_slots.data[title_slot].color_token ==
+            SemanticColorToken.text_primary &&
+        artifact.*.text_slots.data[deadline_slot].type_token ==
+            SemanticTypeToken.caption &&
+        artifact.*.text_slots.data[deadline_slot].color_token ==
+            SemanticColorToken.status_error &&
+        artifact.*.text_slots.data[title_slot].bounds.width > 0 &&
+        artifact.*.text_slots.data[deadline_slot].bounds.height > 0,
+        "typography slots retain exact bounds semantic type and color provenance");
+    expect(state,
+        display_has_token(artifact.*.canvas, SemanticColorToken.chart_grid) != 0 &&
+        display_has_token(artifact.*.canvas, SemanticColorToken.chart_axis) != 0 &&
+        display_has_token(artifact.*.canvas, SemanticColorToken.status_error) != 0 &&
+        display_has_token(artifact.*.canvas, SemanticColorToken.focus) != 0,
+        "grid axis deadline and focus evidence use semantic color roles");
+
+    let x_index: i32 = semantics_find_index(artifact.*.semantics,
+        performance_chart_x_axis_id(artifact.*.canvas.key));
+    let y_index: i32 = semantics_find_index(artifact.*.semantics,
+        performance_chart_y_axis_id(artifact.*.canvas.key));
+    let baseline_index: i32 = semantics_find_index(artifact.*.semantics,
+        performance_chart_baseline_id(artifact.*.canvas.key));
+    let deadline_index: i32 = semantics_find_index(artifact.*.semantics,
+        performance_chart_deadline_id(artifact.*.canvas.key));
+    expect(state, x_index >= 0 && y_index >= 0 &&
+        semantic_text_equal(artifact.*.semantics.nodes.data[x_index].name,
+            "Elapsed time") != 0 &&
+        semantic_text_equal(artifact.*.semantics.nodes.data[x_index].value,
+            "seconds") != 0 &&
+        semantic_text_equal(artifact.*.semantics.nodes.data[y_index].name,
+            "Frame time") != 0 &&
+        semantic_text_equal(artifact.*.semantics.nodes.data[y_index].value,
+            "milliseconds") != 0,
+        "both axes expose names and units independently of pixels");
+    expect(state, baseline_index >= 0 && deadline_index >= 0 &&
+        semantic_text_equal(
+            artifact.*.semantics.nodes.data[baseline_index].name,
+            "Eight millisecond baseline") != 0 &&
+        semantic_text_equal(
+            artifact.*.semantics.nodes.data[deadline_index].name,
+            "Sixteen millisecond deadline") != 0,
+        "baseline and deadline are named semantic references");
+
+    let selected_index: i32 = semantics_find_index(
+        artifact.*.semantics, node_key(7100));
+    let available_index: i32 = semantics_find_index(
+        artifact.*.semantics, node_key(7101));
+    let disabled_index: i32 = semantics_find_index(
+        artifact.*.semantics, node_key(7102));
+    expect(state, selected_index >= 0 && available_index >= 0 &&
+        disabled_index >= 0 &&
+        artifact.*.semantics.nodes.data[selected_index].selected == 1 &&
+        artifact.*.semantics.nodes.data[selected_index].focus_order == 1 &&
+        semantic_actions_has(
+            artifact.*.semantics.nodes.data[selected_index].action_mask,
+            SemanticAction.focus) != 0 &&
+        artifact.*.semantics.nodes.data[disabled_index].disabled == 1 &&
+        artifact.*.semantics.nodes.data[disabled_index].action_mask == 0,
+        "legend exposes selected focusable available and disabled state truth");
+    expect(state, artifact.*.hits.nodes.len == 4 &&
+        artifact.*.hits.nodes.data[1].enabled == 1 &&
+        artifact.*.hits.nodes.data[3].enabled == 0 &&
+        artifact.*.legend.data[0].color_token ==
+            SemanticColorToken.chart_series_primary &&
+        artifact.*.legend.data[1].color_token ==
+            SemanticColorToken.chart_series_secondary &&
+        artifact.*.legend.data[2].color_token ==
+            SemanticColorToken.chart_series_tertiary,
+        "legend hit targets and series colors share stable IDs and token mapping");
+
+    let table_index: i32 = semantics_find_index(artifact.*.semantics,
+        performance_chart_table_id(artifact.*.canvas.key));
+    let cell_index: i32 = semantics_find_index(artifact.*.semantics,
+        performance_chart_table_cell_id(artifact.*.canvas.key, 2, 2));
+    expect(state, table_index >= 0 && cell_index >= 0 &&
+        artifact.*.semantics.nodes.data[table_index].role == SemanticRole.table &&
+        artifact.*.semantics.nodes.data[table_index].row_count == 5 &&
+        artifact.*.semantics.nodes.data[table_index].column_count == 4 &&
+        artifact.*.semantics.nodes.data[cell_index].row_index == 2 &&
+        artifact.*.semantics.nodes.data[cell_index].column_index == 2 &&
+        semantic_text_equal(artifact.*.semantics.nodes.data[cell_index].name,
+            "GPU transport") != 0 &&
+        semantic_text_equal(artifact.*.semantics.nodes.data[cell_index].value,
+            "7 ms") != 0,
+        "parallel data table preserves dimensions cell coordinates names and values");
+}
+
+fn talkback_contract(state: *TestState,
+    artifact: *PerformanceChartArtifact) void {
+    let session: TalkbackSession = talkback_session_make(talkback_capabilities());
+    let viewport: Rect = artifact.*.canvas.bounds;
+    let selected: TalkbackResponse = talkback_dispatch(&session,
+        artifact.*.semantics, viewport, talkback_request(1,
+            TalkbackCommand.click, node_key(7100),
+            artifact.*.semantics.revision));
+    let focused: TalkbackResponse = talkback_dispatch(&session,
+        artifact.*.semantics, viewport, talkback_request(2,
+            TalkbackCommand.focus, node_key(7100),
+            artifact.*.semantics.revision));
+    let disabled: TalkbackResponse = talkback_dispatch(&session,
+        artifact.*.semantics, viewport, talkback_request(3,
+            TalkbackCommand.click, node_key(7102),
+            artifact.*.semantics.revision));
+    let cell: TalkbackResponse = talkback_dispatch(&session,
+        artifact.*.semantics, viewport, talkback_request(4,
+            TalkbackCommand.query,
+            performance_chart_table_cell_id(artifact.*.canvas.key, 2, 2),
+            artifact.*.semantics.revision));
+    expect(state, selected.status == TalkbackStatus.accepted &&
+        focused.status == TalkbackStatus.accepted &&
+        selected.target_id.value == 7100 && selected.emitted_action == 1,
+        "Talkback selects and focuses the named series by stable ID");
+    expect(state, disabled.status == TalkbackStatus.action_unavailable,
+        "Talkback observes the disabled legend action contract");
+    expect(state, cell.status == TalkbackStatus.accepted &&
+        cell.resolved_role == SemanticRole.cell &&
+        cell.row_index == 2 && cell.column_index == 2,
+        "Talkback queries the semantic data table without pixel inference");
+    let pixel: TalkbackRequest = talkback_pixel_request(5,
+        TalkbackCommand.click, 100, 100, 1, 1);
+    let pixel_result: TalkbackResponse = talkback_dispatch(&session,
+        artifact.*.semantics, viewport, pixel);
+    expect(state, pixel_result.status ==
+        TalkbackStatus.pixel_fallback_disabled,
+        "chart automation remains ID-first with pixel fallback disabled");
+    talkback_session_free(&session);
+}
+
+fn deterministic_contract(state: *TestState, spec: PerformanceChartSpec,
+    first: *PerformanceChartArtifact) void {
+    let second: PerformanceChartArtifact = performance_chart_build(spec);
+    expect(state, second.error == PerformanceChartError.none &&
+        first.*.evidence_hash == 767263707 &&
+        second.evidence_hash == first.*.evidence_hash &&
+        second.canvas.display.content_hash ==
+            first.*.canvas.display.content_hash,
+        "identical chart input rebuilds identical retained evidence");
+    let first_raster: CpuRasterResult = cpu_rasterize(
+        first.*.canvas.display, 960, 560);
+    let second_raster: CpuRasterResult = cpu_rasterize(
+        second.canvas.display, 960, 560);
+    let first_hash: i64 = 0;
+    let second_hash: i64 = 1;
+    if (first_raster.error == CpuRasterError.none) {
+        first_hash = cpu_surface_hash(first_raster.surface);
+    }
+    if (second_raster.error == CpuRasterError.none) {
+        second_hash = cpu_surface_hash(second_raster.surface);
+    }
+    expect(state, first_raster.error == CpuRasterError.none &&
+        second_raster.error == CpuRasterError.none &&
+        first_raster.pixels_touched > 0 &&
+        first_hash == 426609686 && first_hash == second_hash,
+        "CPU oracle renders the chart pixel-identically across two builds");
+    _zag_print("performance chart evidence hash: ");
+    _zag_print_i64(first.*.evidence_hash); _zag_println("");
+    _zag_print("performance chart CPU hash: ");
+    _zag_print_i64(first_hash); _zag_println("");
+    cpu_raster_free(&second_raster); cpu_raster_free(&first_raster);
+    performance_chart_free(&second);
+}
+
+fn failure_contract(state: *TestState,
+    source: ArrayList[PerformanceChartSeries],
+    base: PerformanceChartSpec) void {
+    let duplicate: ArrayList[PerformanceChartSeries] =
+        make[PerformanceChartSeries](2);
+    push[PerformanceChartSeries](&duplicate, source.data[0]);
+    let duplicate_series: PerformanceChartSeries = source.data[1];
+    duplicate_series.id = source.data[0].id;
+    push[PerformanceChartSeries](&duplicate, duplicate_series);
+    let invalid_spec: PerformanceChartSpec = base;
+    invalid_spec.series = duplicate;
+    let invalid: PerformanceChartArtifact = performance_chart_build(invalid_spec);
+    expect(state, invalid.error == PerformanceChartError.invalid_series &&
+        invalid.canvas.display.ops.len == 0 && invalid.semantics.nodes.len == 0,
+        "duplicate series IDs fail before display semantics or hit mutation");
+    performance_chart_free(&invalid); free[PerformanceChartSeries](&duplicate);
+}
+
+fn main() i32 {
+    let state: TestState = TestState{ .passed = 0, .failed = 0 };
+    let cpu: ArrayList[PerformanceChartPoint] = chart_points(
+        10, 11, 12, 10, "10 ms", "11 ms", "12 ms", "10 ms");
+    let gpu: ArrayList[PerformanceChartPoint] = chart_points(
+        8, 7, 9, 8, "8 ms", "7 ms", "9 ms", "8 ms");
+    let fallback: ArrayList[PerformanceChartPoint] = chart_points(
+        20, 19, 21, 20, "20 ms", "19 ms", "21 ms", "20 ms");
+    let series: ArrayList[PerformanceChartSeries] =
+        make[PerformanceChartSeries](3);
+    let x_ticks: ArrayList[[]u8] = make[[]u8](7);
+    push[[]u8](&x_ticks, "0 s"); push[[]u8](&x_ticks, "5 s");
+    push[[]u8](&x_ticks, "10 s"); push[[]u8](&x_ticks, "15 s");
+    push[[]u8](&x_ticks, "20 s"); push[[]u8](&x_ticks, "25 s");
+    push[[]u8](&x_ticks, "30 s");
+    let y_ticks: ArrayList[[]u8] = make[[]u8](7);
+    push[[]u8](&y_ticks, "24 ms"); push[[]u8](&y_ticks, "20 ms");
+    push[[]u8](&y_ticks, "16 ms"); push[[]u8](&y_ticks, "12 ms");
+    push[[]u8](&y_ticks, "8 ms"); push[[]u8](&y_ticks, "4 ms");
+    push[[]u8](&y_ticks, "0 ms");
+    let cpu_series: PerformanceChartSeries = performance_chart_series(
+        node_key(7100), "CPU oracle", cpu,
+        SemanticColorToken.chart_series_primary);
+    cpu_series.description = "Deterministic reference renderer";
+    cpu_series.selected = 1; cpu_series.focused = 1;
+    push[PerformanceChartSeries](&series, cpu_series);
+    let gpu_series: PerformanceChartSeries = performance_chart_series(
+        node_key(7101), "GPU transport", gpu,
+        SemanticColorToken.chart_series_secondary);
+    gpu_series.description = "Experimental accelerated transport";
+    push[PerformanceChartSeries](&series, gpu_series);
+    let fallback_series: PerformanceChartSeries = performance_chart_series(
+        node_key(7102), "Unavailable fallback", fallback,
+        SemanticColorToken.chart_series_tertiary);
+    fallback_series.description = "Disabled backend comparison";
+    fallback_series.disabled = 1;
+    push[PerformanceChartSeries](&series, fallback_series);
+
+    let spec: PerformanceChartSpec = chart_spec(series, x_ticks, y_ticks);
+    let artifact: PerformanceChartArtifact = performance_chart_build(spec);
+    if (artifact.error != PerformanceChartError.none) {
+        _zag_print("chart build error canvas path semantics hit: ");
+        _zag_print_i64(artifact.error as i64); _zag_print(" ");
+        _zag_print_i64(artifact.canvas_error as i64); _zag_print(" ");
+        _zag_print_i64(artifact.path_error as i64); _zag_print(" ");
+        _zag_print_i64(artifact.semantics_error as i64); _zag_print(" ");
+        _zag_print_i64(artifact.hit_error as i64); _zag_println("");
+    }
+    component_contract(&state, &artifact);
+    talkback_contract(&state, &artifact);
+    deterministic_contract(&state, spec, &artifact);
+    failure_contract(&state, series, spec);
+    performance_chart_free(&artifact);
+    free[PerformanceChartSeries](&series);
+    free[PerformanceChartPoint](&fallback);
+    free[PerformanceChartPoint](&gpu);
+    free[PerformanceChartPoint](&cpu);
+    free[[]u8](&y_ticks); free[[]u8](&x_ticks);
+
+    _zag_print("Performance chart contract: pass=");
+    _zag_print_i64(state.passed as i64);
+    _zag_print(" fail="); _zag_print_i64(state.failed as i64);
+    _zag_println("");
+    if (state.failed == 0) { return 0; }
+    return 1;
+}

@@ -1,0 +1,789 @@
+@import("std:list")
+
+// Bounded, owned SFNT/OpenType parsing. This is the first font-engine seam:
+// callers receive validated metrics and deterministic Unicode-to-glyph lookup
+// without a runtime dependency on FreeType, HarfBuzz, Skia, or an OS text API.
+
+enum OpenTypeError {
+    none,
+    empty,
+    too_large,
+    truncated,
+    unsupported_signature,
+    invalid_table_count,
+    invalid_table_bounds,
+    duplicate_required_table,
+    missing_cmap,
+    missing_head,
+    missing_maxp,
+    missing_hhea,
+    missing_hmtx,
+    invalid_metrics,
+    unsupported_cmap,
+    invalid_cmap,
+    invalid_codepoint,
+    invalid_glyph,
+    invalid_outline,
+    unsupported_outline,
+}
+
+struct OpenTypeFace {
+    bytes: ArrayList[u8],
+    units_per_em: i32,
+    ascender: i32,
+    descender: i32,
+    line_gap: i32,
+    glyph_count: i32,
+    cmap_offset: i32,
+    cmap_length: i32,
+    cmap_format: i32,
+    hmtx_offset: i32,
+    hmtx_length: i32,
+    horizontal_metric_count: i32,
+    loca_offset: i32,
+    loca_length: i32,
+    glyf_offset: i32,
+    glyf_length: i32,
+    index_to_loc_format: i32,
+    error: OpenTypeError,
+    error_offset: i64,
+}
+
+struct GlyphLookup {
+    glyph_id: i32,
+    error: OpenTypeError,
+}
+
+struct GlyphHorizontalMetric {
+    advance_width: i32,
+    error: OpenTypeError,
+}
+
+struct GlyphOutlinePoint {
+    x: i32,
+    y: i32,
+    on_curve: i32,
+}
+
+struct GlyphOutline {
+    points: ArrayList[GlyphOutlinePoint],
+    contour_ends: ArrayList[i32],
+    x_min: i32,
+    y_min: i32,
+    x_max: i32,
+    y_max: i32,
+    error: OpenTypeError,
+}
+
+fn opentype_u16(bytes: []u8, offset: i32) i32 {
+    return ((bytes[offset] as i32) << 8) | (bytes[offset + 1] as i32);
+}
+
+fn opentype_u32(bytes: []u8, offset: i32) i64 {
+    return ((bytes[offset] as i64) << 24) |
+        ((bytes[offset + 1] as i64) << 16) |
+        ((bytes[offset + 2] as i64) << 8) |
+        (bytes[offset + 3] as i64);
+}
+
+fn opentype_i16(bytes: []u8, offset: i32) i32 {
+    let value: i32 = opentype_u16(bytes, offset);
+    if (value >= 32768) { return value - 65536; }
+    return value;
+}
+
+fn opentype_face_empty() OpenTypeFace {
+    return OpenTypeFace{
+        .bytes = make[u8](1),
+        .units_per_em = 0,
+        .ascender = 0,
+        .descender = 0,
+        .line_gap = 0,
+        .glyph_count = 0,
+        .cmap_offset = 0,
+        .cmap_length = 0,
+        .cmap_format = 0,
+        .hmtx_offset = 0,
+        .hmtx_length = 0,
+        .horizontal_metric_count = 0,
+        .loca_offset = 0,
+        .loca_length = 0,
+        .glyf_offset = 0,
+        .glyf_length = 0,
+        .index_to_loc_format = 0,
+        .error = OpenTypeError.none,
+        .error_offset = 0,
+    };
+}
+
+fn opentype_fail(face: *OpenTypeFace, error: OpenTypeError, offset: i64) void {
+    face.*.error = error;
+    face.*.error_offset = offset;
+}
+
+fn opentype_tag(bytes: []u8, offset: i32, a: i32, b: i32,
+    c: i32, d: i32) i32 {
+    return (bytes[offset] as i32 == a && bytes[offset + 1] as i32 == b &&
+        bytes[offset + 2] as i32 == c && bytes[offset + 3] as i32 == d) as i32;
+}
+
+fn opentype_signature_supported(bytes: []u8) i32 {
+    let signature: i64 = opentype_u32(bytes, 0);
+    if (signature == 65536) { return 1; }
+    return (opentype_tag(bytes, 0, 79, 84, 84, 79) != 0 ||
+        opentype_tag(bytes, 0, 116, 114, 117, 101) != 0) as i32;
+}
+
+fn opentype_table_valid(file_length: i32, offset: i64, length: i64) i32 {
+    if (offset < 0 || length < 0 || offset > file_length as i64) { return 0; }
+    if (length > (file_length as i64) - offset) { return 0; }
+    return 1;
+}
+
+fn opentype_parse(data: []u8) OpenTypeFace {
+    let face: OpenTypeFace = opentype_face_empty();
+    if (data.len == 0) { opentype_fail(&face, OpenTypeError.empty, 0); return face; }
+    if (data.len > 67108864) {
+        opentype_fail(&face, OpenTypeError.too_large, data.len as i64); return face;
+    }
+    let copy_index: i32 = 0;
+    while (copy_index < data.len) {
+        push[u8](&face.bytes, data[copy_index]);
+        copy_index = copy_index + 1;
+    }
+    let bytes: []u8 = face.bytes.data[0..face.bytes.len];
+    if (bytes.len < 12) { opentype_fail(&face, OpenTypeError.truncated, bytes.len as i64); return face; }
+    if (opentype_signature_supported(bytes) == 0) {
+        opentype_fail(&face, OpenTypeError.unsupported_signature, 0); return face;
+    }
+    let table_count: i32 = opentype_u16(bytes, 4);
+    if (table_count <= 0 || table_count > 4096) {
+        opentype_fail(&face, OpenTypeError.invalid_table_count, 4); return face;
+    }
+    let directory_bytes: i64 = 12 + (table_count as i64) * 16;
+    if (directory_bytes > bytes.len as i64) {
+        opentype_fail(&face, OpenTypeError.truncated, bytes.len as i64); return face;
+    }
+    let cmap_table_offset: i32 = 0;
+    let cmap_table_length: i32 = 0;
+    let head_offset: i32 = 0;
+    let head_length: i32 = 0;
+    let maxp_offset: i32 = 0;
+    let maxp_length: i32 = 0;
+    let hhea_offset: i32 = 0;
+    let hhea_length: i32 = 0;
+    let hmtx_offset: i32 = 0;
+    let hmtx_length: i32 = 0;
+    let loca_offset: i32 = 0;
+    let loca_length: i32 = 0;
+    let glyf_offset: i32 = 0;
+    let glyf_length: i32 = 0;
+    let table_index: i32 = 0;
+    while (table_index < table_count) {
+        let record: i32 = 12 + table_index * 16;
+        let offset64: i64 = opentype_u32(bytes, record + 8);
+        let length64: i64 = opentype_u32(bytes, record + 12);
+        if (opentype_table_valid(bytes.len, offset64, length64) == 0) {
+            opentype_fail(&face, OpenTypeError.invalid_table_bounds, record + 8);
+            return face;
+        }
+        if (opentype_tag(bytes, record, 99, 109, 97, 112) != 0) {
+            if (cmap_table_length != 0) {
+                opentype_fail(&face, OpenTypeError.duplicate_required_table, record);
+                return face;
+            }
+            cmap_table_offset = offset64 as i32; cmap_table_length = length64 as i32;
+        } else if (opentype_tag(bytes, record, 104, 101, 97, 100) != 0) {
+            if (head_length != 0) {
+                opentype_fail(&face, OpenTypeError.duplicate_required_table, record);
+                return face;
+            }
+            head_offset = offset64 as i32; head_length = length64 as i32;
+        } else if (opentype_tag(bytes, record, 109, 97, 120, 112) != 0) {
+            if (maxp_length != 0) {
+                opentype_fail(&face, OpenTypeError.duplicate_required_table, record);
+                return face;
+            }
+            maxp_offset = offset64 as i32; maxp_length = length64 as i32;
+        } else if (opentype_tag(bytes, record, 104, 104, 101, 97) != 0) {
+            if (hhea_length != 0) {
+                opentype_fail(&face, OpenTypeError.duplicate_required_table, record);
+                return face;
+            }
+            hhea_offset = offset64 as i32; hhea_length = length64 as i32;
+        } else if (opentype_tag(bytes, record, 104, 109, 116, 120) != 0) {
+            if (hmtx_length != 0) {
+                opentype_fail(&face, OpenTypeError.duplicate_required_table, record);
+                return face;
+            }
+            hmtx_offset = offset64 as i32; hmtx_length = length64 as i32;
+        } else if (opentype_tag(bytes, record, 108, 111, 99, 97) != 0) {
+            if (loca_length != 0) {
+                opentype_fail(&face, OpenTypeError.duplicate_required_table, record);
+                return face;
+            }
+            loca_offset = offset64 as i32; loca_length = length64 as i32;
+        } else if (opentype_tag(bytes, record, 103, 108, 121, 102) != 0) {
+            if (glyf_length != 0) {
+                opentype_fail(&face, OpenTypeError.duplicate_required_table, record);
+                return face;
+            }
+            glyf_offset = offset64 as i32; glyf_length = length64 as i32;
+        }
+        table_index = table_index + 1;
+    }
+    if (cmap_table_length == 0) { opentype_fail(&face, OpenTypeError.missing_cmap, 12); return face; }
+    if (head_length == 0) { opentype_fail(&face, OpenTypeError.missing_head, 12); return face; }
+    if (maxp_length == 0) { opentype_fail(&face, OpenTypeError.missing_maxp, 12); return face; }
+    if (hhea_length == 0) { opentype_fail(&face, OpenTypeError.missing_hhea, 12); return face; }
+    if (hmtx_length == 0) { opentype_fail(&face, OpenTypeError.missing_hmtx, 12); return face; }
+    if (head_length < 20 || maxp_length < 6 || cmap_table_length < 4 || hhea_length < 36) {
+        opentype_fail(&face, OpenTypeError.invalid_metrics, 12); return face;
+    }
+    face.units_per_em = opentype_u16(bytes, head_offset + 18);
+    face.ascender = opentype_i16(bytes, hhea_offset + 4);
+    face.descender = opentype_i16(bytes, hhea_offset + 6);
+    face.line_gap = opentype_i16(bytes, hhea_offset + 8);
+    face.glyph_count = opentype_u16(bytes, maxp_offset + 4);
+    let line_units: i32 = face.ascender - face.descender + face.line_gap;
+    if (face.units_per_em < 16 || face.units_per_em > 16384 ||
+        face.glyph_count <= 0 || face.ascender <= face.descender ||
+        line_units <= 0) {
+        opentype_fail(&face, OpenTypeError.invalid_metrics, head_offset + 18);
+        return face;
+    }
+    face.horizontal_metric_count = opentype_u16(bytes, hhea_offset + 34);
+    if (face.horizontal_metric_count <= 0 ||
+        face.horizontal_metric_count > face.glyph_count) {
+        opentype_fail(&face, OpenTypeError.invalid_metrics, hhea_offset + 34);
+        return face;
+    }
+    let required_hmtx: i64 = (face.horizontal_metric_count as i64) * 4 +
+        ((face.glyph_count - face.horizontal_metric_count) as i64) * 2;
+    if (required_hmtx > hmtx_length as i64) {
+        opentype_fail(&face, OpenTypeError.invalid_metrics, hmtx_offset);
+        return face;
+    }
+    face.hmtx_offset = hmtx_offset;
+    face.hmtx_length = hmtx_length;
+    if ((loca_length == 0) != (glyf_length == 0)) {
+        opentype_fail(&face, OpenTypeError.invalid_outline, 12); return face;
+    }
+    if (loca_length != 0) {
+        if (head_length < 54) {
+            opentype_fail(&face, OpenTypeError.invalid_outline, head_offset); return face;
+        }
+        face.index_to_loc_format = opentype_i16(bytes, head_offset + 50);
+        if (face.index_to_loc_format != 0 && face.index_to_loc_format != 1) {
+            opentype_fail(&face, OpenTypeError.invalid_outline, head_offset + 50); return face;
+        }
+        let required_loca: i64 = (face.glyph_count as i64 + 1) *
+            (2 + face.index_to_loc_format * 2) as i64;
+        if (required_loca > loca_length as i64) {
+            opentype_fail(&face, OpenTypeError.invalid_outline, loca_offset); return face;
+        }
+        face.loca_offset = loca_offset; face.loca_length = loca_length;
+        face.glyf_offset = glyf_offset; face.glyf_length = glyf_length;
+    }
+    let cmap_count: i32 = opentype_u16(bytes, cmap_table_offset + 2);
+    if (cmap_count <= 0 || cmap_count > 4096 ||
+        4 + (cmap_count as i64) * 8 > cmap_table_length as i64) {
+        opentype_fail(&face, OpenTypeError.invalid_cmap, cmap_table_offset + 2);
+        return face;
+    }
+    let best_score: i32 = 0;
+    let best_offset: i32 = 0;
+    let best_length: i32 = 0;
+    let best_format: i32 = 0;
+    let encoding_index: i32 = 0;
+    while (encoding_index < cmap_count) {
+        let record: i32 = cmap_table_offset + 4 + encoding_index * 8;
+        let platform: i32 = opentype_u16(bytes, record);
+        let encoding: i32 = opentype_u16(bytes, record + 2);
+        let relative64: i64 = opentype_u32(bytes, record + 4);
+        if (relative64 >= 0 && relative64 + 2 <= cmap_table_length as i64) {
+            let subtable: i32 = cmap_table_offset + relative64 as i32;
+            let format: i32 = opentype_u16(bytes, subtable);
+            let length64: i64 = 0;
+            if (format == 4 && relative64 + 4 <= cmap_table_length as i64) {
+                length64 = opentype_u16(bytes, subtable + 2) as i64;
+            } else if (format == 12 && relative64 + 8 <= cmap_table_length as i64) {
+                length64 = opentype_u32(bytes, subtable + 4);
+            }
+            let score: i32 = 0;
+            if (format == 12 && platform == 3 && encoding == 10) { score = 40; }
+            else if (format == 12 && platform == 0) { score = 35; }
+            else if (format == 4 && platform == 3 && (encoding == 1 || encoding == 0)) { score = 30; }
+            else if (format == 4 && platform == 0) { score = 25; }
+            if (score > best_score && length64 >= 16 &&
+                relative64 + length64 <= cmap_table_length as i64) {
+                best_score = score; best_offset = subtable;
+                best_length = length64 as i32; best_format = format;
+            }
+        }
+        encoding_index = encoding_index + 1;
+    }
+    if (best_score == 0) {
+        opentype_fail(&face, OpenTypeError.unsupported_cmap, cmap_table_offset);
+        return face;
+    }
+    face.cmap_offset = best_offset;
+    face.cmap_length = best_length;
+    face.cmap_format = best_format;
+    return face;
+}
+
+fn opentype_lookup_fail(error: OpenTypeError) GlyphLookup {
+    return GlyphLookup{ .glyph_id = 0, .error = error };
+}
+
+fn opentype_lookup_format12(face: OpenTypeFace, codepoint: i64) GlyphLookup {
+    let bytes: []u8 = face.bytes.data[0..face.bytes.len];
+    if (face.cmap_length < 16) { return opentype_lookup_fail(OpenTypeError.invalid_cmap); }
+    let group_count64: i64 = opentype_u32(bytes, face.cmap_offset + 12);
+    if (group_count64 > 1048576 || 16 + group_count64 * 12 > face.cmap_length as i64) {
+        return opentype_lookup_fail(OpenTypeError.invalid_cmap);
+    }
+    let low: i64 = 0;
+    let high: i64 = group_count64;
+    while (low < high) {
+        let middle: i64 = low + (high - low) / 2;
+        let group: i32 = face.cmap_offset + 16 + (middle as i32) * 12;
+        let start: i64 = opentype_u32(bytes, group);
+        let end: i64 = opentype_u32(bytes, group + 4);
+        if (end < start) { return opentype_lookup_fail(OpenTypeError.invalid_cmap); }
+        if (codepoint < start) { high = middle; }
+        else if (codepoint > end) { low = middle + 1; }
+        else {
+            let glyph: i64 = opentype_u32(bytes, group + 8) + (codepoint - start);
+            if (glyph < 0 || glyph >= face.glyph_count as i64) {
+                return opentype_lookup_fail(OpenTypeError.invalid_glyph);
+            }
+            return GlyphLookup{ .glyph_id = glyph as i32, .error = OpenTypeError.none };
+        }
+    }
+    return GlyphLookup{ .glyph_id = 0, .error = OpenTypeError.none };
+}
+
+fn opentype_lookup_format4(face: OpenTypeFace, codepoint: i64) GlyphLookup {
+    if (codepoint > 65535) { return GlyphLookup{ .glyph_id = 0, .error = OpenTypeError.none }; }
+    let bytes: []u8 = face.bytes.data[0..face.bytes.len];
+    if (face.cmap_length < 16) { return opentype_lookup_fail(OpenTypeError.invalid_cmap); }
+    let segment_count: i32 = opentype_u16(bytes, face.cmap_offset + 6) / 2;
+    if (segment_count <= 0 || segment_count > 32768) {
+        return opentype_lookup_fail(OpenTypeError.invalid_cmap);
+    }
+    let end_base: i32 = face.cmap_offset + 14;
+    let start_base: i32 = end_base + segment_count * 2 + 2;
+    let delta_base: i32 = start_base + segment_count * 2;
+    let range_base: i32 = delta_base + segment_count * 2;
+    if (range_base + segment_count * 2 > face.cmap_offset + face.cmap_length) {
+        return opentype_lookup_fail(OpenTypeError.invalid_cmap);
+    }
+    let segment: i32 = 0;
+    while (segment < segment_count) {
+        let end: i32 = opentype_u16(bytes, end_base + segment * 2);
+        if (codepoint <= end as i64) {
+            let start: i32 = opentype_u16(bytes, start_base + segment * 2);
+            if (codepoint < start as i64) {
+                return GlyphLookup{ .glyph_id = 0, .error = OpenTypeError.none };
+            }
+            let delta_raw: i32 = opentype_u16(bytes, delta_base + segment * 2);
+            let delta: i32 = delta_raw;
+            if (delta >= 32768) { delta = delta - 65536; }
+            let range: i32 = opentype_u16(bytes, range_base + segment * 2);
+            let glyph: i32 = 0;
+            if (range == 0) {
+                glyph = ((codepoint as i32) + delta) % 65536;
+                if (glyph < 0) { glyph = glyph + 65536; }
+            } else {
+                let glyph_offset: i32 = range_base + segment * 2 + range +
+                    ((codepoint as i32) - start) * 2;
+                if (glyph_offset < face.cmap_offset ||
+                    glyph_offset + 2 > face.cmap_offset + face.cmap_length) {
+                    return opentype_lookup_fail(OpenTypeError.invalid_cmap);
+                }
+                glyph = opentype_u16(bytes, glyph_offset);
+                if (glyph != 0) {
+                    glyph = (glyph + delta) % 65536;
+                    if (glyph < 0) { glyph = glyph + 65536; }
+                }
+            }
+            if (glyph >= face.glyph_count) {
+                return opentype_lookup_fail(OpenTypeError.invalid_glyph);
+            }
+            return GlyphLookup{ .glyph_id = glyph, .error = OpenTypeError.none };
+        }
+        segment = segment + 1;
+    }
+    return GlyphLookup{ .glyph_id = 0, .error = OpenTypeError.none };
+}
+
+fn opentype_glyph_for_scalar(face: OpenTypeFace, codepoint: i64) GlyphLookup {
+    if (face.error != OpenTypeError.none) { return opentype_lookup_fail(face.error); }
+    if (codepoint < 0 || codepoint > 1114111 ||
+        (codepoint >= 55296 && codepoint <= 57343)) {
+        return opentype_lookup_fail(OpenTypeError.invalid_codepoint);
+    }
+    if (face.cmap_format == 12) { return opentype_lookup_format12(face, codepoint); }
+    if (face.cmap_format == 4) { return opentype_lookup_format4(face, codepoint); }
+    return opentype_lookup_fail(OpenTypeError.unsupported_cmap);
+}
+
+fn opentype_horizontal_metric(face: OpenTypeFace,
+    glyph_id: i32) GlyphHorizontalMetric {
+    if (face.error != OpenTypeError.none) {
+        return GlyphHorizontalMetric{ .advance_width = 0, .error = face.error };
+    }
+    if (glyph_id < 0 || glyph_id >= face.glyph_count ||
+        face.horizontal_metric_count <= 0) {
+        return GlyphHorizontalMetric{
+            .advance_width = 0, .error = OpenTypeError.invalid_glyph };
+    }
+    let metric_index: i32 = glyph_id;
+    if (metric_index >= face.horizontal_metric_count) {
+        metric_index = face.horizontal_metric_count - 1;
+    }
+    let offset: i32 = face.hmtx_offset + metric_index * 4;
+    if (offset < face.hmtx_offset || offset + 2 > face.hmtx_offset + face.hmtx_length) {
+        return GlyphHorizontalMetric{
+            .advance_width = 0, .error = OpenTypeError.invalid_metrics };
+    }
+    return GlyphHorizontalMetric{
+        .advance_width = opentype_u16(face.bytes.data[0..face.bytes.len], offset),
+        .error = OpenTypeError.none,
+    };
+}
+
+fn opentype_outline_empty() GlyphOutline {
+    return GlyphOutline{
+        .points = make[GlyphOutlinePoint](1),
+        .contour_ends = make[i32](1),
+        .x_min = 0, .y_min = 0, .x_max = 0, .y_max = 0,
+        .error = OpenTypeError.none,
+    };
+}
+
+fn opentype_outline_fail(outline: *GlyphOutline, error: OpenTypeError) void {
+    outline.*.error = error;
+}
+
+fn opentype_glyph_data_offset(face: OpenTypeFace, glyph_id: i32) i64 {
+    let bytes: []u8 = face.bytes.data[0..face.bytes.len];
+    if (face.index_to_loc_format == 0) {
+        return (opentype_u16(bytes, face.loca_offset + glyph_id * 2) as i64) * 2;
+    }
+    return opentype_u32(bytes, face.loca_offset + glyph_id * 4);
+}
+
+fn opentype_i8(value: u8) i32 {
+    let result: i32 = value as i32;
+    if (result >= 128) { return result - 256; }
+    return result;
+}
+
+fn opentype_f2dot14_round(value: i64) i32 {
+    if (value >= 0) { return ((value + 8192) / 16384) as i32; }
+    return ((value - 8192) / 16384) as i32;
+}
+
+// Decode one TrueType simple glyph into exact font-unit contour points. Curves
+// remain quadratic at this layer: consecutive off-curve points imply the
+// standard midpoint when the renderer converts the contour into a Path.
+fn opentype_glyph_outline_depth(face: OpenTypeFace, glyph_id: i32,
+    depth: i32) GlyphOutline {
+    let outline: GlyphOutline = opentype_outline_empty();
+    if (face.error != OpenTypeError.none) {
+        opentype_outline_fail(&outline, face.error); return outline;
+    }
+    if (glyph_id < 0 || glyph_id >= face.glyph_count) {
+        opentype_outline_fail(&outline, OpenTypeError.invalid_glyph); return outline;
+    }
+    if (depth > 16) {
+        opentype_outline_fail(&outline, OpenTypeError.invalid_outline); return outline;
+    }
+    if (face.loca_length == 0 || face.glyf_length == 0) {
+        opentype_outline_fail(&outline, OpenTypeError.unsupported_outline); return outline;
+    }
+    let start64: i64 = opentype_glyph_data_offset(face, glyph_id);
+    let end64: i64 = opentype_glyph_data_offset(face, glyph_id + 1);
+    if (start64 < 0 || end64 < start64 || end64 > face.glyf_length as i64) {
+        opentype_outline_fail(&outline, OpenTypeError.invalid_outline); return outline;
+    }
+    if (start64 == end64) { return outline; }
+    if (end64 - start64 < 10) {
+        opentype_outline_fail(&outline, OpenTypeError.invalid_outline); return outline;
+    }
+    let bytes: []u8 = face.bytes.data[0..face.bytes.len];
+    let glyph_start: i32 = face.glyf_offset + start64 as i32;
+    let glyph_end: i32 = face.glyf_offset + end64 as i32;
+    let contour_count: i32 = opentype_i16(bytes, glyph_start);
+    outline.x_min = opentype_i16(bytes, glyph_start + 2);
+    outline.y_min = opentype_i16(bytes, glyph_start + 4);
+    outline.x_max = opentype_i16(bytes, glyph_start + 6);
+    outline.y_max = opentype_i16(bytes, glyph_start + 8);
+    if (outline.x_min > outline.x_max || outline.y_min > outline.y_max) {
+        opentype_outline_fail(&outline, OpenTypeError.invalid_outline); return outline;
+    }
+    if (contour_count < 0) {
+        let cursor: i32 = glyph_start + 10;
+        let component_count: i32 = 0;
+        let more_components: i32 = 1;
+        let final_flags: i32 = 0;
+        while (more_components != 0) {
+            if (component_count >= 256 || cursor + 4 > glyph_end) {
+                opentype_outline_fail(&outline, OpenTypeError.invalid_outline); return outline;
+            }
+            let flags: i32 = opentype_u16(bytes, cursor);
+            let component_glyph: i32 = opentype_u16(bytes, cursor + 2);
+            cursor = cursor + 4; component_count = component_count + 1;
+            final_flags = flags;
+            if ((flags & 6144) == 6144 || (flags & (0 - 8192)) != 0) {
+                opentype_outline_fail(&outline, OpenTypeError.invalid_outline); return outline;
+            }
+            let arg_1: i32 = 0;
+            let arg_2: i32 = 0;
+            if ((flags & 1) != 0) {
+                if (cursor + 4 > glyph_end) {
+                    opentype_outline_fail(&outline, OpenTypeError.invalid_outline); return outline;
+                }
+                if ((flags & 2) != 0) {
+                    arg_1 = opentype_i16(bytes, cursor);
+                    arg_2 = opentype_i16(bytes, cursor + 2);
+                } else {
+                    arg_1 = opentype_u16(bytes, cursor);
+                    arg_2 = opentype_u16(bytes, cursor + 2);
+                }
+                cursor = cursor + 4;
+            } else {
+                if (cursor + 2 > glyph_end) {
+                    opentype_outline_fail(&outline, OpenTypeError.invalid_outline); return outline;
+                }
+                if ((flags & 2) != 0) {
+                    arg_1 = opentype_i8(bytes[cursor]); arg_2 = opentype_i8(bytes[cursor + 1]);
+                } else {
+                    arg_1 = bytes[cursor] as i32; arg_2 = bytes[cursor + 1] as i32;
+                }
+                cursor = cursor + 2;
+            }
+            let a: i32 = 16384; let b: i32 = 0;
+            let c: i32 = 0; let d: i32 = 16384;
+            let transform_kinds: i32 = (((flags & 8) != 0) as i32) +
+                (((flags & 64) != 0) as i32) + (((flags & 128) != 0) as i32);
+            if (transform_kinds > 1) {
+                opentype_outline_fail(&outline, OpenTypeError.invalid_outline); return outline;
+            }
+            if ((flags & 8) != 0) {
+                if (cursor + 2 > glyph_end) {
+                    opentype_outline_fail(&outline, OpenTypeError.invalid_outline); return outline;
+                }
+                a = opentype_i16(bytes, cursor); d = a; cursor = cursor + 2;
+            } else if ((flags & 64) != 0) {
+                if (cursor + 4 > glyph_end) {
+                    opentype_outline_fail(&outline, OpenTypeError.invalid_outline); return outline;
+                }
+                a = opentype_i16(bytes, cursor); d = opentype_i16(bytes, cursor + 2);
+                cursor = cursor + 4;
+            } else if ((flags & 128) != 0) {
+                if (cursor + 8 > glyph_end) {
+                    opentype_outline_fail(&outline, OpenTypeError.invalid_outline); return outline;
+                }
+                a = opentype_i16(bytes, cursor); b = opentype_i16(bytes, cursor + 2);
+                c = opentype_i16(bytes, cursor + 4); d = opentype_i16(bytes, cursor + 6);
+                cursor = cursor + 8;
+            }
+            let component: GlyphOutline = opentype_glyph_outline_depth(
+                face, component_glyph, depth + 1);
+            if (component.error != OpenTypeError.none) {
+                opentype_glyph_outline_free(&component);
+                opentype_outline_fail(&outline, OpenTypeError.invalid_outline); return outline;
+            }
+            if (outline.points.len + component.points.len > 65535 ||
+                outline.contour_ends.len + component.contour_ends.len > 4096) {
+                opentype_glyph_outline_free(&component);
+                opentype_outline_fail(&outline, OpenTypeError.invalid_outline); return outline;
+            }
+            let translate_x: i32 = arg_1;
+            let translate_y: i32 = arg_2;
+            if ((flags & 2) == 0) {
+                if (arg_1 < 0 || arg_1 >= outline.points.len ||
+                    arg_2 < 0 || arg_2 >= component.points.len) {
+                    opentype_glyph_outline_free(&component);
+                    opentype_outline_fail(&outline, OpenTypeError.invalid_outline); return outline;
+                }
+                let child_anchor: GlyphOutlinePoint = component.points.data[arg_2];
+                let anchor_x: i32 = opentype_f2dot14_round(
+                    (a as i64) * child_anchor.x + (c as i64) * child_anchor.y);
+                let anchor_y: i32 = opentype_f2dot14_round(
+                    (b as i64) * child_anchor.x + (d as i64) * child_anchor.y);
+                translate_x = outline.points.data[arg_1].x - anchor_x;
+                translate_y = outline.points.data[arg_1].y - anchor_y;
+            } else if ((flags & 2048) != 0) {
+                let raw_x: i32 = translate_x; let raw_y: i32 = translate_y;
+                translate_x = opentype_f2dot14_round(
+                    (a as i64) * raw_x + (c as i64) * raw_y);
+                translate_y = opentype_f2dot14_round(
+                    (b as i64) * raw_x + (d as i64) * raw_y);
+            }
+            let point_base: i32 = outline.points.len;
+            let component_point: i32 = 0;
+            while (component_point < component.points.len) {
+                let source: GlyphOutlinePoint = component.points.data[component_point];
+                let transformed_x: i64 = opentype_f2dot14_round(
+                    (a as i64) * source.x + (c as i64) * source.y) as i64 + translate_x;
+                let transformed_y: i64 = opentype_f2dot14_round(
+                    (b as i64) * source.x + (d as i64) * source.y) as i64 + translate_y;
+                if (transformed_x < (0 - 2147483647) || transformed_x > 2147483647 ||
+                    transformed_y < (0 - 2147483647) || transformed_y > 2147483647) {
+                    opentype_glyph_outline_free(&component);
+                    opentype_outline_fail(&outline, OpenTypeError.invalid_outline); return outline;
+                }
+                push[GlyphOutlinePoint](&outline.points, GlyphOutlinePoint{
+                    .x = transformed_x as i32, .y = transformed_y as i32,
+                    .on_curve = source.on_curve });
+                component_point = component_point + 1;
+            }
+            let component_contour: i32 = 0;
+            while (component_contour < component.contour_ends.len) {
+                push[i32](&outline.contour_ends,
+                    point_base + component.contour_ends.data[component_contour]);
+                component_contour = component_contour + 1;
+            }
+            opentype_glyph_outline_free(&component);
+            more_components = ((flags & 32) != 0) as i32;
+        }
+        if ((final_flags & 256) != 0) {
+            if (cursor + 2 > glyph_end) {
+                opentype_outline_fail(&outline, OpenTypeError.invalid_outline); return outline;
+            }
+            let instruction_length: i32 = opentype_u16(bytes, cursor);
+            cursor = cursor + 2;
+            if (cursor + instruction_length > glyph_end) {
+                opentype_outline_fail(&outline, OpenTypeError.invalid_outline); return outline;
+            }
+        }
+        let composed_point: i32 = 0;
+        while (composed_point < outline.points.len) {
+            let point: GlyphOutlinePoint = outline.points.data[composed_point];
+            if (point.x < outline.x_min || point.x > outline.x_max ||
+                point.y < outline.y_min || point.y > outline.y_max) {
+                opentype_outline_fail(&outline, OpenTypeError.invalid_outline); return outline;
+            }
+            composed_point = composed_point + 1;
+        }
+        return outline;
+    }
+    if (contour_count > 4096 || glyph_start + 10 + contour_count * 2 + 2 > glyph_end) {
+        opentype_outline_fail(&outline, OpenTypeError.invalid_outline); return outline;
+    }
+    let cursor: i32 = glyph_start + 10;
+    let contour_index: i32 = 0;
+    let previous_end: i32 = 0 - 1;
+    while (contour_index < contour_count) {
+        let contour_end: i32 = opentype_u16(bytes, cursor);
+        if (contour_end <= previous_end) {
+            opentype_outline_fail(&outline, OpenTypeError.invalid_outline); return outline;
+        }
+        push[i32](&outline.contour_ends, contour_end);
+        previous_end = contour_end;
+        cursor = cursor + 2; contour_index = contour_index + 1;
+    }
+    let point_count: i32 = previous_end + 1;
+    if (point_count < 0 || point_count > 65535 || cursor + 2 > glyph_end) {
+        opentype_outline_fail(&outline, OpenTypeError.invalid_outline); return outline;
+    }
+    let instruction_length: i32 = opentype_u16(bytes, cursor);
+    cursor = cursor + 2;
+    if (cursor + instruction_length > glyph_end) {
+        opentype_outline_fail(&outline, OpenTypeError.invalid_outline); return outline;
+    }
+    cursor = cursor + instruction_length;
+    let flags: ArrayList[u8] = make[u8](point_count + 1);
+    while (flags.len < point_count) {
+        if (cursor >= glyph_end) {
+            free[u8](&flags); opentype_outline_fail(&outline, OpenTypeError.invalid_outline);
+            return outline;
+        }
+        let flag: u8 = bytes[cursor]; cursor = cursor + 1;
+        let repeat: i32 = 1;
+        if (((flag as i32) & 8) != 0) {
+            if (cursor >= glyph_end) {
+                free[u8](&flags); opentype_outline_fail(&outline, OpenTypeError.invalid_outline);
+                return outline;
+            }
+            repeat = (bytes[cursor] as i32) + 1; cursor = cursor + 1;
+        }
+        if (flags.len + repeat > point_count) {
+            free[u8](&flags); opentype_outline_fail(&outline, OpenTypeError.invalid_outline);
+            return outline;
+        }
+        let repeat_index: i32 = 0;
+        while (repeat_index < repeat) {
+            push[u8](&flags, flag); repeat_index = repeat_index + 1;
+        }
+    }
+    let x: i32 = 0;
+    let point_index: i32 = 0;
+    while (point_index < point_count) {
+        let flag: i32 = flags.data[point_index] as i32;
+        if ((flag & 2) != 0) {
+            if (cursor >= glyph_end) {
+                free[u8](&flags); opentype_outline_fail(&outline, OpenTypeError.invalid_outline);
+                return outline;
+            }
+            let delta: i32 = bytes[cursor] as i32; cursor = cursor + 1;
+            if ((flag & 16) != 0) { x = x + delta; } else { x = x - delta; }
+        } else if ((flag & 16) == 0) {
+            if (cursor + 2 > glyph_end) {
+                free[u8](&flags); opentype_outline_fail(&outline, OpenTypeError.invalid_outline);
+                return outline;
+            }
+            x = x + opentype_i16(bytes, cursor); cursor = cursor + 2;
+        }
+        push[GlyphOutlinePoint](&outline.points, GlyphOutlinePoint{
+            .x = x, .y = 0, .on_curve = (flag & 1) as i32 });
+        point_index = point_index + 1;
+    }
+    let y: i32 = 0;
+    point_index = 0;
+    while (point_index < point_count) {
+        let flag: i32 = flags.data[point_index] as i32;
+        if ((flag & 4) != 0) {
+            if (cursor >= glyph_end) {
+                free[u8](&flags); opentype_outline_fail(&outline, OpenTypeError.invalid_outline);
+                return outline;
+            }
+            let delta: i32 = bytes[cursor] as i32; cursor = cursor + 1;
+            if ((flag & 32) != 0) { y = y + delta; } else { y = y - delta; }
+        } else if ((flag & 32) == 0) {
+            if (cursor + 2 > glyph_end) {
+                free[u8](&flags); opentype_outline_fail(&outline, OpenTypeError.invalid_outline);
+                return outline;
+            }
+            y = y + opentype_i16(bytes, cursor); cursor = cursor + 2;
+        }
+        outline.points.data[point_index].y = y;
+        if (outline.points.data[point_index].x < outline.x_min ||
+            outline.points.data[point_index].x > outline.x_max ||
+            y < outline.y_min || y > outline.y_max) {
+            free[u8](&flags); opentype_outline_fail(&outline, OpenTypeError.invalid_outline);
+            return outline;
+        }
+        point_index = point_index + 1;
+    }
+    free[u8](&flags);
+    return outline;
+}
+
+fn opentype_glyph_outline(face: OpenTypeFace, glyph_id: i32) GlyphOutline {
+    return opentype_glyph_outline_depth(face, glyph_id, 0);
+}
+
+fn opentype_glyph_outline_free(outline: *GlyphOutline) void {
+    free[GlyphOutlinePoint](&outline.*.points);
+    free[i32](&outline.*.contour_ends);
+}
+
+fn opentype_face_free(face: *OpenTypeFace) void {
+    free[u8](&face.*.bytes);
+}

@@ -1,0 +1,97 @@
+@import("../src/text/opentype.zag")
+@import("support/opentype_fixture.zag")
+
+fn fuzz_next(state: *i64) i64 {
+    state.* = (state.* * 48271) % 2147483647;
+    return state.*;
+}
+
+fn fuzz_outline_valid(outline: GlyphOutline) i32 {
+    if (outline.error != OpenTypeError.none) { return 1; }
+    if (outline.points.len > 65535 || outline.contour_ends.len > 4096) { return 0; }
+    if (outline.contour_ends.len == 0) { return (outline.points.len == 0) as i32; }
+    if (outline.contour_ends.data[outline.contour_ends.len - 1] !=
+        outline.points.len - 1) { return 0; }
+    let previous: i32 = 0 - 1;
+    let contour: i32 = 0;
+    while (contour < outline.contour_ends.len) {
+        let endpoint: i32 = outline.contour_ends.data[contour];
+        if (endpoint <= previous || endpoint >= outline.points.len) { return 0; }
+        previous = endpoint; contour = contour + 1;
+    }
+    let point: i32 = 0;
+    while (point < outline.points.len) {
+        let value: GlyphOutlinePoint = outline.points.data[point];
+        if (value.on_curve < 0 || value.on_curve > 1 ||
+            value.x < outline.x_min || value.x > outline.x_max ||
+            value.y < outline.y_min || value.y > outline.y_max) { return 0; }
+        point = point + 1;
+    }
+    return 1;
+}
+
+fn main() i32 {
+    let seed: i64 = 918273;
+    let iteration: i32 = 0;
+    while (iteration < 20000) {
+        let length: i32 = (fuzz_next(&seed) % 513) as i32;
+        let bytes: ArrayList[u8] = make[u8](length + 1);
+        let index: i32 = 0;
+        while (index < length) {
+            push[u8](&bytes, (fuzz_next(&seed) & 255) as u8);
+            index = index + 1;
+        }
+        let face: OpenTypeFace = opentype_parse(bytes.data[0..bytes.len]);
+        if (face.error == OpenTypeError.none) {
+            if (face.units_per_em < 16 || face.units_per_em > 16384 ||
+                face.ascender <= face.descender ||
+                face.ascender - face.descender + face.line_gap <= 0 ||
+                face.glyph_count <= 0 ||
+                (face.cmap_format != 4 && face.cmap_format != 12) ||
+                face.cmap_offset < 0 || face.cmap_length <= 0 ||
+                face.cmap_offset + face.cmap_length > face.bytes.len) {
+                opentype_face_free(&face); free[u8](&bytes);
+                _zag_eprintln("OpenType fuzz: accepted face violated bounded invariants");
+                return 1;
+            }
+            let codepoint: i64 = fuzz_next(&seed) % 1114112;
+            let glyph: GlyphLookup = opentype_glyph_for_scalar(face, codepoint);
+            if (glyph.error == OpenTypeError.none &&
+                (glyph.glyph_id < 0 || glyph.glyph_id >= face.glyph_count)) {
+                opentype_face_free(&face); free[u8](&bytes);
+                _zag_eprintln("OpenType fuzz: glyph lookup escaped declared glyph count");
+                return 2;
+            }
+        }
+        opentype_face_free(&face);
+        free[u8](&bytes);
+        iteration = iteration + 1;
+    }
+    iteration = 0;
+    while (iteration < 20000) {
+        let bytes: ArrayList[u8] = fixture_font();
+        let mutation_count: i32 = 1 + (fuzz_next(&seed) % 4) as i32;
+        let mutation: i32 = 0;
+        while (mutation < mutation_count) {
+            let offset: i32 = (fuzz_next(&seed) % bytes.len) as i32;
+            bytes.data[offset] = (fuzz_next(&seed) & 255) as u8;
+            mutation = mutation + 1;
+        }
+        let face: OpenTypeFace = opentype_parse(bytes.data[0..bytes.len]);
+        if (face.error == OpenTypeError.none && face.glyph_count > 3 &&
+            face.loca_length > 0) {
+            let outline: GlyphOutline = opentype_glyph_outline(face, 3);
+            if (fuzz_outline_valid(outline) == 0) {
+                opentype_glyph_outline_free(&outline);
+                opentype_face_free(&face); free[u8](&bytes);
+                _zag_eprintln("OpenType fuzz: structured mutation escaped outline invariants");
+                return 3;
+            }
+            opentype_glyph_outline_free(&outline);
+        }
+        opentype_face_free(&face); free[u8](&bytes);
+        iteration = iteration + 1;
+    }
+    _zag_println("OpenType fuzz: arbitrary=20000 structured=20000 fail=0");
+    return 0;
+}

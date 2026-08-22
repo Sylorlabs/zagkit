@@ -1,0 +1,12 @@
+visual-direction generation dry-run
+mode=full expected_total=100800
+start_index=0
+requested_end_index=8
+max_items=8
+max_items_stops_at=8
+visual-direction generation complete with limit reached
+mode=full expected_total=100800
+requested_max_items=8
+created_count=8
+overwritten_count=8
+actual_targets=8

@@ -1,0 +1,325 @@
+@import("std:list")
+@import("../src/core/virtual_lifecycle.zag")
+@import("../src/layout/virtual_table.zag")
+@import("../src/layout/virtual_tree.zag")
+
+struct TestState { passed: i32, failed: i32 }
+
+fn expect(state: *TestState, condition: i32, name: []u8) void {
+    if (condition != 0) {
+        state.*.passed = state.*.passed + 1;
+        _zag_print("ok  "); _zag_println(name);
+    } else {
+        state.*.failed = state.*.failed + 1;
+        _zag_print("FAIL "); _zag_println(name);
+    }
+}
+
+fn table_contract(state: *TestState) void {
+    let row_overrides: ArrayList[VirtualExtentOverride] = make[VirtualExtentOverride](1);
+    let rows: VirtualListModel = virtual_model(1000000, 1000, 20, 1, 3, row_overrides);
+    let columns: ArrayList[VirtualTableColumn] = make[VirtualTableColumn](6);
+    let pinned: VirtualTableColumn = virtual_table_column(10, 40, 30, 60);
+    pinned.pinned = 1; pinned.resizable = 0;
+    push[VirtualTableColumn](&columns, pinned);
+    let i: i64 = 1;
+    while (i < 6) { push[VirtualTableColumn](&columns, virtual_table_column(10 + i, 50, 30, 80)); i = i + 1; }
+    let model: VirtualTableModel = virtual_table_model(7, rows, columns, 2);
+    let style: VirtualTableStyle = virtual_table_style(20, 2, insets_all(2));
+    let vertical: i64 = virtual_item_offset(rows,
+        virtual_style(VirtualAxis.vertical, insets_all(0)), 500000);
+    let result: VirtualTableResult = virtual_table_layout(
+        model, size(180, 120), vertical, 60, style
+    );
+    expect(state, result.error == VirtualTableError.none && result.semantic_rows == 1000000 &&
+        result.semantic_columns == 6 && result.first_visible_row == 500000 &&
+        result.last_visible_row == 500004,
+        "million-row Table projects the exact semantic row range without materializing the collection");
+    expect(state, result.first_live_row == 499998 && result.last_live_row == 500006 &&
+        result.first_visible_column == 2 && result.last_visible_column == 4 &&
+        result.pinned_columns == 1 && result.cells.len == 60,
+        "Table bounds two-axis live cells while retaining pinned and overscanned columns");
+    expect(state, result.cells.data[0].header == 1 && result.cells.data[0].pinned == 1 &&
+        result.cells.data[0].frame.x == 2 && result.cells.data[1 + 2].row_index == 500000 &&
+        result.cells.data[1 + 2].frame.y == 22,
+        "pinned headers and rows remain fixed while the body scrolls to a stable row ID");
+    expect(state, result.cells.data[20].column_index == 2 && result.cells.data[20].frame.x == 36 &&
+        result.max_horizontal_scroll == 124 && result.layout_hash != 0,
+        "scrolling columns resolve exact logical offsets and maximum horizontal range");
+    let repeated: VirtualTableResult = virtual_table_layout(model, size(180, 120), vertical, 60, style);
+    expect(state, repeated.layout_hash == result.layout_hash,
+        "identical Table inputs produce identical cell identity and geometry");
+    let rtl_style: VirtualTableStyle = style; rtl_style.direction = LayoutDirection.rtl;
+    let rtl: VirtualTableResult = virtual_table_layout(model, size(180, 120), vertical, 60, rtl_style);
+    expect(state, rtl.cells.data[0].frame.x == 138 && rtl.layout_hash != result.layout_hash,
+        "RTL mirrors pinned and scrolling Table columns without changing semantic order");
+    virtual_table_free(&rtl); virtual_table_free(&repeated); virtual_table_free(&result);
+
+    let resize: VirtualTableResizeResult = virtual_table_resize(&model, 12, 100);
+    expect(state, resize.error == VirtualTableError.none && resize.old_width == 50 &&
+        resize.width == 80 && resize.consumed == 30 && resize.unconsumed == 70 &&
+        resize.changed == 1 && model.revision == 3,
+        "Table resize exposes clamped consumption and advances exact model and column revisions");
+    let fixed_resize: VirtualTableResizeResult = virtual_table_resize(&model, 10, 10);
+    expect(state, fixed_resize.error == VirtualTableError.column_not_resizable &&
+        fixed_resize.consumed == 0 && fixed_resize.unconsumed == 10,
+        "nonresizable pinned columns reject mutation without losing requested delta truth");
+    style.max_live_cells = 20;
+    let limited: VirtualTableResult = virtual_table_layout(model, size(180, 120), vertical, 60, style);
+    expect(state, limited.error == VirtualTableError.cell_limit_exceeded,
+        "Table cell residency ceilings fail before cell allocation");
+    virtual_table_free(&limited);
+    free[VirtualTableColumn](&columns); free[VirtualExtentOverride](&row_overrides);
+}
+
+fn table_failure_contract(state: *TestState) void {
+    let overrides: ArrayList[VirtualExtentOverride] = make[VirtualExtentOverride](1);
+    let rows: VirtualListModel = virtual_model(10, 1, 10, 0, 0, overrides);
+    let columns: ArrayList[VirtualTableColumn] = make[VirtualTableColumn](3);
+    push[VirtualTableColumn](&columns, virtual_table_column(1, 20, 10, 30));
+    let late_pinned: VirtualTableColumn = virtual_table_column(2, 20, 10, 30); late_pinned.pinned = 1;
+    push[VirtualTableColumn](&columns, late_pinned);
+    let malformed: VirtualTableResult = virtual_table_layout(
+        virtual_table_model(1, rows, columns, 0), size(100, 80), 0, 0,
+        virtual_table_style(10, 1, insets_all(0))
+    );
+    expect(state, malformed.error == VirtualTableError.invalid_pinned_order && malformed.error_index == 1,
+        "pinned Table columns must form one deterministic logical-leading region");
+    virtual_table_free(&malformed);
+    columns.data[1].pinned = 0; columns.data[1].id = 1;
+    let duplicate: VirtualTableResult = virtual_table_layout(
+        virtual_table_model(1, rows, columns, 0), size(100, 80), 0, 0,
+        virtual_table_style(10, 1, insets_all(0))
+    );
+    expect(state, duplicate.error == VirtualTableError.duplicate_column && duplicate.error_index == 1,
+        "duplicate Table column IDs fail at the exact column before layout");
+    virtual_table_free(&duplicate);
+    free[VirtualTableColumn](&columns); free[VirtualExtentOverride](&overrides);
+}
+
+fn tree_source() ArrayList[VirtualTreeNode] {
+    let source: ArrayList[VirtualTreeNode] = make[VirtualTreeNode](8);
+    push[VirtualTreeNode](&source, virtual_tree_node(1, 0, 0, 1, 1, 12, 1));
+    push[VirtualTreeNode](&source, virtual_tree_node(2, 1, 1, 0, 0, 10, 1));
+    push[VirtualTreeNode](&source, virtual_tree_node(3, 1, 1, 1, 0, 10, 1));
+    push[VirtualTreeNode](&source, virtual_tree_node(4, 3, 2, 0, 0, 8, 1));
+    push[VirtualTreeNode](&source, virtual_tree_node(5, 3, 2, 0, 0, 10, 1));
+    push[VirtualTreeNode](&source, virtual_tree_node(6, 1, 1, 0, 0, 10, 1));
+    push[VirtualTreeNode](&source, virtual_tree_node(7, 0, 0, 1, 0, 10, 1));
+    push[VirtualTreeNode](&source, virtual_tree_node(8, 7, 1, 0, 0, 10, 1));
+    return source;
+}
+
+fn tree_contract(state: *TestState) void {
+    let source: ArrayList[VirtualTreeNode] = tree_source();
+    let collapsed: VirtualTreeProjection = virtual_tree_project(source, 1);
+    expect(state, collapsed.error == VirtualTreeError.none && collapsed.source_count == 8 &&
+        collapsed.nodes.len == 5 && collapsed.nodes.data[0].id == 1 &&
+        collapsed.nodes.data[2].id == 3 && collapsed.nodes.data[3].id == 6 &&
+        collapsed.nodes.data[4].id == 7,
+        "Tree projection removes collapsed descendants while preserving source and sibling identity");
+    let style: VirtualTreeStyle = virtual_tree_style(10, 1, 4, insets_all(1));
+    let ltr: VirtualTreeResult = virtual_tree_layout(collapsed, size(100, 30), 0, style);
+    expect(state, ltr.error == VirtualTreeError.none && ltr.semantic_count == 5 &&
+        ltr.first_visible == 0 && ltr.last_visible == 2 && ltr.placements.len == 5,
+        "Tree virtualizes the expanded semantic projection with exact visible and live ranges");
+    expect(state, ltr.placements.data[1].id == 2 && ltr.placements.data[1].depth == 1 &&
+        ltr.placements.data[1].content_frame.x == 5 &&
+        ltr.placements.data[1].content_frame.width == 94,
+        "Tree indentation is logical and preserves the full selectable row frame");
+    let rtl_style: VirtualTreeStyle = style; rtl_style.direction = LayoutDirection.rtl;
+    let rtl: VirtualTreeResult = virtual_tree_layout(collapsed, size(100, 30), 0, rtl_style);
+    expect(state, rtl.placements.data[1].content_frame.x == 1 &&
+        rtl.placements.data[1].content_frame.width == 94 && rtl.layout_hash != ltr.layout_hash,
+        "RTL moves Tree indentation to logical start without reordering nodes");
+
+    source.data[2].expanded = 1; source.data[2].revision = 2;
+    source.data[6].expanded = 1; source.data[6].revision = 2;
+    let expanded: VirtualTreeProjection = virtual_tree_project(source, 2);
+    expect(state, expanded.error == VirtualTreeError.none && expanded.nodes.len == 8 &&
+        expanded.projection_hash != collapsed.projection_hash,
+        "expansion revisions restore descendants and alter deterministic projection identity");
+    let expanded_layout: VirtualTreeResult = virtual_tree_layout(expanded, size(100, 120), 0, style);
+    expect(state, expanded_layout.semantic_count == 8 && expanded_layout.placements.data[3].id == 4 &&
+        expanded_layout.placements.data[3].parent_id == 3 &&
+        expanded_layout.placements.data[3].source_index == 3,
+        "expanded Tree placement retains parent identity and original source index");
+    virtual_tree_free(&expanded_layout); virtual_tree_projection_free(&expanded);
+    virtual_tree_free(&rtl); virtual_tree_free(&ltr); virtual_tree_projection_free(&collapsed);
+    free[VirtualTreeNode](&source);
+}
+
+fn tree_failure_contract(state: *TestState) void {
+    let source: ArrayList[VirtualTreeNode] = tree_source();
+    source.data[2].id = 2;
+    let duplicate: VirtualTreeProjection = virtual_tree_project(source, 1);
+    expect(state, duplicate.error == VirtualTreeError.duplicate_id && duplicate.error_index == 2,
+        "duplicate Tree IDs fail before visible projection");
+    virtual_tree_projection_free(&duplicate);
+    source.data[2].id = 3; source.data[3].depth = 3;
+    let depth: VirtualTreeProjection = virtual_tree_project(source, 1);
+    expect(state, depth.error == VirtualTreeError.invalid_depth && depth.error_index == 3,
+        "Tree depth jumps fail at the exact malformed preorder node");
+    virtual_tree_projection_free(&depth);
+    source.data[3].depth = 2; source.data[3].parent_id = 999;
+    let parent: VirtualTreeProjection = virtual_tree_project(source, 1);
+    expect(state, parent.error == VirtualTreeError.invalid_parent && parent.error_index == 3,
+        "Tree parent mismatches fail instead of inferring ownership");
+    virtual_tree_projection_free(&parent);
+    source.data[3].parent_id = 3; source.data[2].has_children = 0; source.data[2].expanded = 0;
+    let leaf_parent: VirtualTreeProjection = virtual_tree_project(source, 1);
+    expect(state, leaf_parent.error == VirtualTreeError.invalid_parent && leaf_parent.error_index == 3,
+        "Tree leaves cannot silently own child nodes");
+    virtual_tree_projection_free(&leaf_parent); free[VirtualTreeNode](&source);
+}
+
+fn id_range(start: i64, count: i32) ArrayList[i64] {
+    let ids: ArrayList[i64] = make[i64](count);
+    let i: i32 = 0;
+    while (i < count) { push[i64](&ids, start + i as i64); i = i + 1; }
+    return ids;
+}
+
+fn lifecycle_contract(state: *TestState) void {
+    let store: VirtualRetainedStore = virtual_store_make(12);
+    let first_ids: ArrayList[i64] = id_range(100, 10);
+    let first: VirtualLifecycleResult = virtual_store_reconcile(&store, first_ids);
+    expect(state, first.error == VirtualLifecycleError.none && first.inserted == 10 &&
+        first.live == 10 && first.resident == 10,
+        "initial virtual residency allocates one retained instance per live stable ID");
+    let focus_index: i32 = virtual_store_find(store, 105);
+    let focus_instance: i64 = store.entries.data[focus_index].instance_id;
+    let focus_generation: i64 = store.entries.data[focus_index].generation;
+    expect(state, virtual_store_focus(&store, 105) == VirtualLifecycleError.none,
+        "virtual focus attaches to a retained stable ID");
+
+    let second_ids: ArrayList[i64] = id_range(200, 10);
+    let second: VirtualLifecycleResult = virtual_store_reconcile(&store, second_ids);
+    expect(state, second.error == VirtualLifecycleError.none && second.live == 10 &&
+        second.resident <= 12 && second.evicted == 10 &&
+        virtual_store_find(store, 105) >= 0 && store.entries.data[virtual_store_find(store, 105)].live == 0,
+        "offscreen focus remains retained while nonfocused instances recycle within capacity");
+
+    let return_ids: ArrayList[i64] = id_range(300, 9);
+    return_ids.data[0] = 105;
+    let returned: VirtualLifecycleResult = virtual_store_reconcile(&store, return_ids);
+    let restored_index: i32 = virtual_store_find(store, 105);
+    expect(state, returned.error == VirtualLifecycleError.none && returned.focus_restored == 1 &&
+        store.entries.data[restored_index].instance_id == focus_instance &&
+        store.entries.data[restored_index].generation == focus_generation &&
+        store.entries.data[restored_index].live == 1,
+        "returning focused IDs restore the exact retained instance without generation drift");
+    let before_hash: i64 = returned.lifecycle_hash;
+    let identical: VirtualLifecycleResult = virtual_store_reconcile(&store, return_ids);
+    expect(state, identical.rebound == 0 && identical.inserted == 0 &&
+        identical.lifecycle_hash == before_hash,
+        "identical live residency performs no lifecycle revision or identity churn");
+
+    let duplicate_ids: ArrayList[i64] = id_range(400, 2); duplicate_ids.data[1] = 400;
+    let duplicate: VirtualLifecycleResult = virtual_store_reconcile(&store, duplicate_ids);
+    expect(state, duplicate.error == VirtualLifecycleError.duplicate_id && duplicate.error_index == 1,
+        "duplicate live IDs fail before retained-store mutation");
+    free[i64](&duplicate_ids); free[i64](&return_ids); free[i64](&second_ids); free[i64](&first_ids);
+    virtual_store_free(&store);
+
+    let tight: VirtualRetainedStore = virtual_store_make(4);
+    let focus_ids: ArrayList[i64] = id_range(1, 1); _ = virtual_store_reconcile(&tight, focus_ids);
+    _ = virtual_store_focus(&tight, 1);
+    let full_ids: ArrayList[i64] = id_range(10, 4);
+    let full: VirtualLifecycleResult = virtual_store_reconcile(&tight, full_ids);
+    expect(state, full.error == VirtualLifecycleError.too_many_live_nodes &&
+        virtual_store_find(tight, 1) >= 0,
+        "offscreen focus consumes explicit capacity instead of being silently recycled");
+    free[i64](&full_ids); free[i64](&focus_ids); virtual_store_free(&tight);
+}
+
+fn property_contract(state: *TestState) void {
+    let valid: i32 = 1;
+    let overrides: ArrayList[VirtualExtentOverride] = make[VirtualExtentOverride](1);
+    let rows: VirtualListModel = virtual_model(10000, 100, 10, 1, 0, overrides);
+    let columns: ArrayList[VirtualTableColumn] = make[VirtualTableColumn](5);
+    let pinned: VirtualTableColumn = virtual_table_column(1, 20, 20, 20); pinned.pinned = 1;
+    push[VirtualTableColumn](&columns, pinned);
+    let i: i64 = 1;
+    while (i < 5) { push[VirtualTableColumn](&columns, virtual_table_column(1 + i, 30, 20, 50)); i = i + 1; }
+    let table: VirtualTableModel = virtual_table_model(9, rows, columns, 0);
+    let table_style: VirtualTableStyle = virtual_table_style(10, 1, insets_all(1));
+    let scroll: i64 = 0;
+    while (scroll <= 80) {
+        let result: VirtualTableResult = virtual_table_layout(table, size(90, 70), 500, scroll, table_style);
+        if (result.error != VirtualTableError.none || result.cells.len > 64 ||
+            result.cells.data[0].frame.x != 1 || result.semantic_rows != 10000 ||
+            result.first_live_row > result.first_visible_row ||
+            result.last_live_row < result.last_visible_row) { valid = 0; }
+        virtual_table_free(&result);
+        scroll = scroll + 7;
+    }
+    free[VirtualTableColumn](&columns); free[VirtualExtentOverride](&overrides);
+
+    let tree: ArrayList[VirtualTreeNode] = tree_source();
+    let mask: i32 = 0;
+    while (mask < 4) {
+        tree.data[2].expanded = mask & 1;
+        tree.data[6].expanded = (mask >> 1) & 1;
+        let projection: VirtualTreeProjection = virtual_tree_project(tree, mask as i64);
+        let expected: i32 = 5 + ((mask & 1) * 2) + ((mask >> 1) & 1);
+        if (projection.error != VirtualTreeError.none || projection.nodes.len != expected) { valid = 0; }
+        let j: i32 = 0;
+        while (j < projection.nodes.len) {
+            let k: i32 = j + 1;
+            while (k < projection.nodes.len) {
+                if (projection.nodes.data[j].id == projection.nodes.data[k].id) { valid = 0; }
+                k = k + 1;
+            }
+            j = j + 1;
+        }
+        virtual_tree_projection_free(&projection);
+        mask = mask + 1;
+    }
+    free[VirtualTreeNode](&tree);
+
+    let wide_tree: ArrayList[VirtualTreeNode] = make[VirtualTreeNode](4096);
+    let wide_index: i32 = 0;
+    while (wide_index < 4096) {
+        push[VirtualTreeNode](&wide_tree, virtual_tree_node(
+            10000 + wide_index as i64, 0, 0, 0, 0, 8, 0
+        ));
+        wide_index = wide_index + 1;
+    }
+    let wide_projection: VirtualTreeProjection = virtual_tree_project(wide_tree, 0);
+    if (wide_projection.error != VirtualTreeError.none || wide_projection.nodes.len != 4096) {
+        valid = 0;
+    }
+    virtual_tree_projection_free(&wide_projection); free[VirtualTreeNode](&wide_tree);
+
+    let store: VirtualRetainedStore = virtual_store_make(16);
+    let window: i32 = 0;
+    while (window < 100) {
+        let ids: ArrayList[i64] = id_range(1000 + window as i64 * 10, 10);
+        let lifecycle: VirtualLifecycleResult = virtual_store_reconcile(&store, ids);
+        if (lifecycle.error != VirtualLifecycleError.none || lifecycle.live != 10 ||
+            lifecycle.resident > 16 || store.entries.len > 16) { valid = 0; }
+        free[i64](&ids);
+        window = window + 1;
+    }
+    virtual_store_free(&store);
+    expect(state, valid == 1,
+        "Table scroll 4096-node Tree expansion and 100-window recycling sweeps preserve bounded stable identity");
+}
+
+fn main() i32 {
+    let state: TestState = TestState{ .passed = 0, .failed = 0 };
+    table_contract(&state);
+    table_failure_contract(&state);
+    tree_contract(&state);
+    tree_failure_contract(&state);
+    lifecycle_contract(&state);
+    property_contract(&state);
+    let passed_text: []u8 = _zag_i64_to_str(state.passed as i64);
+    let failed_text: []u8 = _zag_i64_to_str(state.failed as i64);
+    _zag_print("Virtual collections contract: pass="); _zag_print(passed_text);
+    _zag_print(" fail="); _zag_println(failed_text);
+    _zag_str_free(passed_text); _zag_str_free(failed_text);
+    if (state.failed == 0) { return 0; }
+    return 1;
+}

@@ -1,0 +1,40 @@
+@import("resources.zag")
+
+enum ImagePayloadError {
+    none,
+    wrong_kind,
+    unsupported_format,
+    invalid_dimensions,
+    invalid_color_space,
+    size_mismatch,
+}
+
+fn image_resource_format_tag() i64 { return 1; }
+
+fn image_payload_expected_bytes(width: i64, height: i64) i64 {
+    if (width <= 0 || height <= 0 || width > 1048576 || height > 1048576) {
+        return 0;
+    }
+    if (width > 536870912 / height) { return 0; }
+    let pixels: i64 = width * height;
+    if (pixels > 536870912 / 4) { return 0; }
+    return pixels * 4;
+}
+
+fn image_resource_validate(resource: RenderResource) ImagePayloadError {
+    if (resource.kind != RenderResourceKind.image) {
+        return ImagePayloadError.wrong_kind;
+    }
+    if (resource.format_tag != image_resource_format_tag()) {
+        return ImagePayloadError.unsupported_format;
+    }
+    let expected: i64 = image_payload_expected_bytes(resource.width, resource.height);
+    if (expected <= 0) { return ImagePayloadError.invalid_dimensions; }
+    if (resource.color_space == RenderColorSpace.none) {
+        return ImagePayloadError.invalid_color_space;
+    }
+    if (resource.payload.len as i64 != expected) {
+        return ImagePayloadError.size_mismatch;
+    }
+    return ImagePayloadError.none;
+}

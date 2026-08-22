@@ -1,0 +1,122 @@
+@import("opentype.zag")
+@import("../render/path.zag")
+
+enum GlyphPathError {
+    none,
+    invalid_metrics,
+    invalid_outline,
+    empty_glyph,
+    path_error,
+}
+
+struct GlyphPathResult {
+    path: PathData,
+    error: GlyphPathError,
+}
+
+fn glyph_path_result(error: GlyphPathError) GlyphPathResult {
+    return GlyphPathResult{ .path = path_make(PathFillRule.non_zero), .error = error };
+}
+
+fn glyph_path_point(point: GlyphOutlinePoint, units_per_em: i32,
+    font_size: i64, origin_x: i64, baseline_y: i64) PathPoint {
+    return path_point(
+        origin_x + ((point.x as i64) * font_size) / (units_per_em as i64),
+        baseline_y - ((point.y as i64) * font_size) / (units_per_em as i64)
+    );
+}
+
+fn glyph_path_midpoint(a: GlyphOutlinePoint, b: GlyphOutlinePoint) GlyphOutlinePoint {
+    return GlyphOutlinePoint{
+        .x = (a.x + b.x) / 2,
+        .y = (a.y + b.y) / 2,
+        .on_curve = 1,
+    };
+}
+
+fn glyph_outline_to_path(outline: GlyphOutline, units_per_em: i32,
+    font_size: i64, origin_x: i64, baseline_y: i64) GlyphPathResult {
+    let result: GlyphPathResult = glyph_path_result(GlyphPathError.none);
+    if (outline.error != OpenTypeError.none) {
+        result.error = GlyphPathError.invalid_outline; return result;
+    }
+    if (units_per_em <= 0 || font_size <= 0 ||
+        path_fixed_valid(font_size) == 0 || path_fixed_valid(origin_x) == 0 ||
+        path_fixed_valid(baseline_y) == 0) {
+        result.error = GlyphPathError.invalid_metrics; return result;
+    }
+    if (outline.points.len == 0 && outline.contour_ends.len == 0) {
+        result.error = GlyphPathError.empty_glyph; return result;
+    }
+    if (outline.points.len <= 0 || outline.contour_ends.len <= 0 ||
+        outline.contour_ends.data[outline.contour_ends.len - 1] != outline.points.len - 1) {
+        result.error = GlyphPathError.invalid_outline; return result;
+    }
+    let contour_start: i32 = 0;
+    let contour_index: i32 = 0;
+    while (contour_index < outline.contour_ends.len) {
+        let contour_end: i32 = outline.contour_ends.data[contour_index];
+        if (contour_end < contour_start || contour_end >= outline.points.len) {
+            result.error = GlyphPathError.invalid_outline; return result;
+        }
+        let count: i32 = contour_end - contour_start + 1;
+        let first: GlyphOutlinePoint = outline.points.data[contour_start];
+        let last: GlyphOutlinePoint = outline.points.data[contour_end];
+        let start_point: GlyphOutlinePoint = first;
+        let local_index: i32 = 1;
+        let remaining: i32 = count - 1;
+        if (first.on_curve == 0) {
+            if (last.on_curve != 0) {
+                start_point = last; local_index = 0; remaining = count - 1;
+            } else {
+                start_point = glyph_path_midpoint(last, first);
+                local_index = 0; remaining = count;
+            }
+        }
+        if (path_move_to(&result.path, glyph_path_point(start_point,
+            units_per_em, font_size, origin_x, baseline_y)) != PathError.none) {
+            result.error = GlyphPathError.path_error; return result;
+        }
+        while (remaining > 0) {
+            let absolute: i32 = contour_start + (local_index % count);
+            let point: GlyphOutlinePoint = outline.points.data[absolute];
+            if (point.on_curve != 0) {
+                if (path_line_to(&result.path, glyph_path_point(point,
+                    units_per_em, font_size, origin_x, baseline_y)) != PathError.none) {
+                    result.error = GlyphPathError.path_error; return result;
+                }
+                local_index = local_index + 1; remaining = remaining - 1;
+            } else {
+                let next_local: i32 = (local_index + 1) % count;
+                let next: GlyphOutlinePoint = outline.points.data[contour_start + next_local];
+                let end_point: GlyphOutlinePoint = next;
+                let consume_next: i32 = 0;
+                if (next.on_curve == 0) {
+                    end_point = glyph_path_midpoint(point, next);
+                } else if (remaining > 1) {
+                    consume_next = 1;
+                }
+                if (path_quad_to(&result.path,
+                    glyph_path_point(point, units_per_em, font_size, origin_x, baseline_y),
+                    glyph_path_point(end_point, units_per_em, font_size, origin_x, baseline_y)) !=
+                    PathError.none) {
+                    result.error = GlyphPathError.path_error; return result;
+                }
+                local_index = local_index + 1 + consume_next;
+                remaining = remaining - 1 - consume_next;
+            }
+        }
+        if (path_close(&result.path) != PathError.none) {
+            result.error = GlyphPathError.path_error; return result;
+        }
+        contour_start = contour_end + 1; contour_index = contour_index + 1;
+    }
+    if (path_seal(&result.path) != PathError.none) {
+        result.error = GlyphPathError.path_error; return result;
+    }
+    return result;
+}
+
+fn glyph_path_result_free(result: *GlyphPathResult) void {
+    path_free(&result.*.path);
+}

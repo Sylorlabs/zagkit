@@ -1,0 +1,140 @@
+@import("std:list")
+@import("../src/core/state.zag")
+@import("../src/core/reconcile.zag")
+
+struct TestState { passed: i32, failed: i32 }
+
+fn expect(state: *TestState, condition: i32, name: []u8) void {
+    if (condition != 0) {
+        state.*.passed = state.*.passed + 1;
+        _zag_print("ok  "); _zag_println(name);
+    } else {
+        state.*.failed = state.*.failed + 1;
+        _zag_print("FAIL "); _zag_println(name);
+    }
+}
+
+fn state_contract(state: *TestState) void {
+    let count: State[i64] = state_make[i64](7, 10);
+    let ctx: ViewContext = view_context_make(node_key(100));
+    expect(state, state_read[i64](&count, &ctx) == 10, "state read returns the typed value");
+    expect(state, state_read[i64](&count, &ctx) == 10 && ctx.reads.len == 1, "duplicate reads collapse to one exact dependency");
+
+    let change: StateChange = state_set[i64](&count, 20);
+    expect(state, change.from_revision == 0 && change.to_revision == 1, "state change records exact revisions");
+    expect(state, view_context_invalidated(ctx, change) == 1, "the recorded reader invalidates for its state change");
+    let cause: InvalidationCause = view_context_invalidation(ctx, change);
+    expect(state, cause.found == 1 && cause.reader.value == 100 && cause.state_id == 7 && cause.read_revision == 0 && cause.from_revision == 0 && cause.to_revision == 1, "invalidation names the exact read, reader, and revision edge");
+    expect(state, view_context_invalidated(ctx, StateChange{ .state_id = 8, .from_revision = 0, .to_revision = 1 }) == 0, "unread state does not invalidate the reader");
+
+    let binding: Binding[i64] = binding_make[i64](&count, 55);
+    let action: Action = binding_set[i64](binding, 30, node_key_scoped(101, 2));
+    expect(state, binding_read[i64](binding, &ctx) == 30, "binding reads and writes the target state");
+    expect(state, action.id == 55 && action.target_state_id == 7 && action.from_revision == 1 && action.to_revision == 2, "binding emits an auditable action");
+    expect(state, view_context_invalidated(ctx, change) == 0, "a fresh read is not invalidated by an older change");
+
+    view_context_free(&ctx);
+}
+
+fn reconciliation_property_contract(state: *TestState) void {
+    let previous: ArrayList[RenderNode] = make[RenderNode](5);
+    let key: i64 = 0;
+    while (key < 5) {
+        push[RenderNode](&previous, render_node(node_key(key), 10 + key, 100 + key, 1000 + key));
+        key = key + 1;
+    }
+
+    let case_index: i64 = 0;
+    let all_stable: i32 = 1;
+    while (case_index < 20) {
+        let specs: ArrayList[ViewSpec] = make[ViewSpec](5);
+        let step: i64 = 1;
+        if ((case_index % 2) == 1) { step = 3; }
+        let i: i64 = 0;
+        while (i < 5) {
+            let permuted_key: i64 = (case_index + i * step) % 5;
+            push[ViewSpec](&specs, view_spec(node_key(permuted_key), 10 + permuted_key, 100 + permuted_key));
+            i = i + 1;
+        }
+        let next_instance: i64 = 9000;
+        let result: ReconcileResult = reconcile(previous, specs, &next_instance);
+        if (result.reused != 5 || result.inserted != 0 || result.updated != 0 || result.removed != 0) { all_stable = 0; }
+        i = 0;
+        while (i < result.nodes.len) {
+            if (result.nodes.data[i].instance_id != 1000 + result.nodes.data[i].key.value) { all_stable = 0; }
+            i = i + 1;
+        }
+        reconcile_free(&result);
+        free[ViewSpec](&specs);
+        case_index = case_index + 1;
+    }
+    expect(state, all_stable, "20-permutation sweep preserves identity without phantom work");
+    free[RenderNode](&previous);
+}
+
+fn environment_contract(state: *TestState) void {
+    let env: Environment = environment_make();
+    expect(state, environment_get(env, 1, 99) == 99, "environment miss uses its explicit fallback");
+    let first: i64 = environment_set(&env, 1, 42);
+    let same: i64 = environment_set(&env, 1, 42);
+    let changed: i64 = environment_set(&env, 1, 43);
+    expect(state, first == 1 && same == 1 && changed == 2, "environment revisions change only when values change");
+    expect(state, environment_get(env, 1, 0) == 43, "environment returns the latest value");
+    environment_free(&env);
+}
+
+fn reconciliation_contract(state: *TestState) void {
+    let previous: ArrayList[RenderNode] = make[RenderNode](2);
+    push[RenderNode](&previous, render_node(node_key(1), 10, 100, 40));
+    push[RenderNode](&previous, render_node(node_key(2), 20, 200, 41));
+
+    let next: ArrayList[ViewSpec] = make[ViewSpec](3);
+    push[ViewSpec](&next, view_spec(node_key(2), 20, 200));
+    push[ViewSpec](&next, view_spec(node_key(1), 10, 101));
+    push[ViewSpec](&next, view_spec(node_key(3), 30, 300));
+    let next_instance: i64 = 100;
+    let first: ReconcileResult = reconcile(previous, next, &next_instance);
+
+    expect(state, first.reused == 2 && first.updated == 1 && first.inserted == 1 && first.removed == 0, "reconciliation reports reuse, update, and insertion exactly");
+    expect(state, first.nodes.data[0].instance_id == 41 && first.nodes.data[1].instance_id == 40 && first.nodes.data[2].instance_id == 100, "stable keys preserve identity through reorder");
+    expect(state, first.nodes.data[1].generation == 1, "fingerprint change advances only the updated node generation");
+
+    let replacement_specs: ArrayList[ViewSpec] = make[ViewSpec](2);
+    push[ViewSpec](&replacement_specs, view_spec(node_key(2), 99, 201));
+    push[ViewSpec](&replacement_specs, view_spec(node_key(3), 30, 300));
+    let second: ReconcileResult = reconcile(first.nodes, replacement_specs, &next_instance);
+    expect(state, second.inserted == 1 && second.reused == 1 && second.removed == 2, "kind replacement and missing keys retire old nodes");
+    expect(state, second.nodes.data[0].instance_id == 101 && second.nodes.data[1].instance_id == 100, "replacement gets a new identity while retained key stays stable");
+
+    let duplicate_specs: ArrayList[ViewSpec] = make[ViewSpec](2);
+    push[ViewSpec](&duplicate_specs, view_spec(node_key(9), 1, 1));
+    push[ViewSpec](&duplicate_specs, view_spec(node_key(9), 1, 2));
+    let empty: ArrayList[RenderNode] = make[RenderNode](1);
+    let duplicate: ReconcileResult = reconcile(empty, duplicate_specs, &next_instance);
+    expect(state, duplicate.duplicate_keys == 1 && duplicate.nodes.len == 1, "duplicate keys fail visibly and deterministically keep the first node");
+
+    reconcile_free(&duplicate);
+    free[RenderNode](&empty);
+    free[ViewSpec](&duplicate_specs);
+    reconcile_free(&second);
+    free[ViewSpec](&replacement_specs);
+    reconcile_free(&first);
+    free[ViewSpec](&next);
+    free[RenderNode](&previous);
+}
+
+fn main() i32 {
+    let state: TestState = TestState{ .passed = 0, .failed = 0 };
+    state_contract(&state);
+    environment_contract(&state);
+    reconciliation_contract(&state);
+    reconciliation_property_contract(&state);
+    let passed_text: []u8 = _zag_i64_to_str(state.passed as i64);
+    let failed_text: []u8 = _zag_i64_to_str(state.failed as i64);
+    _zag_print("State/reconcile contract: pass="); _zag_print(passed_text);
+    _zag_print(" fail="); _zag_println(failed_text);
+    _zag_str_free(passed_text);
+    _zag_str_free(failed_text);
+    if (state.failed == 0) { return 0; }
+    return 1;
+}

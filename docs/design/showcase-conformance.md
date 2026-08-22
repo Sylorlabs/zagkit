@@ -1,0 +1,132 @@
+# Design-system showcase conformance
+
+The Zagkit showcase is a conformance surface, not a decorative dashboard. A
+capture may demonstrate renderer progress while this contract is incomplete,
+but it must be labeled experimental and cannot promote the visual system.
+
+## Required proof
+
+### Token provenance
+
+- Every visible color, type style, spacing value, radius, elevation, material,
+  and motion value resolves through a named semantic token.
+- The inspector reports the token ID, resolved value, environment inputs, and
+  fallback used by every rendered node.
+- Brand, focus, selection, status, category, warning, error, and data-series
+  colors have separate documented meanings. Similar-looking literals are not
+  accepted as token proof.
+- Component-local exceptions are named, reviewable, and never silently become
+  a second token scale.
+- The showcase includes a live token-catalog/inspector route where reviewers
+  can select a rendered node and see its color, type, spacing, radius,
+  elevation, material, and interaction-state token IDs. Source-only token
+  tables do not count as visible showcase proof.
+
+### Semantic symbols and color
+
+- Icons and status marks use real assets and a documented semantic mapping.
+- Color is never the only carrier of category, status, selection, error, or
+  focus. Text, shape, icon, semantics, or position carries the same truth.
+- Decorative marks are hidden from accessibility. Meaningful marks expose a
+  role, name, value, and state.
+
+### Hierarchy and range
+
+- The same canonical card is rendered at base, panel, and raised/overlay
+  elevation tiers with visibly distinct fill, edge, depth, and contrast rules.
+- Primary navigation, contextual inspection, status, content, and commands use
+  distinct component roles. A status rail may not masquerade as a second
+  navigation system.
+- Typography demonstrates display, title, heading, body, label, caption, and
+  code roles with tested line-height, truncation, locale, and large-text rules.
+- A reusable component gallery, typography route, and inspector route are
+  independently navigable native compositions. A single dashboard containing
+  one instance of each shape does not count as proof that the system scales.
+
+### Material, lighting, and motion truth
+
+- Glass is a functional foreground layer for navigation, controls, and
+  transient presentation. It is not a decorative fill applied to every card;
+  ordinary content surfaces remain visually quieter so hierarchy survives.
+- A production glass claim requires retained backdrop sampling, blur,
+  background-adaptive tint and contrast, edge lensing/refraction, coherent
+  highlights, and soft multi-lobe shadows. A translucent rounded rectangle or
+  fixed gradient may be an explicitly labelled CPU fallback, but is not
+  liquid-glass conformance.
+- Material thickness changes with scale and presentation role: a compact
+  control and an expanded menu cannot reuse one fixed shadow, tint, or optical
+  response. Nearby content may influence the material only through bounded,
+  deterministic inputs recorded in the display-list evidence.
+- Interaction can energize, lift, flex, or morph a material only when the
+  motion is interruptible, reversible, refresh-rate aware, and continuous with
+  the pointer or gesture. Static before/after states do not prove fluidity.
+- Reduced transparency, increased contrast, reduced motion, grayscale, and
+  color-vision variants have explicit substitutions that preserve legibility,
+  focus, selection, and action truth. The system setting and chosen
+  substitution are inspectable tokens, never silent renderer branches.
+
+### Interaction states
+
+- Canonical Button, IconButton, navigation item, segmented control, field,
+  list row, menu item, and card action show default, hover, keyboard focus,
+  pressed, selected, disabled, loading, and error states.
+- State differences remain clear in light, dark, high contrast, reduced
+  transparency, reduced motion, grayscale, and color-vision simulations.
+- Hover is supplementary. Keyboard, touch, pen, gamepad, accessibility action,
+  and Zagkit Talkback reach the same action and state truth.
+- State fixtures identify their state in visible text and semantics, so color
+  alone is never the evidence that hover, focus, selection, loading, disabled,
+  or error styling exists.
+
+### Data visualization
+
+- Any chart presented as a toolkit component includes named axes, units, tick
+  labels, a baseline or domain reference, series identity, hover/focus detail,
+  empty/loading/error states, and a semantic table equivalent.
+- A decorative grid with dots is not called a chart component and cannot count
+  as component coverage.
+
+### Segmented controls and navigation
+
+- A segmented control has one declared selection model, visible selected and
+  focused states, arrow-key behavior, disabled behavior, and tab semantics.
+- Navigation exposes one canonical active location. Contextual inspectors and
+  system status are labeled and styled as their actual roles.
+- A read-only status rail owns no navigation actions, focus stops, selection,
+  or enabled pointer targets. Its structural Surface may retain disabled bounds
+  for inspection, but normal input routing must miss it. Category/status marks are either documented
+  semantic symbols with redundant text or explicitly decorative; arbitrary
+  colored-dot filler is a conformance failure.
+- Every enabled navigation item activates its named destination: the selected
+  label, main landmark, visible heading, semantics, actions, and Talkback tree
+  must describe the same content. An item whose destination is not implemented
+  remains visibly and semantically disabled; changing only its highlight is a
+  failing no-op, not navigation evidence.
+
+### Responsive placement
+
+- Rendering, semantics, hit testing, and Talkback consume one shared Flex
+  placement result. Independently scaled coordinate tables are a conformance
+  failure even when one screenshot happens to align.
+- Component minimums are hard constraints. In particular, the performance
+  chart is never squeezed below 640 by 420 logical pixels to preserve a
+  dashboard silhouette.
+- Expanded placement may expose the labelled system-status rail. Medium
+  placement releases that width to primary content, and compact placement
+  changes navigation structure rather than shrinking desktop columns.
+- In every valid desktop viewport, if the chart contract cannot fit, the page
+  exposes an explicit compact semantic summary and removes chart-only controls.
+  The desktop placement contract defines a 480 by 360 minimum; the Linux shell
+  must show an explicit unsupported-size state below it before promotion. A
+  cropped, overlapped, or silently incomplete chart is not adaptive evidence.
+
+## Evidence matrix
+
+For each required component and state, record the semantic token trace,
+semantics/Talkback snapshot, keyboard path, CPU golden, and native screenshot at
+1.0x and 2.0x. The full visual-direction matrix adds all other scales, themes,
+locales, directions, contrast, text, motion, and transparency variants.
+
+Screenshot review is necessary but insufficient. Promotion also requires
+native input, focus, assistive-technology, deterministic rendering, idle,
+frame-time, resize, recovery, and cleanup evidence.

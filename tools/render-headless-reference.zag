@@ -1,0 +1,140 @@
+@import("../src/render/png_encode.zag")
+
+fn reference_push_fill(list: *DisplayList, owner: i64, bounds: Rect,
+    paint: Paint) i32 {
+    let op: DisplayOp = display_op(DisplayOpKind.fill_rect, node_key(owner));
+    op.bounds = bounds;
+    op.paint = paint;
+    return (display_list_push(list, op) == DisplayError.none) as i32;
+}
+
+fn reference_push_stroke(list: *DisplayList, owner: i64, bounds: Rect,
+    paint: Paint, width: i64) i32 {
+    let op: DisplayOp = display_op(DisplayOpKind.stroke_rect, node_key(owner));
+    op.bounds = bounds;
+    op.paint = paint;
+    op.paint.stroke_width = width;
+    return (display_list_push(list, op) == DisplayError.none) as i32;
+}
+
+fn reference_add_accent_path(list: *DisplayList) i32 {
+    let path: PathData = path_make(PathFillRule.non_zero);
+    _ = path_move_to(&path, path_point(238 * unit_scale(), 48 * unit_scale()));
+    _ = path_cubic_to(&path,
+        path_point(280 * unit_scale(), 34 * unit_scale()),
+        path_point(302 * unit_scale(), 70 * unit_scale()),
+        path_point(276 * unit_scale(), 98 * unit_scale()));
+    _ = path_quad_to(&path,
+        path_point(252 * unit_scale(), 116 * unit_scale()),
+        path_point(232 * unit_scale(), 88 * unit_scale()));
+    _ = path_close(&path);
+    if (path_seal(&path) != PathError.none) {
+        path_free(&path);
+        return 0;
+    }
+    let payload: PathEncodeResult = path_encode(path);
+    path_free(&path);
+    let error: RenderResourceError = display_list_add_resource(list,
+        render_resource_spec(700, RenderResourceKind.path,
+            payload.bytes.data[0..payload.bytes.len], path_resource_format_tag())
+    );
+    path_encode_free(&payload);
+    if (error != RenderResourceError.none) { return 0; }
+    let op: DisplayOp = display_op(DisplayOpKind.draw_path, node_key(700));
+    op.resource_id = 700;
+    op.paint = paint_rgba16(24576, 49152, 65535, 56000);
+    return (display_list_push(list, op) == DisplayError.none) as i32;
+}
+
+fn reference_add_image(list: *DisplayList) i32 {
+    let pixels: ArrayList[u8] = make[u8](16);
+    push[u8](&pixels, 35); push[u8](&pixels, 217); push[u8](&pixels, 255); push[u8](&pixels, 255);
+    push[u8](&pixels, 120); push[u8](&pixels, 80); push[u8](&pixels, 255); push[u8](&pixels, 255);
+    push[u8](&pixels, 245); push[u8](&pixels, 120); push[u8](&pixels, 185); push[u8](&pixels, 255);
+    push[u8](&pixels, 20); push[u8](&pixels, 38); push[u8](&pixels, 78); push[u8](&pixels, 255);
+    let spec: RenderResourceSpec = render_resource_spec(
+        701, RenderResourceKind.image, pixels.data[0..pixels.len],
+        image_resource_format_tag()
+    );
+    spec.width = 2;
+    spec.height = 2;
+    spec.color_space = RenderColorSpace.srgb;
+    let error: RenderResourceError = display_list_add_resource(list, spec);
+    free[u8](&pixels);
+    if (error != RenderResourceError.none) { return 0; }
+    let op: DisplayOp = display_op(DisplayOpKind.draw_image, node_key(701));
+    op.resource_id = 701;
+    op.bounds = rect(228 * unit_scale(), 118 * unit_scale(),
+        70 * unit_scale(), 54 * unit_scale());
+    op.paint.alpha = 52000;
+    return (display_list_push(list, op) == DisplayError.none) as i32;
+}
+
+fn reference_scene() DisplayList {
+    let list: DisplayList = display_list_make();
+    _ = reference_push_fill(&list, 1, rect(0, 0, 320 * unit_scale(), 200 * unit_scale()),
+        paint_rgba16(2600, 3900, 8200, 65535));
+    _ = reference_push_fill(&list, 2, rect(0, 0, 320 * unit_scale(), 28 * unit_scale()),
+        paint_rgba16(6200, 8200, 15000, 62000));
+    _ = reference_push_stroke(&list, 3, rect(0, 28 * unit_scale(),
+        320 * unit_scale(), unit_scale()), paint_rgba16(16000, 22000, 36000, 36000),
+        unit_scale());
+    _ = reference_push_fill(&list, 4, rect(12 * unit_scale(), 42 * unit_scale(),
+        72 * unit_scale(), 144 * unit_scale()), paint_rgba16(7000, 10000, 18000, 52000));
+    _ = reference_push_stroke(&list, 5, rect(12 * unit_scale(), 42 * unit_scale(),
+        72 * unit_scale(), 144 * unit_scale()), paint_rgba16(18000, 26000, 43000, 42000),
+        unit_scale());
+    _ = reference_push_fill(&list, 6, rect(96 * unit_scale(), 42 * unit_scale(),
+        112 * unit_scale(), 62 * unit_scale()), paint_rgba16(10000, 13500, 23500, 56000));
+    _ = reference_push_stroke(&list, 7, rect(96 * unit_scale(), 42 * unit_scale(),
+        112 * unit_scale(), 62 * unit_scale()), paint_rgba16(22000, 34000, 54000, 46000),
+        unit_scale());
+    _ = reference_push_fill(&list, 8, rect(96 * unit_scale(), 116 * unit_scale(),
+        112 * unit_scale(), 70 * unit_scale()), paint_rgba16(8200, 11200, 20500, 54000));
+    _ = reference_push_stroke(&list, 9, rect(96 * unit_scale(), 116 * unit_scale(),
+        112 * unit_scale(), 70 * unit_scale()), paint_rgba16(18000, 30000, 50000, 42000),
+        unit_scale());
+    _ = reference_push_fill(&list, 10, rect(24 * unit_scale(), 56 * unit_scale(),
+        48 * unit_scale(), 8 * unit_scale()), paint_rgba16(12000, 52000, 65535, 57000));
+    _ = reference_push_fill(&list, 11, rect(24 * unit_scale(), 76 * unit_scale(),
+        36 * unit_scale(), 5 * unit_scale()), paint_rgba16(26000, 33000, 47000, 50000));
+    _ = reference_push_fill(&list, 12, rect(24 * unit_scale(), 91 * unit_scale(),
+        44 * unit_scale(), 5 * unit_scale()), paint_rgba16(26000, 33000, 47000, 50000));
+    _ = reference_add_accent_path(&list);
+    _ = reference_add_image(&list);
+    _ = display_list_seal(&list);
+    return list;
+}
+
+fn main() i32 {
+    if (_zag_argc() != 2) {
+        _zag_eprintln("usage: render-headless-reference <output.png>");
+        return 2;
+    }
+    let list: DisplayList = reference_scene();
+    if (display_list_verify(list) != DisplayError.none) {
+        display_list_free(&list);
+        return 3;
+    }
+    let raster: CpuRasterResult = cpu_rasterize(list, 320, 200);
+    if (raster.error != CpuRasterError.none) {
+        cpu_raster_free(&raster);
+        display_list_free(&list);
+        return 4;
+    }
+    let png: PngEncodeResult = png_encode_surface(raster.surface);
+    if (png.error != PngEncodeError.none) {
+        png_encode_free(&png);
+        cpu_raster_free(&raster);
+        display_list_free(&list);
+        return 5;
+    }
+    let write_error: i32 = _zag_write_file(
+        _zag_arg(1), png.bytes.data[0..png.bytes.len]
+    );
+    png_encode_free(&png);
+    cpu_raster_free(&raster);
+    display_list_free(&list);
+    if (write_error != 0) { return 6; }
+    return 0;
+}

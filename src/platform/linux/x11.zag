@@ -1,0 +1,351 @@
+@import("../capabilities.zag")
+@import("../../render/cpu_raster.zag")
+
+// Xlib is used only as the public Linux window-system transport. Layout,
+// rendering, resources, state, semantics, and pixels remain owned by Zagkit.
+// This fallback never promotes itself to Wayland or accessibility support.
+@cabi extern fn XOpenDisplay(name: *u8) *u8;
+@cabi extern fn XDefaultScreen(display: *u8) i32;
+@cabi extern fn XRootWindow(display: *u8, screen: i32) i64;
+@cabi extern fn XDefaultVisual(display: *u8, screen: i32) *u8;
+@cabi extern fn XDefaultDepth(display: *u8, screen: i32) i32;
+@cabi extern fn XCreateSimpleWindow(display: *u8, parent: i64, x: i32, y: i32,
+    width: i32, height: i32, border_width: i32, border: i64,
+    background: i64) i64;
+@cabi extern fn XCreateGC(display: *u8, drawable: i64, value_mask: i64,
+    values: *u8) *u8;
+@cabi extern fn XSelectInput(display: *u8, window: i64, event_mask: i64) i32;
+@cabi extern fn XStoreName(display: *u8, window: i64, name: *u8) i32;
+@cabi extern fn XChangeProperty(display: *u8, window: i64, property: i64,
+    property_type: i64, format: i32, mode: i32, data: *u8,
+    element_count: i32) i32;
+@cabi extern fn XInternAtom(display: *u8, name: *u8, only_if_exists: i32) i64;
+@cabi extern fn XSetWMProtocols(display: *u8, window: i64, protocols: *i64,
+    count: i32) i32;
+@cabi extern fn XMapWindow(display: *u8, window: i64) i32;
+@cabi extern fn XCreateImage(display: *u8, visual: *u8, depth: i32, format: i32,
+    offset: i32, data: *u8, width: i32, height: i32, bitmap_pad: i32,
+    bytes_per_line: i32) *u8;
+@cabi extern fn XPutImage(display: *u8, drawable: i64, gc: *u8, image: *u8,
+    src_x: i32, src_y: i32, dest_x: i32, dest_y: i32,
+    width: i32, height: i32) i32;
+@cabi extern fn XPending(display: *u8) i32;
+@cabi extern fn XNextEvent(display: *u8, event: *u8) i32;
+@cabi extern fn XGetGeometry(display: *u8, drawable: i64, root_return: *i64,
+    x_return: *i32, y_return: *i32, width_return: *i32,
+    height_return: *i32, border_width_return: *i32,
+    depth_return: *i32) i32;
+@cabi extern fn XFlush(display: *u8) i32;
+@cabi extern fn XSync(display: *u8, discard: i32) i32;
+@cabi extern fn XDestroyImage(image: *u8) i32;
+@cabi extern fn XFreeGC(display: *u8, gc: *u8) i32;
+@cabi extern fn XDestroyWindow(display: *u8, window: i64) i32;
+@cabi extern fn XCloseDisplay(display: *u8) i32;
+
+enum LinuxX11Error {
+    none,
+    display_unavailable,
+    visual_unavailable,
+    window_creation_failed,
+    image_creation_failed,
+    presentation_failed,
+}
+
+enum LinuxX11EventKind {
+    none,
+    expose,
+    resize,
+    close,
+}
+
+struct LinuxX11Event {
+    kind: LinuxX11EventKind,
+    width: i32,
+    height: i32,
+}
+
+struct LinuxX11Window {
+    display: *u8,
+    visual: *u8,
+    window: i64,
+    gc: *u8,
+    image: *u8,
+    image_data: *u8,
+    event_data: *u8,
+    delete_atom: i64,
+    depth: i32,
+    width: i32,
+    height: i32,
+    open: i32,
+    error: LinuxX11Error,
+    capabilities: PlatformCapabilities,
+}
+
+fn linux_x11_null() *u8 { return null as *u8; }
+
+fn linux_x11_c_string(value: []u8) *u8 {
+    let out: *u8 = _zag_malloc(value.len + 1) as *u8;
+    let i: i32 = 0;
+    while (i < value.len) { out[i] = value[i]; i = i + 1; }
+    out[value.len] = 0;
+    return out;
+}
+
+fn linux_x11_empty() LinuxX11Window {
+    return LinuxX11Window{
+        .display = linux_x11_null(),
+        .visual = linux_x11_null(),
+        .window = 0,
+        .gc = linux_x11_null(),
+        .image = linux_x11_null(),
+        .image_data = linux_x11_null(),
+        .event_data = linux_x11_null(),
+        .delete_atom = 0,
+        .depth = 0,
+        .width = 0,
+        .height = 0,
+        .open = 0,
+        .error = LinuxX11Error.none,
+        .capabilities = platform_capabilities_linux_auto(0, 1),
+    };
+}
+
+fn linux_x11_release_image(host: *LinuxX11Window) void {
+    unsafe {
+        if (host.*.image != linux_x11_null()) {
+            // XDestroyImage normally owns `data`. Zagkit allocated these bytes,
+            // so detach them before asking Xlib to destroy only its descriptor.
+            let words: *i64 = host.*.image as *i64;
+            words[2] = 0;
+            _ = XDestroyImage(host.*.image);
+            host.*.image = linux_x11_null();
+        }
+        if (host.*.image_data != linux_x11_null()) {
+            _zag_free(host.*.image_data as *i8);
+            host.*.image_data = linux_x11_null();
+        }
+    }
+}
+
+fn linux_x11_copy_surface(host: *LinuxX11Window, surface: CpuSurface) i32 {
+    if (surface.width <= 0 || surface.height <= 0 ||
+        surface.pixels.len != surface.width * surface.height * 4) { return 0; }
+    let pixel_count: i64 = (surface.width as i64) * (surface.height as i64);
+    if (pixel_count <= 0 || pixel_count > 67108864) { return 0; }
+    unsafe {
+        if (host.*.image == linux_x11_null() || host.*.width != surface.width ||
+            host.*.height != surface.height) {
+            linux_x11_release_image(host);
+            host.*.image_data = _zag_malloc((pixel_count * 4) as i32) as *u8;
+            if (host.*.image_data == linux_x11_null()) {
+                host.*.error = LinuxX11Error.image_creation_failed;
+                return 0;
+            }
+            host.*.image = XCreateImage(host.*.display, host.*.visual,
+                host.*.depth, 2, 0, host.*.image_data, surface.width,
+                surface.height, 32, surface.width * 4);
+            if (host.*.image == linux_x11_null()) {
+                _zag_free(host.*.image_data as *i8);
+                host.*.image_data = linux_x11_null();
+                host.*.error = LinuxX11Error.image_creation_failed;
+                return 0;
+            }
+            host.*.width = surface.width;
+            host.*.height = surface.height;
+        }
+        let i: i64 = 0;
+        while (i < pixel_count) {
+            let source: i64 = i * 4;
+            let destination: i64 = source;
+            // The CPU oracle is RGBA8. Common little-endian X11 TrueColor
+            // visuals consume BGRX bytes for the 0x00RRGGBB masks.
+            host.*.image_data[destination] = surface.pixels.data[source + 2];
+            host.*.image_data[destination + 1] = surface.pixels.data[source + 1];
+            host.*.image_data[destination + 2] = surface.pixels.data[source];
+            host.*.image_data[destination + 3] = 0;
+            i = i + 1;
+        }
+    }
+    return 1;
+}
+
+fn linux_x11_open(width: i32, height: i32, title: []u8,
+    wayland_available: i32) LinuxX11Window {
+    let host: LinuxX11Window = linux_x11_empty();
+    host.capabilities = platform_capabilities_linux_auto(wayland_available, 1);
+    unsafe {
+        host.display = XOpenDisplay(linux_x11_null());
+        if (host.display == linux_x11_null()) {
+            host.error = LinuxX11Error.display_unavailable;
+            host.capabilities = platform_capabilities_linux_auto(wayland_available, 0);
+            return host;
+        }
+        let screen: i32 = XDefaultScreen(host.display);
+        host.visual = XDefaultVisual(host.display, screen);
+        host.depth = XDefaultDepth(host.display, screen);
+        if (host.visual == linux_x11_null() || host.depth < 24) {
+            host.error = LinuxX11Error.visual_unavailable;
+            _ = XCloseDisplay(host.display);
+            host.display = linux_x11_null();
+            return host;
+        }
+        let root: i64 = XRootWindow(host.display, screen);
+        host.window = XCreateSimpleWindow(host.display, root, 64, 64,
+            width, height, 0, 0, 0x080b14);
+        if (host.window == 0) {
+            host.error = LinuxX11Error.window_creation_failed;
+            _ = XCloseDisplay(host.display);
+            host.display = linux_x11_null();
+            return host;
+        }
+        host.gc = XCreateGC(host.display, host.window, 0, linux_x11_null());
+        if (host.gc == linux_x11_null()) {
+            host.error = LinuxX11Error.window_creation_failed;
+            _ = XDestroyWindow(host.display, host.window);
+            _ = XCloseDisplay(host.display);
+            host.display = linux_x11_null();
+            return host;
+        }
+        // Exposure, StructureNotify, KeyPress, ButtonPress/Release, pointer
+        // motion, and focus changes are selected even before routing all of
+        // them, so the shell contract can grow without changing host creation.
+        _ = XSelectInput(host.display, host.window,
+            32768 + 131072 + 1 + 4 + 8 + 64 + 2097152);
+        // WM_NAME is an old Latin-1 property. Keep its fallback ASCII-clean,
+        // then publish the real title through EWMH's UTF8_STRING contract.
+        let fallback_title: *u8 = linux_x11_c_string("Zagkit - Linux Preview");
+        _ = XStoreName(host.display, host.window, fallback_title);
+        _zag_free(fallback_title as *i8);
+        let net_name_text: *u8 = linux_x11_c_string("_NET_WM_NAME");
+        let utf8_text: *u8 = linux_x11_c_string("UTF8_STRING");
+        let utf8_title: *u8 = linux_x11_c_string(title);
+        let net_name_atom: i64 = XInternAtom(host.display, net_name_text, 0);
+        let utf8_atom: i64 = XInternAtom(host.display, utf8_text, 0);
+        _zag_free(net_name_text as *i8);
+        _zag_free(utf8_text as *i8);
+        if (net_name_atom != 0 && utf8_atom != 0) {
+            _ = XChangeProperty(host.display, host.window, net_name_atom,
+                utf8_atom, 8, 0, utf8_title, title.len as i32);
+        }
+        _zag_free(utf8_title as *i8);
+
+        let protocols_name: *u8 = linux_x11_c_string("WM_PROTOCOLS");
+        let delete_name: *u8 = linux_x11_c_string("WM_DELETE_WINDOW");
+        let protocols_atom: i64 = XInternAtom(host.display, protocols_name, 0);
+        host.delete_atom = XInternAtom(host.display, delete_name, 0);
+        _zag_free(protocols_name as *i8);
+        _zag_free(delete_name as *i8);
+        if (protocols_atom != 0 && host.delete_atom != 0) {
+            let atom_storage: *i64 = _zag_malloc(8) as *i64;
+            atom_storage[0] = host.delete_atom;
+            _ = XSetWMProtocols(host.display, host.window, atom_storage, 1);
+            _zag_free(atom_storage as *i8);
+        }
+        host.event_data = _zag_malloc(192) as *u8;
+        if (host.event_data == linux_x11_null()) {
+            host.error = LinuxX11Error.window_creation_failed;
+            _ = XFreeGC(host.display, host.gc);
+            _ = XDestroyWindow(host.display, host.window);
+            _ = XCloseDisplay(host.display);
+            host.display = linux_x11_null();
+            return host;
+        }
+        host.width = width;
+        host.height = height;
+        host.open = 1;
+        _ = XMapWindow(host.display, host.window);
+        _ = XSync(host.display, 0);
+    }
+    return host;
+}
+
+fn linux_x11_present(host: *LinuxX11Window, surface: CpuSurface) i32 {
+    if (host.*.open == 0 || linux_x11_copy_surface(host, surface) == 0) {
+        host.*.error = LinuxX11Error.presentation_failed;
+        return 0;
+    }
+    unsafe {
+        // XPutImage's integer return is not a success Status contract. Xlib
+        // reports protocol failures through its error path, so synchronize the
+        // request before declaring this frame presented.
+        _ = XPutImage(host.*.display, host.*.window, host.*.gc,
+            host.*.image, 0, 0, 0, 0, surface.width, surface.height);
+        _ = XSync(host.*.display, 0);
+    }
+    return 1;
+}
+
+fn linux_x11_decode_event(host: *LinuxX11Window) LinuxX11Event {
+    let result: LinuxX11Event = LinuxX11Event{
+        .kind = LinuxX11EventKind.none,
+        .width = host.*.width,
+        .height = host.*.height,
+    };
+    unsafe {
+        let event_type: i32 = (host.*.event_data[0] as i32) & 127;
+        if (event_type == 12) { result.kind = LinuxX11EventKind.expose; }
+        else if (event_type == 22) {
+            // Query the server for authoritative geometry instead of
+            // duplicating XConfigureEvent's C-union byte layout in toolkit
+            // code. Each output has its own initialized Zag slot, so the C
+            // ABI's 32-bit writes are represented without aliasing.
+            let root_return: i64 = 0;
+            let x_return: i32 = 0;
+            let y_return: i32 = 0;
+            let width_return: i32 = 0;
+            let height_return: i32 = 0;
+            let border_return: i32 = 0;
+            let depth_return: i32 = 0;
+            if (XGetGeometry(host.*.display, host.*.window, &root_return,
+                &x_return, &y_return, &width_return, &height_return,
+                &border_return, &depth_return) != 0) {
+                result.width = width_return;
+                result.height = height_return;
+                if (result.width > 0 && result.height > 0 &&
+                    (result.width != host.*.width || result.height != host.*.height)) {
+                    result.kind = LinuxX11EventKind.resize;
+                }
+            }
+        } else if (event_type == 33) {
+            let words64: *i64 = host.*.event_data as *i64;
+            if (words64[7] == host.*.delete_atom) {
+                result.kind = LinuxX11EventKind.close;
+                host.*.open = 0;
+            }
+        }
+    }
+    return result;
+}
+
+fn linux_x11_next_event(host: *LinuxX11Window) LinuxX11Event {
+    if (host.*.open == 0) {
+        return LinuxX11Event{ .kind = LinuxX11EventKind.close,
+            .width = host.*.width, .height = host.*.height };
+    }
+    unsafe { _ = XNextEvent(host.*.display, host.*.event_data); }
+    return linux_x11_decode_event(host);
+}
+
+fn linux_x11_pending(host: *LinuxX11Window) i32 {
+    if (host.*.open == 0) { return 0; }
+    unsafe { return XPending(host.*.display); }
+}
+
+fn linux_x11_close(host: *LinuxX11Window) void {
+    unsafe {
+        linux_x11_release_image(host);
+        if (host.*.event_data != linux_x11_null()) {
+            _zag_free(host.*.event_data as *i8);
+            host.*.event_data = linux_x11_null();
+        }
+        if (host.*.display != linux_x11_null()) {
+            if (host.*.gc != linux_x11_null()) { _ = XFreeGC(host.*.display, host.*.gc); }
+            if (host.*.window != 0) { _ = XDestroyWindow(host.*.display, host.*.window); }
+            _ = XCloseDisplay(host.*.display);
+        }
+    }
+    host.*.display = linux_x11_null();
+    host.*.gc = linux_x11_null();
+    host.*.window = 0;
+    host.*.open = 0;
+}

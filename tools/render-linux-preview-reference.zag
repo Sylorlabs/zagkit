@@ -1,0 +1,38 @@
+@import("../src/showcase/linux_preview_scene.zag")
+@import("../src/render/png_encode.zag")
+
+fn main() i32 {
+    if (_zag_argc() != 2) {
+        _zag_eprintln("usage: render-linux-preview-reference <output.png>");
+        return 2;
+    }
+    let list: DisplayList = linux_preview_scene(1120, 720);
+    if (display_list_verify(list) != DisplayError.none) {
+        display_list_free(&list);
+        return 3;
+    }
+    let raster: CpuRasterResult = cpu_rasterize(list, 1120, 720);
+    if (raster.error != CpuRasterError.none) {
+        _zag_eprintln("linux preview raster failed");
+        _zag_print("error="); print_i64(raster.error as i64);
+        _zag_print(" op="); print_i64(raster.error_op as i64);
+        _zag_println("");
+        cpu_raster_free(&raster);
+        display_list_free(&list);
+        return 4;
+    }
+    let png: PngEncodeResult = png_encode_surface(raster.surface);
+    if (png.error != PngEncodeError.none) {
+        png_encode_free(&png);
+        cpu_raster_free(&raster);
+        display_list_free(&list);
+        return 5;
+    }
+    let write_error: i32 = _zag_write_file(_zag_arg(1),
+        png.bytes.data[0..png.bytes.len]);
+    png_encode_free(&png);
+    cpu_raster_free(&raster);
+    display_list_free(&list);
+    if (write_error != 0) { return 6; }
+    return 0;
+}

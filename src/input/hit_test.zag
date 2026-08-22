@@ -1,0 +1,187 @@
+@import("std:list")
+@import("../core/geometry.zag")
+@import("../core/view_contract.zag")
+@import("../render/display_list.zag")
+
+enum HitTreeError {
+    none,
+    duplicate_id,
+    missing_parent,
+    invalid_geometry,
+    invalid_transform,
+    singular_transform,
+}
+
+struct HitNode {
+    id: NodeKey,
+    parent: NodeKey,
+    bounds: Rect,
+    clip: Rect,
+    has_clip: i32,
+    transform: Transform,
+    z_order: i64,
+    enabled: i32,
+    focusable: i32,
+}
+
+struct HitTree {
+    nodes: ArrayList[HitNode],
+    revision: i64,
+    last_error: HitTreeError,
+    error_node: NodeKey,
+}
+
+struct HitResult {
+    found: i32,
+    id: NodeKey,
+    node_index: i32,
+    local_x: i64,
+    local_y: i64,
+    z_order: i64,
+}
+
+fn hit_root_key() NodeKey { return node_key(0 - 1); }
+
+fn hit_node(id: NodeKey, parent: NodeKey, bounds: Rect) HitNode {
+    return HitNode{
+        .id = id,
+        .parent = parent,
+        .bounds = bounds,
+        .clip = bounds,
+        .has_clip = 0,
+        .transform = transform_identity(),
+        .z_order = 0,
+        .enabled = 1,
+        .focusable = 0,
+    };
+}
+
+fn hit_tree_make() HitTree {
+    return HitTree{
+        .nodes = make[HitNode](16),
+        .revision = 0,
+        .last_error = HitTreeError.none,
+        .error_node = hit_root_key(),
+    };
+}
+
+fn hit_tree_free(tree: *HitTree) void {
+    free[HitNode](&tree.*.nodes);
+}
+
+fn hit_tree_find_index(tree: HitTree, id: NodeKey) i32 {
+    let i: i32 = tree.nodes.len - 1;
+    while (i >= 0) {
+        if (node_key_equal(tree.nodes.data[i].id, id) == 1) { return i; }
+        i = i - 1;
+    }
+    return 0 - 1;
+}
+
+fn hit_tree_find_index_borrowed(tree: *HitTree, id: NodeKey) i32 {
+    return hit_tree_find_index(tree.*, id);
+}
+
+fn hit_transform_values_valid(transform: Transform) i32 {
+    let limit: i64 = 4096 * unit_scale();
+    if (transform.scale_x < 0 - limit || transform.scale_x > limit ||
+        transform.scale_y < 0 - limit || transform.scale_y > limit ||
+        transform.skew_x < 0 - limit || transform.skew_x > limit ||
+        transform.skew_y < 0 - limit || transform.skew_y > limit ||
+        transform.translate_x < -1000000000 || transform.translate_x > 1000000000 ||
+        transform.translate_y < -1000000000 || transform.translate_y > 1000000000) { return 0; }
+    return 1;
+}
+
+fn hit_geometry_valid(value: Rect) i32 {
+    let limit: i64 = 1000000000;
+    return (value.x >= 0 - limit && value.x <= limit &&
+        value.y >= 0 - limit && value.y <= limit &&
+        value.width > 0 && value.width <= limit &&
+        value.height > 0 && value.height <= limit) as i32;
+}
+
+fn hit_tree_fail(tree: *HitTree, error: HitTreeError, id: NodeKey) HitTreeError {
+    tree.*.last_error = error;
+    tree.*.error_node = id;
+    return error;
+}
+
+fn hit_tree_add(tree: *HitTree, node: HitNode) HitTreeError {
+    if (hit_tree_find_index(tree.*, node.id) >= 0) {
+        return hit_tree_fail(tree, HitTreeError.duplicate_id, node.id);
+    }
+    if (node_key_equal(node.parent, hit_root_key()) == 0 &&
+        hit_tree_find_index(tree.*, node.parent) < 0) {
+        return hit_tree_fail(tree, HitTreeError.missing_parent, node.id);
+    }
+    if (hit_geometry_valid(node.bounds) == 0 ||
+        (node.has_clip != 0 && hit_geometry_valid(node.clip) == 0)) {
+        return hit_tree_fail(tree, HitTreeError.invalid_geometry, node.id);
+    }
+    if (hit_transform_values_valid(node.transform) == 0) {
+        return hit_tree_fail(tree, HitTreeError.invalid_transform, node.id);
+    }
+    let determinant: i64 = node.transform.scale_x * node.transform.scale_y -
+        node.transform.skew_x * node.transform.skew_y;
+    if (determinant == 0) {
+        return hit_tree_fail(tree, HitTreeError.singular_transform, node.id);
+    }
+    push[HitNode](&tree.*.nodes, node);
+    tree.*.revision = tree.*.revision + 1;
+    tree.*.last_error = HitTreeError.none;
+    tree.*.error_node = hit_root_key();
+    return HitTreeError.none;
+}
+
+fn hit_empty_result() HitResult {
+    return HitResult{
+        .found = 0,
+        .id = hit_root_key(),
+        .node_index = 0 - 1,
+        .local_x = 0,
+        .local_y = 0,
+        .z_order = 0,
+    };
+}
+
+fn hit_node_local(node: HitNode, world_x: i64, world_y: i64) HitResult {
+    if (world_x < -1000000000 || world_x > 1000000000 ||
+        world_y < -1000000000 || world_y > 1000000000) { return hit_empty_result(); }
+    let dx: i64 = world_x - node.transform.translate_x;
+    let dy: i64 = world_y - node.transform.translate_y;
+    let determinant: i64 = node.transform.scale_x * node.transform.scale_y -
+        node.transform.skew_x * node.transform.skew_y;
+    if (determinant == 0) { return hit_empty_result(); }
+    let local_x: i64 = ((dx * node.transform.scale_y - dy * node.transform.skew_x) * unit_scale()) / determinant;
+    let local_y: i64 = ((dy * node.transform.scale_x - dx * node.transform.skew_y) * unit_scale()) / determinant;
+    return HitResult{
+        .found = 1,
+        .id = node.id,
+        .node_index = 0 - 1,
+        .local_x = local_x,
+        .local_y = local_y,
+        .z_order = node.z_order,
+    };
+}
+
+fn hit_test(tree: HitTree, world_x: i64, world_y: i64) HitResult {
+    if (world_x < -1000000000 || world_x > 1000000000 ||
+        world_y < -1000000000 || world_y > 1000000000) { return hit_empty_result(); }
+    let best: HitResult = hit_empty_result();
+    let i: i32 = tree.nodes.len - 1;
+    while (i >= 0) {
+        let node: HitNode = tree.nodes.data[i];
+        if (node.enabled != 0) {
+            let candidate: HitResult = hit_node_local(node, world_x, world_y);
+            if (candidate.found != 0 && rect_contains(node.bounds, candidate.local_x, candidate.local_y) != 0 &&
+                (node.has_clip == 0 || rect_contains(node.clip, candidate.local_x, candidate.local_y) != 0) &&
+                (best.found == 0 || node.z_order > best.z_order)) {
+                best = candidate;
+                best.node_index = i;
+            }
+        }
+        i = i - 1;
+    }
+    return best;
+}

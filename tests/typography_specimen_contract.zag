@@ -1,0 +1,592 @@
+@import("../src/showcase/typography_specimen.zag")
+@import("../src/render/cpu_raster.zag")
+
+struct TestState { passed: i32, failed: i32 }
+
+fn expect(state:  *TestState,
+    condition: i32, name: []u8) void {
+    if (condition != 0) {
+        state.*.passed = state.*.passed + 1;
+        _zag_print("ok  "); _zag_println(name);
+    } else {
+        state.*.failed = state.*.failed + 1;
+        _zag_print("FAIL "); _zag_println(name);
+    }
+}
+
+fn typography_test_rect_equal(left: Rect, right: Rect) i32 {
+    return (left.x == right.x && left.y == right.y &&
+        left.width == right.width && left.height == right.height) as i32;
+}
+
+fn typography_test_face(path: []u8) OpenTypeFace {
+    let bytes: []u8 = _zag_read_file(path);
+    if (bytes.len <= 0) { return opentype_face_empty(); }
+    let face: OpenTypeFace = opentype_parse(bytes);
+    _zag_free(_zag_slice_ptr(bytes));
+    return face;
+}
+
+fn typography_test_base_spec() TypographySpecimenSpec {
+    return typography_specimen_spec(node_key_scoped(7300, 4),
+        rect(0, 0, 1120 * unit_scale(), 720 * unit_scale()));
+}
+
+fn typography_test_structure_contract(
+    state:  *TestState,
+    artifact:  *TypographySpecimenArtifact) void {
+    expect(state, typography_specimen_valid(artifact) != 0 &&
+        artifact.*.rows.len == 13 && artifact.*.semantics.nodes.len == 40 &&
+        artifact.*.display.ops.len == 130 &&
+        artifact.*.display.resources.resources.len == 26,
+        "thirteen reusable rows own twenty-six Text paths and forty semantic nodes");
+    expect(state, node_key_equal(artifact.*.id,
+            node_key_scoped(7300, 4)) != 0 &&
+        node_key_equal(artifact.*.semantics.nodes.data[0].id,
+            artifact.*.id) != 0 &&
+        artifact.*.semantics.nodes.data[0].role == SemanticRole.group &&
+        typography_test_rect_equal(
+            artifact.*.semantics.nodes.data[0].bounds,
+            artifact.*.bounds) != 0,
+        "one stable scoped root ID owns the exact specimen semantic bounds");
+    expect(state, artifact.*.outer_padding ==
+            flex_spacing(FlexSpacingToken.large, FlexDensity.standard) &&
+        artifact.*.row_gap ==
+            flex_spacing(FlexSpacingToken.small, FlexDensity.standard) &&
+        artifact.*.row_padding ==
+            flex_spacing(FlexSpacingToken.small, FlexDensity.standard) &&
+        artifact.*.column_gap ==
+            flex_spacing(FlexSpacingToken.large, FlexDensity.standard) &&
+        artifact.*.required_height ==
+            typography_specimen_required_height(
+                unit_scale(), FlexDensity.standard) &&
+        artifact.*.required_height == 666 * unit_scale() &&
+        artifact.*.structural_minimum_width == 344 * unit_scale() &&
+        artifact.*.required_height < artifact.*.bounds.height,
+        "all repeated specimen rhythm resolves through named Flex spacing tokens");
+
+    let index: i32 = 0;
+    let identity_truth: i32 = 1;
+    let geometry_truth: i32 = 1;
+    while (index < artifact.*.rows.len) {
+        let row: TypographySpecimenRow = artifact.*.rows.data[index];
+        if (row.index != index ||
+            node_key_equal(row.row_id,
+                typography_specimen_row_id(artifact.*.id, index)) == 0 ||
+            node_key_equal(row.label_id,
+                typography_specimen_label_id(artifact.*.id, index)) == 0 ||
+            node_key_equal(row.sample_id,
+                typography_specimen_sample_id(artifact.*.id, index)) == 0 ||
+            row.label_evidence_hash == 0 || row.sample_evidence_hash == 0 ||
+            row.sample_path_payload_hash == 0) {
+            identity_truth = 0;
+        }
+        let row_semantic: i32 = semantics_find_index(
+            artifact.*.semantics, row.row_id);
+        let label_semantic: i32 = semantics_find_index(
+            artifact.*.semantics, row.label_id);
+        let sample_semantic: i32 = semantics_find_index(
+            artifact.*.semantics, row.sample_id);
+        if (row_semantic < 0 || label_semantic < 0 || sample_semantic < 0 ||
+            typography_test_rect_equal(
+                artifact.*.semantics.nodes.data[row_semantic].bounds,
+                row.bounds) == 0 ||
+            typography_test_rect_equal(
+                artifact.*.semantics.nodes.data[label_semantic].bounds,
+                row.label_bounds) == 0 ||
+            typography_test_rect_equal(
+                artifact.*.semantics.nodes.data[sample_semantic].bounds,
+                row.sample_bounds) == 0 ||
+            node_key_equal(
+                artifact.*.semantics.nodes.data[label_semantic].parent,
+                row.row_id) == 0 ||
+            node_key_equal(
+                artifact.*.semantics.nodes.data[sample_semantic].parent,
+                row.row_id) == 0) {
+            geometry_truth = 0;
+        }
+        index = index + 1;
+    }
+    expect(state, identity_truth != 0,
+        "every row label and sample exposes deterministic non-pixel identity and evidence");
+    expect(state, geometry_truth != 0,
+        "Flex geometry is shared exactly by row metadata Text semantics and Talkback");
+}
+
+fn typography_test_token_contract(
+    state:  *TestState,
+    artifact:  *TypographySpecimenArtifact) void {
+    let ramp_truth: i32 = 1;
+    let index: i32 = 0;
+    while (index < 7) {
+        let row: TypographySpecimenRow = artifact.*.rows.data[index];
+        if (row.section != TypographySpecimenSection.type_ramp ||
+            row.requested_type != index as SemanticTypeToken ||
+            row.resolved_type != row.requested_type ||
+            row.weight != TypographySpecimenWeight.regular ||
+            row.color != SemanticColorToken.text_primary ||
+            row.resolved_font_size !=
+                semantic_type_size(row.resolved_type)) {
+            ramp_truth = 0;
+        }
+        index = index + 1;
+    }
+    expect(state, ramp_truth != 0,
+        "display title heading body label caption and code form the canonical semantic ramp");
+    expect(state,
+        artifact.*.rows.data[7].section == TypographySpecimenSection.weight &&
+        artifact.*.rows.data[7].weight == TypographySpecimenWeight.light &&
+        artifact.*.rows.data[8].weight == TypographySpecimenWeight.regular &&
+        artifact.*.rows.data[9].weight == TypographySpecimenWeight.bold &&
+        artifact.*.rows.data[7].requested_type == SemanticTypeToken.body &&
+        artifact.*.rows.data[8].requested_type == SemanticTypeToken.body &&
+        artifact.*.rows.data[9].requested_type == SemanticTypeToken.body,
+        "the weight strip changes only the caller-declared face at one type role");
+    expect(state,
+        artifact.*.rows.data[6].requested_type == SemanticTypeToken.code &&
+        artifact.*.rows.data[6].resolved_type == SemanticTypeToken.code &&
+        artifact.*.code_family_routing_available == 0,
+        "the code size role is present without claiming unavailable font-family routing");
+    expect(state, artifact.*.weight_shape_proof == 1 &&
+        artifact.*.light_probe_hash != artifact.*.regular_probe_hash &&
+        artifact.*.light_probe_hash != artifact.*.bold_probe_hash &&
+        artifact.*.regular_probe_hash != artifact.*.bold_probe_hash &&
+        artifact.*.weight_metadata_verified == 0,
+        "weight proof compares real outline payloads without claiming unparsed OS/2 metadata");
+    expect(state,
+        artifact.*.rows.data[10].section == TypographySpecimenSection.contrast &&
+        artifact.*.rows.data[10].color == SemanticColorToken.text_primary &&
+        artifact.*.rows.data[11].color == SemanticColorToken.text_secondary &&
+        artifact.*.rows.data[12].color == SemanticColorToken.text_disabled &&
+        artifact.*.rows.data[12].disabled == 1,
+        "primary secondary and disabled contrast are canonical tokens with semantic state");
+}
+
+fn typography_test_talkback_contract(
+    state:  *TestState,
+    artifact:  *TypographySpecimenArtifact) void {
+    let session: TalkbackSession = talkback_session_make(
+        talkback_capabilities());
+    let body_id: NodeKey = typography_specimen_sample_id(artifact.*.id, 3);
+    let disabled_id: NodeKey = typography_specimen_sample_id(
+        artifact.*.id, 12);
+    let body: TalkbackResponse = talkback_dispatch(&session,
+        artifact.*.semantics, artifact.*.bounds,
+        talkback_request(1, TalkbackCommand.query, body_id,
+            artifact.*.semantics.revision));
+    let disabled: TalkbackResponse = talkback_dispatch(&session,
+        artifact.*.semantics, artifact.*.bounds,
+        talkback_request(2, TalkbackCommand.query, disabled_id,
+            artifact.*.semantics.revision));
+    let click: TalkbackResponse = talkback_dispatch(&session,
+        artifact.*.semantics, artifact.*.bounds,
+        talkback_request(3, TalkbackCommand.click, body_id,
+            artifact.*.semantics.revision));
+    expect(state, body.status == TalkbackStatus.accepted &&
+        body.resolved_role == SemanticRole.text && body.has_bounds == 1 &&
+        typography_test_rect_equal(body.bounds,
+            artifact.*.rows.data[3].sample_bounds) != 0,
+        "Talkback queries the body specimen by stable ID with exact Text geometry");
+    expect(state, disabled.status == TalkbackStatus.accepted &&
+        (disabled.state_flags & talkback_state_disabled_bit()) != 0 &&
+        click.status == TalkbackStatus.action_unavailable,
+        "disabled text is inspectable while decorative specimens expose no fake action");
+    talkback_session_free(&session);
+}
+
+fn typography_test_host_parent(tree:  *SemanticsTree,
+    id: NodeKey, bounds: Rect) void {
+    let parent: SemanticsSpec = semantics_spec(id, semantic_root_key(),
+        SemanticRole.group, "Typography host");
+    parent.has_bounds = 1;
+    parent.bounds = bounds;
+    _ = semantics_add(tree, parent);
+}
+
+fn typography_test_host_background(display:  *DisplayList,
+    bounds: Rect) void {
+    let background: DisplayOp = display_op(DisplayOpKind.fill_rect,
+        node_key(7599));
+    background.bounds = bounds;
+    background.paint = semantic_color_paint(SemanticColorToken.canvas);
+    _ = display_list_push(display, background);
+}
+
+fn typography_test_host_contract(
+    state:  *TestState,
+    artifact:  *TypographySpecimenArtifact) void {
+    let host_id: NodeKey = node_key(7600);
+    let display: DisplayList = display_list_make();
+    typography_test_host_background(&display, artifact.*.bounds);
+    let semantics: SemanticsTree = semantics_tree_make();
+    typography_test_host_parent(&semantics, host_id, artifact.*.bounds);
+    let artifact_hash: i64 = artifact.*.evidence_hash;
+    let hosted: TypographySpecimenHostResult =
+        typography_specimen_contribute_hosted(artifact,
+            typography_specimen_host_spec(host_id),
+            &display, &semantics);
+    let root_index: i32 = semantics_find_index(semantics, artifact.*.id);
+    let sample_index: i32 = semantics_find_index(semantics,
+        typography_specimen_sample_id(artifact.*.id, 3));
+    expect(state, hosted.error == TypographySpecimenHostError.none &&
+        hosted.display_operations_added == 130 &&
+        hosted.display_resources_added == 26 &&
+        hosted.semantic_nodes_added == 40 &&
+        display.ops.len == 131 &&
+        display.resources.resources.len == 26 && semantics.nodes.len == 41,
+        "hosted contribution atomically adds the exact immutable display and semantic counts");
+    expect(state, root_index >= 0 && sample_index >= 0 &&
+        node_key_equal(semantics.nodes.data[root_index].parent, host_id) != 0 &&
+        node_key_equal(semantics.nodes.data[sample_index].parent,
+            typography_specimen_row_id(artifact.*.id, 3)) != 0 &&
+        typography_test_rect_equal(semantics.nodes.data[sample_index].bounds,
+            artifact.*.rows.data[3].sample_bounds) != 0,
+        "hosting reparents only the specimen root and preserves every child ID and Flex bound");
+    let hosted_session: TalkbackSession = talkback_session_make(
+        talkback_capabilities());
+    let hosted_query: TalkbackResponse = talkback_dispatch(
+        &hosted_session, semantics, artifact.*.bounds,
+        talkback_request(40, TalkbackCommand.query,
+            typography_specimen_sample_id(artifact.*.id, 3),
+            semantics.revision));
+    expect(state, hosted_query.status == TalkbackStatus.accepted &&
+        hosted_query.resolved_role == SemanticRole.text &&
+        typography_test_rect_equal(hosted_query.bounds,
+            artifact.*.rows.data[3].sample_bounds) != 0,
+        "Talkback resolves hosted typography by the original stable sample ID");
+    talkback_session_free(&hosted_session);
+    let source_resource: RenderResource =
+        artifact.*.display.resources.resources.data[0];
+    let hosted_resource_index: i32 = render_resource_find_index(
+        &display.resources, source_resource.id);
+    expect(state, hosted_resource_index >= 0 &&
+        display.resources.resources.data[hosted_resource_index].content_hash ==
+            source_resource.content_hash &&
+        typography_specimen_valid(artifact) != 0 &&
+        artifact.*.evidence_hash == artifact_hash,
+        "hosting copies resources exactly and leaves the reusable specimen immutable");
+    expect(state, display_list_seal(&display) == DisplayError.none &&
+        display_list_verify(&display) == DisplayError.none,
+        "the caller can continue composition and seal the hosted display normally");
+    semantics_tree_free(&semantics);
+    display_list_free(&display);
+
+    let duplicate_display: DisplayList = display_list_make();
+    typography_test_host_background(&duplicate_display, artifact.*.bounds);
+    let duplicate_semantics: SemanticsTree = semantics_tree_make();
+    typography_test_host_parent(&duplicate_semantics,
+        host_id, artifact.*.bounds);
+    let duplicate: SemanticsSpec = semantics_spec(
+        typography_specimen_sample_id(artifact.*.id, 4), host_id,
+        SemanticRole.text, "Existing collision");
+    duplicate.has_bounds = 1;
+    duplicate.bounds = artifact.*.rows.data[4].sample_bounds;
+    _ = semantics_add(&duplicate_semantics, duplicate);
+    let duplicate_ops: i32 = duplicate_display.ops.len;
+    let duplicate_hash: i64 = duplicate_display.content_hash;
+    let duplicate_nodes: i32 = duplicate_semantics.nodes.len;
+    let duplicate_revision: i64 = duplicate_semantics.revision;
+    let duplicate_result: TypographySpecimenHostResult =
+        typography_specimen_contribute_hosted(artifact,
+            typography_specimen_host_spec(host_id),
+            &duplicate_display, &duplicate_semantics);
+    expect(state, duplicate_result.error ==
+            TypographySpecimenHostError.duplicate_semantic_id &&
+        duplicate_display.ops.len == duplicate_ops &&
+        duplicate_display.resources.resources.len == 0 &&
+        duplicate_display.content_hash == duplicate_hash &&
+        duplicate_semantics.nodes.len == duplicate_nodes &&
+        duplicate_semantics.revision == duplicate_revision,
+        "semantic ID collisions reject before either host destination changes");
+    semantics_tree_free(&duplicate_semantics);
+    display_list_free(&duplicate_display);
+
+    let collision_display: DisplayList = display_list_make();
+    let collision_spec: RenderResourceSpec = render_resource_spec(
+        source_resource.id, source_resource.kind,
+        source_resource.payload.data[0..source_resource.payload.len],
+        source_resource.format_tag);
+    collision_spec.revision = source_resource.revision;
+    collision_spec.width = source_resource.width;
+    collision_spec.height = source_resource.height;
+    collision_spec.color_space = source_resource.color_space;
+    _ = display_list_add_resource(&collision_display, collision_spec);
+    let collision_semantics: SemanticsTree = semantics_tree_make();
+    typography_test_host_parent(&collision_semantics,
+        host_id, artifact.*.bounds);
+    let collision_hash: i64 = collision_display.content_hash;
+    let collision_nodes: i32 = collision_semantics.nodes.len;
+    let collision_result: TypographySpecimenHostResult =
+        typography_specimen_contribute_hosted(artifact,
+            typography_specimen_host_spec(host_id),
+            &collision_display, &collision_semantics);
+    expect(state, collision_result.error ==
+            TypographySpecimenHostError.resource_collision &&
+        collision_display.resources.resources.len == 1 &&
+        collision_display.ops.len == 0 &&
+        collision_display.content_hash == collision_hash &&
+        collision_semantics.nodes.len == collision_nodes,
+        "resource collisions fail before staged display or semantic publication");
+    semantics_tree_free(&collision_semantics);
+    display_list_free(&collision_display);
+
+    let missing_display: DisplayList = display_list_make();
+    let missing_semantics: SemanticsTree = semantics_tree_make();
+    let missing: TypographySpecimenHostResult =
+        typography_specimen_contribute_hosted(artifact,
+            typography_specimen_host_spec(node_key(7699)),
+            &missing_display, &missing_semantics);
+    expect(state, missing.error ==
+            TypographySpecimenHostError.missing_semantic_parent &&
+        missing_display.ops.len == 0 &&
+        missing_display.resources.resources.len == 0 &&
+        missing_semantics.nodes.len == 0,
+        "a missing declared host parent fails with both destinations empty");
+    semantics_tree_free(&missing_semantics);
+    display_list_free(&missing_display);
+
+    let limited_display: DisplayList =
+        display_list_make_with_resource_limits(1, 1024, 1024);
+    let limited_semantics: SemanticsTree = semantics_tree_make();
+    typography_test_host_parent(&limited_semantics,
+        host_id, artifact.*.bounds);
+    let limited: TypographySpecimenHostResult =
+        typography_specimen_contribute_hosted(artifact,
+            typography_specimen_host_spec(host_id),
+            &limited_display, &limited_semantics);
+    expect(state, limited.error ==
+            TypographySpecimenHostError.invalid_destination &&
+        limited_display.ops.len == 0 &&
+        limited_display.resources.resources.len == 0 &&
+        limited_semantics.nodes.len == 1,
+        "insufficient host resource capacity fails atomically before mutation");
+    semantics_tree_free(&limited_semantics);
+    display_list_free(&limited_display);
+}
+
+fn typography_test_adaptive_contract(
+    state:  *TestState,
+    light:  *OpenTypeFace,
+    regular:  *OpenTypeFace,
+    bold:  *OpenTypeFace,
+    baseline:  *TypographySpecimenArtifact) void {
+    let rtl_spec: TypographySpecimenSpec = typography_test_base_spec();
+    rtl_spec.direction = LayoutDirection.rtl;
+    rtl_spec.density = FlexDensity.compact;
+    let rtl: TypographySpecimenArtifact = typography_specimen_build(
+        rtl_spec, light, regular, bold);
+    expect(state, typography_specimen_valid(&rtl) != 0 &&
+        rtl.rtl_layout_applied == 1 && rtl.nominal_ltr_text_only == 1 &&
+        rtl.bidi_shaping_available == 0 && rtl.font_fallback_available == 0 &&
+        rtl.rows.data[0].label_bounds.x > rtl.rows.data[0].sample_bounds.x &&
+        baseline.*.rows.data[0].label_bounds.x <
+            baseline.*.rows.data[0].sample_bounds.x &&
+        rtl.rows.data[0].label_alignment == TextAlignment.start &&
+        rtl.rows.data[0].sample_alignment == TextAlignment.end,
+        "RTL mirrors Flex columns and physical alignment while reporting nominal LTR text truth");
+    expect(state, rtl.outer_padding ==
+            flex_spacing(FlexSpacingToken.large, FlexDensity.compact) &&
+        rtl.row_gap ==
+            flex_spacing(FlexSpacingToken.small, FlexDensity.compact) &&
+        rtl.outer_padding < baseline.*.outer_padding &&
+        node_key_equal(rtl.rows.data[5].sample_id,
+            baseline.*.rows.data[5].sample_id) != 0,
+        "compact density changes named spacing without changing stable identity");
+
+    let large_spec: TypographySpecimenSpec = typography_test_base_spec();
+    large_spec.bounds = rect(0, 0,
+        1360 * unit_scale(), 900 * unit_scale());
+    large_spec.text_scale = (unit_scale() * 7) / 4;
+    let large: TypographySpecimenArtifact = typography_specimen_build(
+        large_spec, light, regular, bold);
+    expect(state, typography_specimen_valid(&large) != 0 &&
+        large.scale_steps == 2 &&
+        large.continuous_text_scaling_available == 0 &&
+        large.rows.data[0].requested_type == SemanticTypeToken.display &&
+        large.rows.data[0].resolved_type == SemanticTypeToken.display &&
+        large.rows.data[3].requested_type == SemanticTypeToken.body &&
+        large.rows.data[3].resolved_type == SemanticTypeToken.title &&
+        large.rows.data[5].requested_type == SemanticTypeToken.caption &&
+        large.rows.data[5].resolved_type == SemanticTypeToken.body &&
+        large.rows.data[6].requested_type == SemanticTypeToken.code &&
+        large.rows.data[6].resolved_type == SemanticTypeToken.heading &&
+        large.required_height == (814 * unit_scale()) + unit_scale() / 2 &&
+        large.required_height > 720 * unit_scale() &&
+        large.required_height < large.bounds.height &&
+        large.rows.data[3].resolved_font_size >
+            baseline.*.rows.data[3].resolved_font_size,
+        "large text uses explicit canonical-role substitution and records the continuous-scale limit");
+    expect(state, large.rows.data[3].bounds.height >
+            baseline.*.rows.data[3].bounds.height &&
+        node_key_equal(large.rows.data[3].sample_id,
+            baseline.*.rows.data[3].sample_id) != 0,
+        "large text recomputes Flex row geometry without replacing component identity");
+
+    typography_specimen_free(&large);
+    typography_specimen_free(&rtl);
+}
+
+fn typography_test_bounds_contract(
+    state:  *TestState,
+    light:  *OpenTypeFace,
+    regular:  *OpenTypeFace,
+    bold:  *OpenTypeFace) void {
+    let useful_spec: TypographySpecimenSpec = typography_specimen_spec(
+        node_key(7350), rect(0, 0,
+            705 * unit_scale(), 720 * unit_scale()));
+    let useful: TypographySpecimenArtifact = typography_specimen_build(
+        useful_spec, light, regular, bold);
+    expect(state, typography_specimen_valid(&useful) != 0 &&
+        useful.required_height == 666 * unit_scale(),
+        "the default DejaVu specimen fits its measured 705 by 720 useful bound");
+
+    let narrow_spec: TypographySpecimenSpec = typography_specimen_spec(
+        node_key(7351), rect(0, 0,
+            704 * unit_scale(), 720 * unit_scale()));
+    let narrow: TypographySpecimenArtifact = typography_specimen_build(
+        narrow_spec, light, regular, bold);
+    expect(state, narrow.error == TypographySpecimenError.text_error &&
+        narrow.text_error == TextError.overflow && narrow.error_row == 0 &&
+        narrow.evidence_hash == 0,
+        "one pixel below the default useful width fails on the display sample instead of clipping");
+
+    let short_spec: TypographySpecimenSpec = typography_specimen_spec(
+        node_key(7352), rect(0, 0,
+            1120 * unit_scale(), 665 * unit_scale()));
+    let short: TypographySpecimenArtifact = typography_specimen_build(
+        short_spec, light, regular, bold);
+    expect(state, short.error == TypographySpecimenError.layout_overflow &&
+        short.rows.len == 0 && short.semantics.nodes.len == 0 &&
+        short.display.ops.len == 0,
+        "one pixel below the required height fails before semantic or display publication");
+
+    typography_specimen_free(&short);
+    typography_specimen_free(&narrow);
+    typography_specimen_free(&useful);
+}
+
+fn typography_test_determinism_contract(
+    state:  *TestState,
+    light:  *OpenTypeFace,
+    regular:  *OpenTypeFace,
+    bold:  *OpenTypeFace,
+    first:  *TypographySpecimenArtifact) void {
+    let second: TypographySpecimenArtifact = typography_specimen_build(
+        typography_test_base_spec(), light, regular, bold);
+    let first_raster: CpuRasterResult = cpu_rasterize(first.*.display,
+        1120, 720);
+    let second_raster: CpuRasterResult = cpu_rasterize(second.display,
+        1120, 720);
+    let first_hash: i64 = 0;
+    let second_hash: i64 = 0;
+    if (first_raster.error == CpuRasterError.none) {
+        first_hash = cpu_surface_hash(first_raster.surface);
+    }
+    if (second_raster.error == CpuRasterError.none) {
+        second_hash = cpu_surface_hash(second_raster.surface);
+    }
+    expect(state, typography_specimen_valid(&second) != 0 &&
+        first.*.evidence_hash == second.evidence_hash &&
+        first.*.display_hash == second.display_hash &&
+        first.*.talkback_hash == second.talkback_hash,
+        "identical type faces tokens scale and Flex inputs produce identical evidence");
+    expect(state, first_hash != 0 && first_hash == second_hash &&
+        first_raster.pixels_touched > 0 &&
+        second_raster.pixels_touched > 0,
+        "the CPU oracle produces deterministic nonempty typography pixels");
+    _zag_print("Typography specimen evidence hash: ");
+    _zag_print_i64(first.*.evidence_hash); _zag_println("");
+    _zag_print("Typography specimen CPU hash: ");
+    _zag_print_i64(first_hash); _zag_println("");
+    cpu_raster_free(&second_raster);
+    cpu_raster_free(&first_raster);
+    typography_specimen_free(&second);
+}
+
+fn typography_test_failure_contract(
+    state:  *TestState,
+    regular:  *OpenTypeFace,
+    bold:  *OpenTypeFace) void {
+    let invalid_face: OpenTypeFace = opentype_face_empty();
+    let missing: TypographySpecimenArtifact = typography_specimen_build(
+        typography_test_base_spec(), &invalid_face, regular, bold);
+    expect(state, missing.error == TypographySpecimenError.missing_font &&
+        missing.missing_face_index == 0 && missing.rows.len == 0 &&
+        missing.semantics.nodes.len == 0 && missing.display.ops.len == 0 &&
+        missing.weight_shape_proof == 0 && missing.evidence_hash == 0,
+        "a missing light face fails before any partial display semantics or rows exist");
+
+    let disguised: TypographySpecimenArtifact = typography_specimen_build(
+        typography_test_base_spec(), regular, regular, regular);
+    expect(state,
+        disguised.error == TypographySpecimenError.weight_not_visible &&
+        disguised.rows.len == 0 && disguised.semantics.nodes.len == 0 &&
+        disguised.display.ops.len == 0 && disguised.weight_shape_proof == 0 &&
+        disguised.light_probe_hash == disguised.regular_probe_hash &&
+        disguised.regular_probe_hash == disguised.bold_probe_hash,
+        "three identical faces cannot masquerade as a visible weight scale");
+
+    let small_spec: TypographySpecimenSpec = typography_specimen_spec(
+        node_key(7400), rect(0, 0,
+            1200 * unit_scale(), 200 * unit_scale()));
+    let overflow: TypographySpecimenArtifact = typography_specimen_build(
+        small_spec, regular, regular, bold);
+    expect(state, overflow.error == TypographySpecimenError.layout_overflow &&
+        overflow.rows.len == 0 && overflow.semantics.nodes.len == 0 &&
+        overflow.display.ops.len == 0,
+        "insufficient vertical space fails as explicit Flex overflow before rendering");
+
+    let invalid_spec: TypographySpecimenSpec = typography_test_base_spec();
+    invalid_spec.text_scale = 0;
+    let invalid: TypographySpecimenArtifact = typography_specimen_build(
+        invalid_spec, regular, regular, bold);
+    expect(state, invalid.error == TypographySpecimenError.invalid_spec &&
+        invalid.rows.len == 0 && invalid.semantics.nodes.len == 0,
+        "invalid text scale fails before font layout or semantic publication");
+
+    typography_specimen_free(&invalid);
+    typography_specimen_free(&overflow);
+    typography_specimen_free(&disguised);
+    typography_specimen_free(&missing);
+    opentype_face_free(&invalid_face);
+}
+
+fn main() i32 {
+    if (_zag_argc() != 4) {
+        _zag_eprintln(
+            "usage: typography_specimen_contract <light.ttf> <regular.ttf> <bold.ttf>");
+        return 2;
+    }
+    let state: TestState = TestState{ .passed = 0, .failed = 0 };
+    let light: OpenTypeFace = typography_test_face(_zag_arg(1));
+    let regular: OpenTypeFace = typography_test_face(_zag_arg(2));
+    let bold: OpenTypeFace = typography_test_face(_zag_arg(3));
+    expect(&state, light.error == OpenTypeError.none &&
+        regular.error == OpenTypeError.none && bold.error == OpenTypeError.none,
+        "light regular and bold fixtures parse through Zag-owned OpenType");
+
+    let artifact: TypographySpecimenArtifact = typography_specimen_build(
+        typography_test_base_spec(), &light, &regular, &bold);
+    typography_test_structure_contract(&state, &artifact);
+    typography_test_token_contract(&state, &artifact);
+    typography_test_talkback_contract(&state, &artifact);
+    typography_test_host_contract(&state, &artifact);
+    typography_test_adaptive_contract(
+        &state, &light, &regular, &bold, &artifact);
+    typography_test_bounds_contract(
+        &state, &light, &regular, &bold);
+    typography_test_determinism_contract(
+        &state, &light, &regular, &bold, &artifact);
+    typography_test_failure_contract(&state, &regular, &bold);
+
+    typography_specimen_free(&artifact);
+    opentype_face_free(&bold);
+    opentype_face_free(&regular);
+    opentype_face_free(&light);
+    _zag_print("Typography specimen contract: pass=");
+    _zag_print_i64(state.passed as i64);
+    _zag_print(" fail="); _zag_print_i64(state.failed as i64);
+    _zag_println("");
+    if (state.failed == 0) { return 0; }
+    return 1;
+}

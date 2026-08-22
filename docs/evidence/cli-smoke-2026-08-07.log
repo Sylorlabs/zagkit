@@ -1,0 +1,5 @@
+zagkit-cli-smoke: using temporary workspace /tmp/zagkit-cli-smoke.tNDGiu
+zagkit-cli-smoke: checking command help output
+zagkit-cli-smoke: building headless reference binary
+zagkit-cli-smoke: running headless reference command
+zagkit-cli-smoke: PASS (build, run, run output)

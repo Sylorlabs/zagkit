@@ -1,0 +1,172 @@
+{
+  "schema_version": 2,
+  "direction_id": "direction-a2-glass-clarity",
+  "evolves": "direction-a-glass-clarity",
+  "focus_language": "depth as truth: a single scene light, a strict luminance ladder, and glass reserved for surfaces that genuinely float",
+  "principles": {
+    "depth_is_semantic": "Elevation always encodes stacking truth. A surface is only translucent when it floats over live content; content-bearing surfaces are opaque.",
+    "one_scene_light": "Every edge highlight, shadow, and specular hint derives from one window-global key light. No per-component shadow improvisation.",
+    "chroma_only_for_meaning": "Accent, focus, status, and chart series own all saturated color. Structural surfaces stay near-neutral so glass reads calm.",
+    "glass_recedes_with_density": "Compact density demotes veil materials to solid and shrinks radii by one step; premium at leisure, utilitarian under load."
+  },
+  "material_tiers": {
+    "solid": {
+      "meaning": "Content-bearing surfaces: canvas, panels, cards, insets.",
+      "translucency": "none",
+      "budget": "unbounded area",
+      "cpu_oracle": "exact fill plus analytic gradient bands"
+    },
+    "veil": {
+      "meaning": "Persistent chrome floating over app content: header bar, navigation rail, command palette, toasts.",
+      "translucency": "blur 20dp, tint alpha 0.18",
+      "budget": "combined veil area must stay under 25% of the viewport",
+      "cpu_oracle": "vertical ambient-tint band + edge highlight, fallback reason recorded",
+      "reduced_transparency_fallback": "surface.panel opaque"
+    },
+    "glass": {
+      "meaning": "Transient overlays only: menus, popovers, dialog scrims.",
+      "translucency": "blur 36dp, tint alpha 0.22",
+      "budget": "one live glass layer per interaction; scrims excluded",
+      "cpu_oracle": "warm ambient-tint band + overlay shadow pair, fallback reason recorded",
+      "reduced_transparency_fallback": "surface.raised opaque"
+    }
+  },
+  "palette": {
+    "comment": "Dark theme is primary for the showcase. Structural surfaces follow a strict luminance ladder; hue drift between steps is limited to a cool-to-warm ambient shift.",
+    "canvas": "#0B0E14",
+    "surface": "#12161F",
+    "surface-panel": "#171C27",
+    "surface-raised": "#1E2431",
+    "surface-inset": "#0D1018",
+    "surface-light": "#F5F7FB",
+    "surface-panel-light": "#EDF0F7",
+    "surface-raised-light": "#FFFFFF",
+    "text-primary": "#F0F4FC",
+    "text-secondary": "#A9B4C8",
+    "text-disabled": "#5A6478",
+    "text-primary-light": "#0B1020",
+    "text-secondary-light": "#3D4A61",
+    "brand": "#5B5BF0",
+    "brand-emphasis": "#7C7CF5",
+    "brand-on-surface": "#FFFFFF",
+    "focus": "#37D6EE",
+    "danger": "#F0554D",
+    "warning": "#E8A13D",
+    "success": "#3FBF7A",
+    "shadow-contact": "rgba(2, 6, 16, 0.42)",
+    "shadow-ambient": "rgba(2, 6, 16, 0.26)",
+    "edge-highlight": "rgba(190, 210, 255, 0.16)",
+    "ambient-cool": "rgba(80, 140, 255, 0.06)",
+    "ambient-warm": "rgba(230, 120, 190, 0.05)",
+    "reduced-contrast-overlay": "rgba(2, 8, 23, 0.72)"
+  },
+  "luminance_ladder": {
+    "comment": "Structural depth is encoded as ordered relative luminance steps so hierarchy survives high contrast and reduced transparency.",
+    "dark": { "inset": 0.028, "canvas": 0.035, "base": 0.052, "panel": 0.065, "raised": 0.085 },
+    "light": { "raised": 1.0, "panel": 0.93, "base": 0.90, "canvas": 0.87, "inset": 0.83 }
+  },
+  "typography": {
+    "family": "Inter",
+    "family_fallbacks": ["Fira Sans", "Noto Sans", "Noto Sans Arabic", "Noto Sans Hebrew", "Noto Sans JP", "Noto Sans Thai"],
+    "scale_system": "fluid-4",
+    "baseline_grid_dp": 4,
+    "line_height": 1.4,
+    "letter_spacing_display": "-0.015em",
+    "letter_spacing_body": "0.0em",
+    "numerals": "tabular in tables, charts, and inspectors",
+    "monospace": "JetBrains Mono",
+    "minimum_click_target_dp": 24
+  },
+  "spacing": {
+    "unit": "4dp",
+    "base": 4,
+    "inline-x": 12,
+    "inline-y": 10,
+    "gutter": 16,
+    "panel-padding": 20,
+    "component-gap": 14,
+    "density": {
+      "compact": 0.9,
+      "standard": 1.0,
+      "expanded": 1.15
+    },
+    "density_material_rule": "compact demotes veil to solid and reduces every radius token by one step"
+  },
+  "shape": {
+    "comment": "Continuous-curvature (superellipse) corners are the signature shape; the CPU path rasterizer owns them exactly.",
+    "corner_model": "continuous-curvature",
+    "inset-radius": 8,
+    "control-radius": 10,
+    "card-radius": 14,
+    "panel-radius": 16,
+    "overlay-radius": 18,
+    "pill": true,
+    "concentric_rule": "outer_radius = inner_radius + padding",
+    "focus_ring_radius": "control-radius + 4"
+  },
+  "elevation": {
+    "comment": "Every elevated surface casts a two-layer analytic shadow: a tight contact layer and a soft ambient layer, both derived from the scene key light.",
+    "levels": {
+      "base":    { "contact": null, "ambient": null, "edge_highlight_alpha": 0.10 },
+      "panel":   { "contact": { "y": 1, "blur": 4,  "alpha": 0.30 }, "ambient": { "y": 6,  "blur": 18, "alpha": 0.16 }, "edge_highlight_alpha": 0.14 },
+      "raised":  { "contact": { "y": 2, "blur": 6,  "alpha": 0.34 }, "ambient": { "y": 10, "blur": 28, "alpha": 0.20 }, "edge_highlight_alpha": 0.18 },
+      "overlay": { "contact": { "y": 3, "blur": 8,  "alpha": 0.38 }, "ambient": { "y": 16, "blur": 40, "alpha": 0.26 }, "edge_highlight_alpha": 0.22 }
+    },
+    "focus-ring-thickness": 2
+  },
+  "materials": {
+    "light": {
+      "key_azimuth_deg": 40,
+      "key_zenith_deg": 60,
+      "ambient_intensity": 0.42,
+      "ambient_tint": "rgba(190, 210, 255, 0.16)",
+      "rim_intensity": 0.18,
+      "rule": "edge highlights appear on the top and leading edges only, opposite falloff feeds the contact shadow"
+    },
+    "veil": {
+      "blur_px": 20,
+      "tint_alpha": 0.18,
+      "specular_gain": 0.10,
+      "edge_highlight_alpha": 0.16,
+      "reduced_transparency_fallback": "surface-panel-opaque"
+    },
+    "glass": {
+      "blur_px": 36,
+      "tint_alpha": 0.22,
+      "vignette_alpha": 0.16,
+      "specular_gain": 0.12,
+      "edge_highlight_alpha": 0.20,
+      "reduced_transparency_fallback": "surface-raised-opaque"
+    }
+  },
+  "motion": {
+    "model": "springs-only",
+    "temperaments": {
+      "snappy":     { "settle_ms": 130, "use": "press, toggle, disable" },
+      "smooth":     { "settle_ms": 200, "use": "hover, focus, selection, panel resize" },
+      "expressive": { "settle_ms": 320, "use": "overlay entrance, route transitions, material condensation" }
+    },
+    "material_entrance": "glass condenses: blur radius and tint animate together; opacity fades are reserved for reduced motion",
+    "layout-interruption": "preserve-velocity",
+    "reduced_motion_substitution": "snap or bounded opacity fade, never a global duration multiplier"
+  },
+  "interaction_states": {
+    "focus": {
+      "ring": "focus",
+      "ring_width": 2,
+      "inner_separation_width": 1,
+      "focus_alpha": 1.0,
+      "rule": "focus ring pairs a 2dp outer ring with a 1dp inner separation hairline so it stays visible on glass and solid in every theme"
+    },
+    "hover": { "treatment": "surface.interactive fill plus trailing state marker; never color-only" },
+    "pressed": { "treatment": "chrome inset 2dp, elevation drops to base, spring snappy" },
+    "disabled": { "opacity": 0.45, "contrast_delta": 0.55, "redundant_mark": true }
+  },
+  "contrast_floors": {
+    "text_on_solid": 4.5,
+    "text_on_veil": 7.0,
+    "large_text": 3.0,
+    "focus_against_adjacent": 3.0,
+    "enforcement": "token inspector reports computed contrast per node; failures block showcase conformance"
+  }
+}

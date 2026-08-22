@@ -1,0 +1,84 @@
+@import("../src/text/glyph_path.zag")
+@import("../src/render/cpu_raster.zag")
+
+struct TestState { passed: i32, failed: i32 }
+
+fn expect(state: *TestState, condition: i32, name: []u8) void {
+    if (condition != 0) {
+        state.*.passed = state.*.passed + 1; _zag_print("ok  "); _zag_println(name);
+    } else {
+        state.*.failed = state.*.failed + 1; _zag_print("FAIL "); _zag_println(name);
+    }
+}
+
+fn triangle_outline() GlyphOutline {
+    let outline: GlyphOutline = opentype_outline_empty();
+    outline.x_min = 0; outline.y_min = 0; outline.x_max = 100; outline.y_max = 100;
+    push[GlyphOutlinePoint](&outline.points,
+        GlyphOutlinePoint{ .x = 0, .y = 0, .on_curve = 1 });
+    push[GlyphOutlinePoint](&outline.points,
+        GlyphOutlinePoint{ .x = 100, .y = 0, .on_curve = 1 });
+    push[GlyphOutlinePoint](&outline.points,
+        GlyphOutlinePoint{ .x = 0, .y = 100, .on_curve = 1 });
+    push[i32](&outline.contour_ends, 2);
+    return outline;
+}
+
+fn main() i32 {
+    let state: TestState = TestState{ .passed = 0, .failed = 0 };
+    let outline: GlyphOutline = triangle_outline();
+    let result: GlyphPathResult = glyph_outline_to_path(
+        outline, 1000, 20 * unit_scale(), 3 * unit_scale(), 8 * unit_scale());
+    expect(&state, result.error == GlyphPathError.none &&
+        path_verify(result.path) == PathError.none,
+        "a decoded glyph becomes one immutable canonical path");
+    expect(&state, result.path.commands.len == 4 &&
+        result.path.commands.data[0].point_1.x == 3 * unit_scale() &&
+        result.path.commands.data[0].point_1.y == 8 * unit_scale() &&
+        result.path.commands.data[1].point_1.x == 5 * unit_scale() &&
+        result.path.commands.data[2].point_1.y == 6 * unit_scale(),
+        "font units scale around an exact baseline without pixel rounding");
+    let payload: PathEncodeResult = path_encode(result.path);
+    let list: DisplayList = display_list_make();
+    _ = display_list_add_resource(&list, render_resource_spec(
+        41, RenderResourceKind.path, payload.bytes.data[0..payload.bytes.len],
+        path_resource_format_tag()));
+    path_encode_free(&payload);
+    let draw: DisplayOp = display_op(DisplayOpKind.draw_path, node_key(41));
+    draw.resource_id = 41; draw.paint = paint_rgba16(65535, 65535, 65535, 65535);
+    _ = display_list_push(&list, draw); _ = display_list_seal(&list);
+    let raster: CpuRasterResult = cpu_rasterize(list, 10, 10);
+    expect(&state, raster.error == CpuRasterError.none &&
+        raster.rendered_ops == 1 && raster.pixels_touched > 0,
+        "glyph paths execute through the deterministic CPU oracle");
+    cpu_raster_free(&raster); display_list_free(&list);
+    glyph_path_result_free(&result); opentype_glyph_outline_free(&outline);
+
+    let curved: GlyphOutline = opentype_outline_empty();
+    push[GlyphOutlinePoint](&curved.points,
+        GlyphOutlinePoint{ .x = 0, .y = 50, .on_curve = 0 });
+    push[GlyphOutlinePoint](&curved.points,
+        GlyphOutlinePoint{ .x = 50, .y = 100, .on_curve = 0 });
+    push[GlyphOutlinePoint](&curved.points,
+        GlyphOutlinePoint{ .x = 100, .y = 50, .on_curve = 1 });
+    push[i32](&curved.contour_ends, 2);
+    let curve_path: GlyphPathResult = glyph_outline_to_path(
+        curved, 1000, 10 * unit_scale(), 0, 10 * unit_scale());
+    expect(&state, curve_path.error == GlyphPathError.none &&
+        curve_path.path.commands.data[0].verb == PathVerb.move_to &&
+        curve_path.path.commands.data[1].verb == PathVerb.quad_to &&
+        curve_path.path.commands.data[2].verb == PathVerb.quad_to,
+        "consecutive off-curve points preserve TrueType implied midpoints");
+    glyph_path_result_free(&curve_path); opentype_glyph_outline_free(&curved);
+
+    let empty: GlyphOutline = opentype_outline_empty();
+    let empty_path: GlyphPathResult = glyph_outline_to_path(empty, 1000, unit_scale(), 0, 0);
+    expect(&state, empty_path.error == GlyphPathError.empty_glyph,
+        "space-like empty glyphs remain explicit without fabricated geometry");
+    glyph_path_result_free(&empty_path); opentype_glyph_outline_free(&empty);
+
+    _zag_print("Glyph path contract: pass="); _zag_print_i64(state.passed as i64);
+    _zag_print(" fail="); _zag_print_i64(state.failed as i64); _zag_println("");
+    if (state.failed == 0) { return 0; }
+    return 1;
+}

@@ -1,0 +1,242 @@
+@import("../src/text/glyph_run_codec.zag")
+@import("support/opentype_fixture.zag")
+
+struct TestState { passed: i32, failed: i32 }
+
+fn expect(state: *TestState, condition: i32, name: []u8) void {
+    if (condition != 0) {
+        state.*.passed = state.*.passed + 1;
+        _zag_print("ok  "); _zag_println(name);
+    } else {
+        state.*.failed = state.*.failed + 1;
+        _zag_print("FAIL "); _zag_println(name);
+    }
+}
+
+fn codec_bytes_equal(a: ArrayList[u8], b: ArrayList[u8]) i32 {
+    if (a.len != b.len) { return 0; }
+    let index: i32 = 0;
+    while (index < a.len) {
+        if (a.data[index] != b.data[index]) { return 0; }
+        index = index + 1;
+    }
+    return 1;
+}
+
+fn codec_set_i64(bytes: *ArrayList[u8], offset: i32, value: i64) void {
+    let index: i32 = 0;
+    while (index < 8) {
+        bytes.*.data[offset + index] = ((value >> (index * 8)) & 255) as u8;
+        index = index + 1;
+    }
+}
+
+fn shaped_fixture() GlyphRunResource {
+    let run: GlyphRunResource = glyph_run_resource_make(
+        GlyphRunDirection.right_to_left, glyph_run_script_tag("Arab"),
+        7001, 18 * unit_scale());
+    glyph_run_resource_set_text(&run, "\xD9\x84\xD8\xA7");
+    glyph_run_resource_set_language(&run, "ar-EG");
+    push[ResourceGlyph](&run.glyphs, ResourceGlyph{
+        .glyph_id = 901, .cluster_byte_offset = 0, .cluster_byte_length = 4,
+        .origin_x = 30 * unit_scale(), .origin_y = 40 * unit_scale(),
+        .offset_x = unit_scale() / 8, .offset_y = 0 - unit_scale() / 16,
+        .advance_x = 0 - 6 * unit_scale(), .advance_y = 0,
+    });
+    push[ResourceGlyph](&run.glyphs, ResourceGlyph{
+        .glyph_id = 902, .cluster_byte_offset = 0, .cluster_byte_length = 4,
+        .origin_x = 24 * unit_scale(), .origin_y = 40 * unit_scale(),
+        .offset_x = 0 - unit_scale() / 10, .offset_y = unit_scale() / 12,
+        .advance_x = 0 - 5 * unit_scale(), .advance_y = unit_scale() / 32,
+    });
+    run.total_advance_x = 0 - 11 * unit_scale();
+    run.total_advance_y = unit_scale() / 32;
+    return run;
+}
+
+fn limitation_contract(state: *TestState) void {
+    let limits: GlyphRunCodecLimitations = glyph_run_codec_limitations();
+    expect(state, limits.experimental == 1 && limits.already_positioned_only == 1 &&
+        limits.embeds_font_bytes == 0 && limits.supports_multiple_fonts == 0 &&
+        limits.resolves_color_layers == 0 && limits.normalizes_language_tags == 0,
+        "experimental codec states its shaping font fallback color and language limitations");
+}
+
+fn round_trip_contract(state: *TestState) void {
+    let source: GlyphRunResource = shaped_fixture();
+    let encoded: GlyphRunEncodeResult = glyph_run_resource_encode(source);
+    expect(state, encoded.error == GlyphRunCodecError.none && encoded.bytes.len ==
+        glyph_run_codec_header_size() as i32 + 2 * glyph_run_codec_record_size() as i32 +
+            source.utf8.len + source.language.len,
+        "shaped positions encode to the exact bounded canonical size");
+    expect(state, encoded.bytes.data[0] == 90 && encoded.bytes.data[1] == 75 &&
+        encoded.bytes.data[2] == 71 && encoded.bytes.data[3] == 82 &&
+        glyph_run_read_i64(encoded.bytes, 4) == 1,
+        "resource carries ZKGR magic and an explicit version");
+    let decoded: GlyphRunDecodeResult = glyph_run_resource_decode(encoded.bytes);
+    expect(state, decoded.error == GlyphRunCodecError.none && decoded.run.glyphs.len == 2 &&
+        decoded.run.direction == GlyphRunDirection.right_to_left &&
+        decoded.run.script_tag == glyph_run_script_tag("Arab") &&
+        decoded.run.font_resource_id == 7001 &&
+        decoded.run.font_size == 18 * unit_scale(),
+        "decode preserves font direction script and scale metadata");
+    expect(state, decoded.run.glyphs.data[0].glyph_id == 901 &&
+        decoded.run.glyphs.data[0].cluster_byte_offset == 0 &&
+        decoded.run.glyphs.data[0].cluster_byte_length == 4 &&
+        decoded.run.glyphs.data[1].offset_x == 0 - unit_scale() / 10 &&
+        decoded.run.glyphs.data[1].offset_y == unit_scale() / 12 &&
+        decoded.run.glyphs.data[1].advance_y == unit_scale() / 32,
+        "decode preserves shaped IDs clusters origins offsets and two-axis advances");
+    expect(state, decoded.run.utf8.len == 4 && decoded.run.language.len == 5 &&
+        decoded.run.utf8.data[0] == 217 && decoded.run.language.data[2] == 45 &&
+        decoded.run.total_advance_x == 0 - 11 * unit_scale() &&
+        decoded.run.total_advance_y == unit_scale() / 32,
+        "decode owns exact UTF-8 language bytes and total pen movement");
+    let encoded_again: GlyphRunEncodeResult = glyph_run_resource_encode(decoded.run);
+    expect(state, encoded_again.error == GlyphRunCodecError.none &&
+        codec_bytes_equal(encoded.bytes, encoded_again.bytes) != 0,
+        "decode and re-encode are byte identical");
+    let saved: u8 = encoded.bytes.data[encoded.bytes.len - 1];
+    encoded.bytes.data[encoded.bytes.len - 1] = saved ^ 1;
+    expect(state, decoded.run.language.data[decoded.run.language.len - 1] == saved,
+        "decoded text metadata owns storage independent of transport bytes");
+    encoded.bytes.data[encoded.bytes.len - 1] = saved;
+    glyph_run_encode_free(&encoded_again);
+    glyph_run_decode_free(&decoded);
+    glyph_run_encode_free(&encoded);
+    glyph_run_resource_free(&source);
+}
+
+fn nominal_bridge_contract(state: *TestState) void {
+    let bytes: ArrayList[u8] = fixture_font();
+    let face: OpenTypeFace = opentype_parse(bytes.data[0..bytes.len]);
+    let nominal: NominalGlyphRun = nominal_glyph_run_ltr(
+        face, "AAA", 10 * unit_scale(), unit_scale(), 8 * unit_scale());
+    let built: GlyphRunBuildResult = glyph_run_resource_from_nominal(
+        nominal, 88, glyph_run_script_tag("Latn"), "en");
+    expect(state, built.error == GlyphRunCodecError.none && built.run.glyphs.len == 3 &&
+        built.run.glyphs.data[1].glyph_id == nominal.glyphs.data[1].glyph_id &&
+        built.run.glyphs.data[2].cluster_byte_offset == 2 &&
+        built.run.total_advance_x == nominal.total_advance,
+        "nominal positioned runs copy into the general owned resource without claiming shaping");
+    let encoded: GlyphRunEncodeResult = glyph_run_resource_encode(built.run);
+    expect(state, encoded.error == GlyphRunCodecError.none,
+        "nominal bridge output satisfies the same canonical resource contract");
+    glyph_run_encode_free(&encoded);
+    glyph_run_build_free(&built);
+    nominal_glyph_run_free(&nominal);
+    opentype_face_free(&face);
+    free[u8](&bytes);
+}
+
+fn rejection_contract(state: *TestState) void {
+    let invalid_cluster: GlyphRunResource = shaped_fixture();
+    invalid_cluster.glyphs.data[0].cluster_byte_length = 1;
+    let cluster_result: GlyphRunEncodeResult = glyph_run_resource_encode(invalid_cluster);
+    expect(state, cluster_result.error == GlyphRunCodecError.invalid_cluster &&
+        cluster_result.error_index == 0 && cluster_result.bytes.len == 0,
+        "encode rejects clusters that split a UTF-8 scalar");
+    glyph_run_encode_free(&cluster_result);
+    glyph_run_resource_free(&invalid_cluster);
+
+    let bad_total: GlyphRunResource = shaped_fixture();
+    bad_total.total_advance_x = bad_total.total_advance_x + 1;
+    let total_result: GlyphRunEncodeResult = glyph_run_resource_encode(bad_total);
+    expect(state, total_result.error == GlyphRunCodecError.invalid_coordinate,
+        "encode rejects total pen movement inconsistent with glyph advances");
+    glyph_run_encode_free(&total_result);
+    glyph_run_resource_free(&bad_total);
+
+    let bad_language: GlyphRunResource = shaped_fixture();
+    glyph_run_resource_set_language(&bad_language, "ar__EG");
+    let language_result: GlyphRunEncodeResult = glyph_run_resource_encode(bad_language);
+    expect(state, language_result.error == GlyphRunCodecError.invalid_language,
+        "encode rejects non-canonical language metadata bytes");
+    glyph_run_encode_free(&language_result);
+    glyph_run_resource_free(&bad_language);
+
+    let bad_utf8: GlyphRunResource = glyph_run_resource_make(
+        GlyphRunDirection.left_to_right, glyph_run_script_tag("Latn"), 5, unit_scale());
+    glyph_run_resource_set_text(&bad_utf8, "\xC0\xAF");
+    glyph_run_resource_set_language(&bad_utf8, "en");
+    let utf8_result: GlyphRunEncodeResult = glyph_run_resource_encode(bad_utf8);
+    expect(state, utf8_result.error == GlyphRunCodecError.invalid_utf8,
+        "encode rejects malformed UTF-8 instead of serializing replacement text");
+    glyph_run_encode_free(&utf8_result);
+    glyph_run_resource_free(&bad_utf8);
+}
+
+fn malformed_transport_contract(state: *TestState) void {
+    let source: GlyphRunResource = shaped_fixture();
+    let encoded: GlyphRunEncodeResult = glyph_run_resource_encode(source);
+    let stable: i32 = 1;
+    let index: i32 = 0;
+    while (index < encoded.bytes.len) {
+        let saved: u8 = encoded.bytes.data[index];
+        encoded.bytes.data[index] = saved ^ 1;
+        let mutation: GlyphRunDecodeResult = glyph_run_resource_decode(encoded.bytes);
+        if (mutation.error == GlyphRunCodecError.none) { stable = 0; }
+        glyph_run_decode_free(&mutation);
+        encoded.bytes.data[index] = saved;
+        index = index + 1;
+    }
+    expect(state, stable != 0,
+        "every single-byte transport mutation fails canonical decoding or identity");
+
+    let truncation_safe: i32 = 1;
+    let cut: i32 = 0;
+    while (cut < encoded.bytes.len) {
+        let prefix: ArrayList[u8] = make[u8](cut);
+        index = 0;
+        while (index < cut) {
+            push[u8](&prefix, encoded.bytes.data[index]); index = index + 1;
+        }
+        let truncated: GlyphRunDecodeResult = glyph_run_resource_decode(prefix);
+        if (truncated.error == GlyphRunCodecError.none) { truncation_safe = 0; }
+        glyph_run_decode_free(&truncated);
+        free[u8](&prefix);
+        cut = cut + 1;
+    }
+    expect(state, truncation_safe != 0,
+        "every strict prefix is rejected without reading beyond observed bytes");
+
+    push[u8](&encoded.bytes, 0);
+    let trailing: GlyphRunDecodeResult = glyph_run_resource_decode(encoded.bytes);
+    expect(state, trailing.error == GlyphRunCodecError.trailing_data,
+        "trailing bytes fail canonical resource decoding");
+    glyph_run_decode_free(&trailing);
+    encoded.bytes.len = encoded.bytes.len - 1;
+
+    codec_set_i64(&encoded.bytes, 4, 2);
+    let version: GlyphRunDecodeResult = glyph_run_resource_decode(encoded.bytes);
+    expect(state, version.error == GlyphRunCodecError.unsupported_version &&
+        version.error_offset == 4,
+        "unsupported codec versions fail explicitly");
+    glyph_run_decode_free(&version);
+    codec_set_i64(&encoded.bytes, 4, 1);
+
+    codec_set_i64(&encoded.bytes, 60,
+        glyph_run_codec_glyph_limit() as i64 + 1);
+    let count: GlyphRunDecodeResult = glyph_run_resource_decode(encoded.bytes);
+    expect(state, count.error == GlyphRunCodecError.invalid_count &&
+        count.error_offset == 60,
+        "declared glyph counts cannot cross the hard allocation bound");
+    glyph_run_decode_free(&count);
+
+    glyph_run_encode_free(&encoded);
+    glyph_run_resource_free(&source);
+}
+
+fn main() i32 {
+    let state: TestState = TestState{ .passed = 0, .failed = 0 };
+    limitation_contract(&state);
+    round_trip_contract(&state);
+    nominal_bridge_contract(&state);
+    rejection_contract(&state);
+    malformed_transport_contract(&state);
+    _zag_print("Glyph run codec contract: pass=");
+    _zag_print_i64(state.passed as i64);
+    _zag_print(" fail="); _zag_print_i64(state.failed as i64); _zag_println("");
+    if (state.failed == 0) { return 0; }
+    return 1;
+}

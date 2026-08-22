@@ -1,0 +1,173 @@
+@import("../src/text/unicode.zag")
+
+struct TestState { passed: i32, failed: i32 }
+
+fn expect(state: *TestState, condition: i32, name: []u8) void {
+    if (condition != 0) {
+        state.*.passed = state.*.passed + 1;
+        _zag_print("ok  "); _zag_println(name);
+    } else {
+        state.*.failed = state.*.failed + 1;
+        _zag_print("FAIL "); _zag_println(name);
+    }
+}
+
+fn valid_contract(state: *TestState) void {
+    let ascii: Utf8DecodeResult = utf8_decode("Zagkit");
+    expect(state, ascii.error == Utf8Error.none && ascii.scalars.len == 6,
+        "ASCII decodes to one scalar per byte");
+    expect(state, ascii.scalars.data[0].value == 90 &&
+        ascii.scalars.data[5].byte_start == 5,
+        "scalar values retain exact source byte offsets");
+    utf8_decode_free(&ascii);
+
+    let international: Utf8DecodeResult = utf8_decode("é中😀");
+    expect(state, international.error == Utf8Error.none &&
+        international.scalars.len == 3,
+        "two three and four byte UTF-8 sequences decode canonically");
+    expect(state, international.scalars.data[0].value == 233 &&
+        international.scalars.data[0].byte_length == 2 &&
+        international.scalars.data[1].value == 20013 &&
+        international.scalars.data[1].byte_start == 2 &&
+        international.scalars.data[2].value == 128512 &&
+        international.scalars.data[2].byte_start == 5,
+        "international scalars preserve exact codepoints and byte spans");
+    utf8_decode_free(&international);
+
+    let noncharacter_bytes: ArrayList[u8] = make[u8](3);
+    push[u8](&noncharacter_bytes, 239); push[u8](&noncharacter_bytes, 183);
+    push[u8](&noncharacter_bytes, 144);
+    let noncharacter: Utf8DecodeResult = utf8_decode(
+        noncharacter_bytes.data[0..noncharacter_bytes.len]);
+    expect(state, noncharacter.error == Utf8Error.none &&
+        noncharacter.scalars.data[0].value == 64976,
+        "Unicode noncharacters remain valid scalar values");
+    utf8_decode_free(&noncharacter);
+    free[u8](&noncharacter_bytes);
+}
+
+fn invalid_contract(state: *TestState) void {
+    let continuation: ArrayList[u8] = make[u8](2);
+    push[u8](&continuation, 194); push[u8](&continuation, 65);
+    let bad_continuation: Utf8DecodeResult = utf8_decode(
+        continuation.data[0..continuation.len]);
+    expect(state, bad_continuation.error == Utf8Error.invalid_continuation &&
+        bad_continuation.error_offset == 1,
+        "invalid continuation reports the exact byte");
+    utf8_decode_free(&bad_continuation); free[u8](&continuation);
+
+    let truncated_bytes: ArrayList[u8] = make[u8](2);
+    push[u8](&truncated_bytes, 240); push[u8](&truncated_bytes, 159);
+    let truncated: Utf8DecodeResult = utf8_decode(
+        truncated_bytes.data[0..truncated_bytes.len]);
+    expect(state, truncated.error == Utf8Error.truncated &&
+        truncated.error_offset == 0,
+        "truncated sequences fail at their lead byte");
+    utf8_decode_free(&truncated); free[u8](&truncated_bytes);
+
+    let overlong_bytes: ArrayList[u8] = make[u8](3);
+    push[u8](&overlong_bytes, 224); push[u8](&overlong_bytes, 128);
+    push[u8](&overlong_bytes, 128);
+    let overlong: Utf8DecodeResult = utf8_decode(
+        overlong_bytes.data[0..overlong_bytes.len]);
+    expect(state, overlong.error == Utf8Error.overlong,
+        "overlong encodings fail instead of aliasing a scalar");
+    utf8_decode_free(&overlong); free[u8](&overlong_bytes);
+
+    let surrogate_bytes: ArrayList[u8] = make[u8](3);
+    push[u8](&surrogate_bytes, 237); push[u8](&surrogate_bytes, 160);
+    push[u8](&surrogate_bytes, 128);
+    let surrogate: Utf8DecodeResult = utf8_decode(
+        surrogate_bytes.data[0..surrogate_bytes.len]);
+    expect(state, surrogate.error == Utf8Error.surrogate,
+        "UTF-16 surrogate codepoints are not Unicode scalars");
+    utf8_decode_free(&surrogate); free[u8](&surrogate_bytes);
+
+    let range_bytes: ArrayList[u8] = make[u8](4);
+    push[u8](&range_bytes, 244); push[u8](&range_bytes, 144);
+    push[u8](&range_bytes, 128); push[u8](&range_bytes, 128);
+    let range: Utf8DecodeResult = utf8_decode(range_bytes.data[0..range_bytes.len]);
+    expect(state, range.error == Utf8Error.out_of_range,
+        "codepoints above U plus 10FFFF fail closed");
+    utf8_decode_free(&range); free[u8](&range_bytes);
+}
+
+fn allocation_free_validation_contract(state: *TestState) void {
+    let valid: Utf8ValidationResult = utf8_validate("Zagkit é中😀");
+    expect(state, valid.error == Utf8Error.none && valid.scalar_count == 10,
+        "allocation-free validation counts the same canonical Unicode scalars");
+
+    let malformed: ArrayList[u8] = make[u8](2);
+    push[u8](&malformed, 226); push[u8](&malformed, 65);
+    let invalid: Utf8ValidationResult = utf8_validate(
+        malformed.data[0..malformed.len]);
+    expect(state, invalid.error == Utf8Error.truncated && invalid.error_offset == 0,
+        "allocation-free validation preserves exact malformed-sequence evidence");
+    free[u8](&malformed);
+
+    let one: ArrayList[u8] = make[u8](1);
+    push[u8](&one, 0);
+    let matching: i32 = 1;
+    let byte: i32 = 0;
+    while (byte < 256) {
+        one.data[0] = byte as u8;
+        let decoded: Utf8DecodeResult = utf8_decode(one.data[0..one.len]);
+        let checked: Utf8ValidationResult = utf8_validate(one.data[0..one.len]);
+        if (decoded.error != checked.error ||
+            decoded.error_offset != checked.error_offset ||
+            (decoded.error == Utf8Error.none &&
+             decoded.scalars.len as i64 != checked.scalar_count)) {
+            matching = 0;
+        }
+        utf8_decode_free(&decoded);
+        byte = byte + 1;
+    }
+    expect(state, matching == 1,
+        "all 256 one-byte inputs agree between validating and decoding paths");
+    free[u8](&one);
+
+    let arbitrary: ArrayList[u8] = make[u8](8);
+    let seed: i64 = 173;
+    let case_index: i32 = 0;
+    let differential: i32 = 1;
+    while (case_index < 4096) {
+        seed = (seed * 1103515245 + 12345) & 2147483647;
+        let length: i32 = (seed % 8) as i32 + 1;
+        arbitrary.len = 0;
+        let item_index: i32 = 0;
+        while (item_index < length) {
+            seed = (seed * 1103515245 + 12345) & 2147483647;
+            push[u8](&arbitrary, (seed & 255) as u8);
+            item_index = item_index + 1;
+        }
+        let decoded: Utf8DecodeResult = utf8_decode(
+            arbitrary.data[0..arbitrary.len]);
+        let checked: Utf8ValidationResult = utf8_validate(
+            arbitrary.data[0..arbitrary.len]);
+        if (decoded.error != checked.error ||
+            decoded.error_offset != checked.error_offset ||
+            (decoded.error == Utf8Error.none &&
+             decoded.scalars.len as i64 != checked.scalar_count)) {
+            differential = 0;
+        }
+        utf8_decode_free(&decoded);
+        case_index = case_index + 1;
+    }
+    expect(state, differential == 1,
+        "4096 arbitrary byte strings preserve decoder-validator differential truth");
+    free[u8](&arbitrary);
+}
+
+fn main() i32 {
+    let state: TestState = TestState{ .passed = 0, .failed = 0 };
+    valid_contract(&state);
+    invalid_contract(&state);
+    allocation_free_validation_contract(&state);
+    let passed_text: []u8 = _zag_i64_to_str(state.passed as i64);
+    let failed_text: []u8 = _zag_i64_to_str(state.failed as i64);
+    _zag_print("Unicode contract: pass="); _zag_print(passed_text);
+    _zag_print(" fail="); _zag_println(failed_text);
+    _zag_str_free(passed_text); _zag_str_free(failed_text);
+    if (state.failed == 0) { return 0; }
+    return 1;
+}

@@ -1,0 +1,267 @@
+@import("../src/components/button.zag")
+@import("../src/automation/talkback.zag")
+
+struct TestState { passed: i32, failed: i32 }
+
+fn expect(state: *TestState, condition: i32, name: []u8) void {
+    if (condition != 0) {
+        state.*.passed = state.*.passed + 1;
+        _zag_print("ok  "); _zag_println(name);
+    } else {
+        state.*.failed = state.*.failed + 1;
+        _zag_print("FAIL "); _zag_println(name);
+    }
+}
+
+fn make_button(id: i64, canonical: ButtonCanonicalState) ButtonSpec {
+    let spec: ButtonSpec = button_spec(node_key(id), hit_root_key(),
+        rect(20 * unit_scale(), id * 4 * unit_scale(),
+            160 * unit_scale(), 40 * unit_scale()), "Run analysis");
+    spec.description = "Runs the active analysis";
+    spec.focus_order = id;
+    spec.z_order = id;
+    spec.interaction = button_canonical_state(canonical);
+    return spec;
+}
+
+fn measurement_contract(state: *TestState) void {
+    let loose: Constraints = Constraints{
+        .min_width = 0, .max_width = unbounded_extent(),
+        .min_height = 0, .max_height = unbounded_extent(),
+    };
+    let standard: ButtonMeasureResult = button_measure(
+        size(72 * unit_scale(), 16 * unit_scale()), 0, loose,
+        FlexDensity.standard);
+    expect(state, standard.error == ButtonMeasureError.none &&
+        standard.size.width == 104 * unit_scale() &&
+        standard.size.height == 40 * unit_scale(),
+        "Button measurement resolves label content through Flex padding and the standard target");
+    let icon: ButtonMeasureResult = button_measure(
+        size(72 * unit_scale(), 16 * unit_scale()), 1, loose,
+        FlexDensity.standard);
+    expect(state, icon.size.width == 130 * unit_scale() &&
+        icon.visual_gap == 8 * unit_scale(),
+        "leading visuals use the named Flex gap instead of component-local offsets");
+    let touch: ButtonMeasureResult = button_measure(size(0, 0), 1,
+        tight_constraints(48 * unit_scale(), 48 * unit_scale()),
+        FlexDensity.touch);
+    expect(state, touch.minimum_target == 48 * unit_scale() &&
+        touch.size.width == 48 * unit_scale() && touch.clipped == 0,
+        "touch density preserves a 48 logical-pixel interaction target");
+    let clipped: ButtonMeasureResult = button_measure(
+        size(100 * unit_scale(), 20 * unit_scale()), 0,
+        tight_constraints(40 * unit_scale(), 24 * unit_scale()),
+        FlexDensity.compact);
+    expect(state, clipped.clipped == 1 && clipped.size.width == 40 * unit_scale(),
+        "constraint clipping is explicit rather than silently changing intrinsic content");
+    let invalid: ButtonMeasureResult = button_measure(size(0 - 1, 10), 0,
+        loose, FlexDensity.standard);
+    expect(state, invalid.error == ButtonMeasureError.invalid_content,
+        "invalid intrinsic content fails visibly");
+}
+
+fn transition_contract(state: *TestState) void {
+    let current: ButtonInteraction = button_interaction();
+    let hover: ButtonTransition = button_reduce(current, ButtonEvent.pointer_enter);
+    let down: ButtonTransition = button_reduce(hover.interaction, ButtonEvent.pointer_down);
+    let up: ButtonTransition = button_reduce(down.interaction, ButtonEvent.pointer_up_inside);
+    expect(state, hover.interaction.hovered == 1 && down.interaction.pressed == 1 &&
+        up.interaction.pressed == 0 && up.activate == 1,
+        "pointer enter down and inside-up produce one interruptible activation transition");
+    let cancel: ButtonTransition = button_reduce(down.interaction, ButtonEvent.pointer_cancel);
+    expect(state, cancel.interaction.pressed == 0 && cancel.activate == 0,
+        "pointer cancellation clears press without emitting an action");
+    let disabled: ButtonTransition = button_reduce(current, ButtonEvent.disable);
+    let ignored: ButtonTransition = button_reduce(disabled.interaction, ButtonEvent.pointer_down);
+    expect(state, disabled.interaction.enabled == 0 &&
+        disabled.interaction.focused == 0 && ignored.interaction.pressed == 0,
+        "disabled state rejects pointer interaction at the shared state reducer");
+    let loading: ButtonTransition = button_reduce(down.interaction, ButtonEvent.begin_loading);
+    let failure: ButtonTransition = button_reduce(loading.interaction, ButtonEvent.mark_error);
+    expect(state, loading.interaction.loading == 1 && loading.interaction.pressed == 0 &&
+        failure.interaction.loading == 0 && failure.interaction.error == 1,
+        "loading and error transitions have deterministic precedence");
+    let selected: ButtonTransition = button_reduce(current, ButtonEvent.select);
+    expect(state, selected.interaction.selected == 1 && selected.state_changed == 1 &&
+        button_reduce(selected.interaction, ButtonEvent.select).state_changed == 0,
+        "selection is parent-controlled state and repeated selection is idempotent");
+}
+
+fn state_matrix_contract(state: *TestState) void {
+    let display: DisplayList = display_list_make();
+    let hits: HitTree = hit_tree_make();
+    let semantics: SemanticsTree = semantics_tree_make();
+    let first_hash: i64 = 0;
+    let index: i32 = 0;
+    while (index < 8) {
+        let spec: ButtonSpec = make_button(10 + index,
+            index as ButtonCanonicalState);
+        if (index == 0) { spec.variant = ButtonVariant.primary; }
+        if (index == 7) { spec.variant = ButtonVariant.destructive; }
+        let built: ButtonBuildResult = button_emit(spec, &display, &hits, &semantics);
+        expect(state, built.error == ButtonBuildError.none &&
+            built.artifact.id.value == 10 + index &&
+            built.artifact.hit_node_index == index &&
+            built.artifact.semantics_node_index == index,
+            "each canonical Button state emits one shared stable identity");
+        expect(state, built.artifact.evidence_hash != 0 &&
+            (index == 0 || built.artifact.evidence_hash != first_hash),
+            "component state and token truth are present in deterministic evidence");
+        if (index == 0) { first_hash = built.artifact.evidence_hash; }
+        index = index + 1;
+    }
+    expect(state, hits.nodes.len == 8 && semantics.nodes.len == 8,
+        "the canonical state matrix contributes equal hit and semantic trees");
+    expect(state, semantics.nodes.data[5].disabled == 1 &&
+        semantics.nodes.data[5].action_mask == 0 &&
+        hits.nodes.data[5].enabled == 0 && hits.nodes.data[5].focusable == 0,
+        "disabled Button truth agrees across semantics focus actions and hit testing");
+    expect(state, semantics.nodes.data[6].disabled == 1 &&
+        semantic_text_equal(semantics.nodes.data[6].value, "Loading") != 0 &&
+        hits.nodes.data[6].enabled == 0,
+        "loading Button stays discoverable while actions fail closed");
+    expect(state, semantics.nodes.data[7].disabled == 0 &&
+        semantic_text_equal(semantics.nodes.data[7].value, "Error") != 0 &&
+        display.ops.data[display.ops.len - 2].paint.red ==
+            semantic_color_paint(SemanticColorToken.status_error).red,
+        "error state exposes text truth and the named error token");
+    let selected_index: i32 = semantics_find_index(semantics, node_key(14));
+    expect(state, selected_index >= 0 && semantics.nodes.data[selected_index].selected == 1,
+        "selected state is semantic state rather than color alone");
+
+    let hit: HitResult = hit_test(hits, 30 * unit_scale(), 40 * unit_scale());
+    expect(state, hit.found != 0 && hit.id.value == 10,
+        "pointer hit testing resolves the same stable ID used by rendering and semantics");
+    expect(state, display_list_seal(&display) == DisplayError.none &&
+        display_list_verify(display) == DisplayError.none,
+        "Button chrome produces an immutable verifiable DisplayList");
+
+    let session: TalkbackSession = talkback_session_make(talkback_capabilities());
+    let viewport: Rect = rect(0, 0, 600 * unit_scale(), 600 * unit_scale());
+    let enabled_click: TalkbackResponse = talkback_dispatch(&session, semantics,
+        viewport, talkback_request(1, TalkbackCommand.click, node_key(10),
+            semantics.revision));
+    let disabled_click: TalkbackResponse = talkback_dispatch(&session, semantics,
+        viewport, talkback_request(2, TalkbackCommand.click, node_key(15),
+            semantics.revision));
+    expect(state, enabled_click.status == TalkbackStatus.accepted &&
+        enabled_click.emitted_action == 1,
+        "Zagkit Talkback activates Button by stable ID");
+    expect(state, disabled_click.status == TalkbackStatus.action_unavailable &&
+        disabled_click.emitted_action == 0,
+        "Zagkit Talkback observes the same disabled action truth");
+    talkback_session_free(&session);
+    semantics_tree_free(&semantics);
+    hit_tree_free(&hits);
+    display_list_free(&display);
+}
+
+fn atomicity_contract(state: *TestState) void {
+    let display: DisplayList = display_list_make();
+    let hits: HitTree = hit_tree_make();
+    let semantics: SemanticsTree = semantics_tree_make();
+    let first: ButtonBuildResult = button_emit(make_button(30,
+        ButtonCanonicalState.rest), &display, &hits, &semantics);
+    let op_count: i32 = display.ops.len;
+    let display_hash: i64 = display.content_hash;
+    let hit_count: i32 = hits.nodes.len;
+    let semantic_count: i32 = semantics.nodes.len;
+    let duplicate: ButtonBuildResult = button_emit(make_button(30,
+        ButtonCanonicalState.hover), &display, &hits, &semantics);
+    expect(state, first.error == ButtonBuildError.none &&
+        duplicate.error == ButtonBuildError.hit_error &&
+        duplicate.hit_error == HitTreeError.duplicate_id,
+        "duplicate stable IDs fail visibly at the retained hit tree");
+    expect(state, display.ops.len == op_count && display.content_hash == display_hash &&
+        hits.nodes.len == hit_count && semantics.nodes.len == semantic_count,
+        "failed multi-tree Button emission rolls back all partial artifacts");
+
+    let colliding: ButtonSpec = make_button(31, ButtonCanonicalState.rest);
+    colliding.focus_order = 30;
+    let focus_collision: ButtonBuildResult = button_emit(colliding,
+        &display, &hits, &semantics);
+    expect(state, focus_collision.error == ButtonBuildError.semantics_error &&
+        focus_collision.semantics_error == SemanticsError.duplicate_focus_order,
+        "semantic focus-order collisions remain structured component failures");
+    expect(state, display.ops.len == op_count && hits.nodes.len == hit_count &&
+        semantics.nodes.len == semantic_count,
+        "semantic failure also restores display and hit-tree checkpoints");
+
+    let missing: ButtonSpec = make_button(32, ButtonCanonicalState.rest);
+    missing.parent = node_key(999);
+    let missing_parent: ButtonBuildResult = button_emit(missing,
+        &display, &hits, &semantics);
+    expect(state, missing_parent.error == ButtonBuildError.hit_error &&
+        missing_parent.hit_error == HitTreeError.missing_parent &&
+        display.ops.len == op_count,
+        "missing retained parents fail without leaving decorative chrome behind");
+
+    let invalid: ButtonSpec = make_button(33, ButtonCanonicalState.rest);
+    invalid.label = "";
+    expect(state, button_emit(invalid, &display, &hits, &semantics).error ==
+        ButtonBuildError.invalid_spec,
+        "unlabelled public Buttons are rejected instead of creating inaccessible controls");
+
+    let malformed_bytes: ArrayList[u8] = make[u8](2);
+    push[u8](&malformed_bytes, 194); push[u8](&malformed_bytes, 65);
+    let malformed: ButtonSpec = make_button(34, ButtonCanonicalState.rest);
+    malformed.label = malformed_bytes.data[0..malformed_bytes.len];
+    expect(state, button_emit(malformed, &display, &hits, &semantics).error ==
+        ButtonBuildError.invalid_spec && display.ops.len == op_count,
+        "malformed UTF-8 labels fail before component-tree mutation");
+    free[u8](&malformed_bytes);
+
+    let oversized_bytes: ArrayList[u8] = make[u8](4100);
+    let byte_index: i32 = 0;
+    while (byte_index < 4097) {
+        push[u8](&oversized_bytes, 65);
+        byte_index = byte_index + 1;
+    }
+    let oversized: ButtonSpec = make_button(35, ButtonCanonicalState.rest);
+    oversized.label = oversized_bytes.data[0..oversized_bytes.len];
+    expect(state, button_emit(oversized, &display, &hits, &semantics).error ==
+        ButtonBuildError.invalid_spec && semantics.nodes.len == semantic_count,
+        "oversized labels fail before semantic text ownership");
+    free[u8](&oversized_bytes);
+    _ = display_list_seal(&display);
+    let sealed: ButtonBuildResult = button_emit(make_button(36,
+        ButtonCanonicalState.rest), &display, &hits, &semantics);
+    expect(state, sealed.error == ButtonBuildError.display_error &&
+        sealed.display_error == DisplayError.sealed,
+        "sealed display truth rejects late component mutation");
+    semantics_tree_free(&semantics);
+    hit_tree_free(&hits);
+    display_list_free(&display);
+}
+
+fn token_and_content_contract(state: *TestState) void {
+    let primary: ButtonSpec = make_button(50, ButtonCanonicalState.rest);
+    primary.variant = ButtonVariant.primary;
+    let hover: ButtonSpec = make_button(51, ButtonCanonicalState.hover);
+    let disabled: ButtonSpec = make_button(52, ButtonCanonicalState.disabled);
+    let error: ButtonSpec = make_button(53, ButtonCanonicalState.error);
+    expect(state, button_style(primary).fill_token == SemanticColorToken.accent &&
+        button_style(hover).fill_token == SemanticColorToken.surface_selected,
+        "primary and hover styling resolve through distinct semantic roles");
+    expect(state, button_style(disabled).text_token == SemanticColorToken.text_disabled &&
+        button_style(error).border_token == SemanticColorToken.status_error,
+        "disabled and error states use documented semantic tokens");
+    let content: Rect = button_content_bounds(primary);
+    expect(state, content.x == primary.bounds.x + 16 * unit_scale() &&
+        content.y == primary.bounds.y + 8 * unit_scale() &&
+        content.width == primary.bounds.width - 32 * unit_scale(),
+        "Button exposes exact Flex-derived bounds for caller-owned Text content");
+}
+
+fn main() i32 {
+    let state: TestState = TestState{ .passed = 0, .failed = 0 };
+    measurement_contract(&state);
+    transition_contract(&state);
+    state_matrix_contract(&state);
+    atomicity_contract(&state);
+    token_and_content_contract(&state);
+    _zag_print("Button contract: pass="); _zag_print_i64(state.passed as i64);
+    _zag_print(" fail="); _zag_print_i64(state.failed as i64); _zag_println("");
+    if (state.failed == 0) { return 0; }
+    return 1;
+}

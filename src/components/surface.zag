@@ -1,0 +1,963 @@
+@import("button.zag")
+
+// Surface is Zagkit's canonical retained container. One stable NodeKey owns
+// its display operations, hit node, semantic node, and Talkback identity.
+// Child content is emitted separately into the exact Flex-derived
+// `content_bounds` returned by SurfaceArtifact.
+
+enum SurfaceTier { base, panel, raised, overlay }
+enum SurfaceMode { group, actionable }
+
+enum SurfaceCanonicalState {
+    rest,
+    hover,
+    focus,
+    pressed,
+    selected,
+    disabled,
+    loading,
+    error,
+}
+
+enum SurfaceBuildError {
+    none,
+    invalid_spec,
+    capacity_error,
+    display_error,
+    hit_error,
+    semantics_error,
+}
+
+enum SurfaceCapacityError {
+    none,
+    display_operations,
+    hit_nodes,
+    semantic_nodes,
+}
+
+struct SurfaceBuildLimits {
+    display_operations: i32,
+    hit_nodes: i32,
+    semantic_nodes: i32,
+}
+
+struct SurfaceBuildBudget {
+    limits: SurfaceBuildLimits,
+    display_operations: i32,
+    hit_nodes: i32,
+    semantic_nodes: i32,
+}
+
+struct SurfaceSpec {
+    id: NodeKey,
+    parent: NodeKey,
+    bounds: Rect,
+    name: []u8,
+    description: []u8,
+    focus_order: i64,
+    z_order: i64,
+    tier: SurfaceTier,
+    mode: SurfaceMode,
+    density: FlexDensity,
+    interaction: ButtonInteraction,
+    live_region: LiveRegion,
+    limits: SurfaceBuildLimits,
+}
+
+struct SurfaceTransition {
+    interaction: ButtonInteraction,
+    activate: i32,
+    state_changed: i32,
+    rejected: i32,
+}
+
+struct SurfaceResolvedStyle {
+    material_token: SemanticMaterialToken,
+    material_fill_token: SemanticColorToken,
+    fill_token: SemanticColorToken,
+    edge_token: SemanticColorToken,
+    border_token: SemanticColorToken,
+    content_color_token: SemanticColorToken,
+    focus_token: SemanticColorToken,
+    state_token: SemanticColorToken,
+    radius_token: SemanticRadiusToken,
+    material_elevation_token: SemanticElevationToken,
+    elevation_token: SemanticElevationToken,
+    content_spacing_token: FlexSpacingToken,
+    fill_alpha: i64,
+    border_alpha: i64,
+}
+
+struct SurfaceArtifact {
+    id: NodeKey,
+    bounds: Rect,
+    chrome_bounds: Rect,
+    content_bounds: Rect,
+    tier: SurfaceTier,
+    mode: SurfaceMode,
+    interaction: ButtonInteraction,
+    style: SurfaceResolvedStyle,
+    resolved_radius: i64,
+    effectively_enabled: i32,
+    hover_treatment_visible: i32,
+    focus_ring_visible: i32,
+    pressed_treatment_visible: i32,
+    selected_marker_visible: i32,
+    disabled_treatment_visible: i32,
+    loading_treatment_visible: i32,
+    error_treatment_visible: i32,
+    semantics_role: SemanticRole,
+    display_op_start: i32,
+    display_op_end: i32,
+    hit_node_index: i32,
+    semantics_node_index: i32,
+    evidence_hash: i64,
+}
+
+struct SurfaceBuildResult {
+    artifact: SurfaceArtifact,
+    error: SurfaceBuildError,
+    capacity_error: SurfaceCapacityError,
+    display_error: DisplayError,
+    hit_error: HitTreeError,
+    semantics_error: SemanticsError,
+}
+
+struct SurfaceCheckpoint {
+    display_length: i32,
+    display_revision: i64,
+    display_hash: i64,
+    display_last_error: DisplayError,
+    display_error_index: i32,
+    hit_length: i32,
+    hit_revision: i64,
+    hit_last_error: HitTreeError,
+    hit_error_node: NodeKey,
+    semantics: SemanticsCheckpoint,
+}
+
+struct SurfaceDrawResult {
+    error: SurfaceBuildError,
+    capacity_error: SurfaceCapacityError,
+    display_error: DisplayError,
+}
+
+fn surface_name_byte_limit() i32 { return 4096; }
+fn surface_description_byte_limit() i32 { return 16384; }
+
+fn surface_build_limits() SurfaceBuildLimits {
+    return SurfaceBuildLimits{
+        .display_operations = 20,
+        .hit_nodes = 1,
+        .semantic_nodes = 1,
+    };
+}
+
+fn surface_interaction() ButtonInteraction { return button_interaction(); }
+
+fn surface_canonical_state(state: SurfaceCanonicalState) ButtonInteraction {
+    return switch (state) {
+        .rest => button_canonical_state(ButtonCanonicalState.rest),
+        .hover => button_canonical_state(ButtonCanonicalState.hover),
+        .focus => button_canonical_state(ButtonCanonicalState.focus),
+        .pressed => button_canonical_state(ButtonCanonicalState.pressed),
+        .selected => button_canonical_state(ButtonCanonicalState.selected),
+        .disabled => button_canonical_state(ButtonCanonicalState.disabled),
+        .loading => button_canonical_state(ButtonCanonicalState.loading),
+        .error => button_canonical_state(ButtonCanonicalState.error),
+    };
+}
+
+fn surface_mode_valid(mode: SurfaceMode) i32 {
+    let value: i64 = mode as i64;
+    return (value >= SurfaceMode.group as i64 &&
+        value <= SurfaceMode.actionable as i64) as i32;
+}
+
+fn surface_tier_valid(tier: SurfaceTier) i32 {
+    let value: i64 = tier as i64;
+    return (value >= SurfaceTier.base as i64 &&
+        value <= SurfaceTier.overlay as i64) as i32;
+}
+
+fn surface_density_valid(density: FlexDensity) i32 {
+    let value: i64 = density as i64;
+    return (value >= FlexDensity.compact as i64 &&
+        value <= FlexDensity.touch as i64) as i32;
+}
+
+fn surface_live_region_valid(region: LiveRegion) i32 {
+    let value: i64 = region as i64;
+    return (value >= LiveRegion.off as i64 &&
+        value <= LiveRegion.assertive as i64) as i32;
+}
+
+// Material tier mapping: each SurfaceTier selects the SemanticMaterialToken
+// whose resolved elevation_token and fill_token match the tier's semantic
+// role.
+//   base   → solid: fill=surface_base, elevation=base, no tint gradient,
+//            no blur.  The bottom-most opaque layer should not simulate
+//            translucency or cast shadows.
+//   panel  → veil:  fill=surface_panel, elevation=panel, tint gradient
+//            0→12000, blur=20.  A translucent layer above the base.
+//   raised → glass: fill=surface_raised, elevation=raised, tint gradient,
+//            blur=30.  A more visibly elevated translucent layer.
+//   overlay → glass: same material as raised but the surface_tier_elevation
+//            mapping selects SemanticElevationToken.overlay, producing
+//            deeper shadows.  No separate overlay material is needed
+//            because the elevation token already differentiates the two.
+fn surface_material_token(tier: SurfaceTier) SemanticMaterialToken {
+    if (surface_tier_valid(tier) == 0) {
+        return SemanticMaterialToken.solid;
+    }
+    return switch (tier) {
+        .base => SemanticMaterialToken.solid,
+        .panel => SemanticMaterialToken.veil,
+        .raised => SemanticMaterialToken.glass,
+        .overlay => SemanticMaterialToken.glass,
+    };
+}
+
+fn surface_content_spacing_token(tier: SurfaceTier) FlexSpacingToken {
+    if (surface_tier_valid(tier) == 0) { return FlexSpacingToken.medium; }
+    return switch (tier) {
+        .base => FlexSpacingToken.medium,
+        .panel => FlexSpacingToken.large,
+        .raised => FlexSpacingToken.xlarge,
+        .overlay => FlexSpacingToken.xlarge,
+    };
+}
+
+fn surface_group_interaction_valid(value: ButtonInteraction) i32 {
+    return button_interaction_equal(value, surface_interaction());
+}
+
+fn surface_action_interaction_valid(value: ButtonInteraction) i32 {
+    if (button_interaction_valid(value) == 0 ||
+        (value.loading != 0 && value.error != 0)) { return 0; }
+    if (value.enabled == 0 && (value.hovered != 0 || value.focused != 0 ||
+        value.pressed != 0 || value.loading != 0)) { return 0; }
+    return 1;
+}
+
+fn surface_reduce(mode: SurfaceMode, current: ButtonInteraction,
+    event: ButtonEvent) SurfaceTransition {
+    let result: SurfaceTransition = SurfaceTransition{
+        .interaction = current,
+        .activate = 0,
+        .state_changed = 0,
+        .rejected = 0,
+    };
+    if (surface_mode_valid(mode) == 0 ||
+        surface_action_interaction_valid(current) == 0) {
+        result.rejected = 1;
+        return result;
+    }
+    if (mode == SurfaceMode.group) {
+        result.rejected = 1;
+        return result;
+    }
+    let transition: ButtonTransition = button_reduce(current, event);
+    result.interaction = transition.interaction;
+    result.activate = transition.activate;
+    result.state_changed = transition.state_changed;
+    return result;
+}
+
+// `name` is retained by the returned spec. Zag's lifetime contract therefore
+// keeps dynamic backing alive until the last use of the spec; Surface never
+// copies merely to hide an ownership relation.
+fn surface_spec(id: NodeKey, parent: NodeKey, bounds: Rect,
+    name:  []u8, tier: SurfaceTier) SurfaceSpec {
+    return SurfaceSpec{
+        .id = id,
+        .parent = parent,
+        .bounds = bounds,
+        .name = name,
+        .description = "Content group",
+        .focus_order = 0,
+        .z_order = 0,
+        .tier = tier,
+        .mode = SurfaceMode.group,
+        .density = FlexDensity.standard,
+        .interaction = surface_interaction(),
+        .live_region = LiveRegion.off,
+        .limits = surface_build_limits(),
+    };
+}
+
+fn surface_action_spec(id: NodeKey, parent: NodeKey, bounds: Rect,
+    name:  []u8, tier: SurfaceTier) SurfaceSpec {
+    let spec: SurfaceSpec = surface_spec(id, parent, bounds, name, tier);
+    spec.description = "Actionable card";
+    spec.focus_order = 1;
+    spec.mode = SurfaceMode.actionable;
+    return spec;
+}
+
+fn surface_minimum_action_target() i64 { return 44 * unit_scale(); }
+
+fn surface_minimum_extent(spec:  SurfaceSpec) i64 {
+    let padding: i64 = flex_spacing(surface_content_spacing_token(spec.tier),
+        spec.density);
+    let minimum: i64 = padding * 2 + 8 * unit_scale();
+    if (spec.mode == SurfaceMode.actionable &&
+        minimum < surface_minimum_action_target()) {
+        return surface_minimum_action_target();
+    }
+    return minimum;
+}
+
+fn surface_tier_elevation(tier: SurfaceTier) SemanticElevationToken {
+    return switch (tier) {
+        .base => SemanticElevationToken.base,
+        .panel => SemanticElevationToken.panel,
+        .raised => SemanticElevationToken.raised,
+        .overlay => SemanticElevationToken.overlay,
+    };
+}
+
+fn surface_style(spec:  SurfaceSpec) SurfaceResolvedStyle {
+    let material_token: SemanticMaterialToken = surface_material_token(spec.tier);
+    let material: ResolvedMaterialToken = semantic_material(material_token);
+    let tier_elevation: SemanticElevationToken = surface_tier_elevation(spec.tier);
+    let elevation: ResolvedElevationToken = semantic_elevation(
+        tier_elevation);
+    let style: SurfaceResolvedStyle = SurfaceResolvedStyle{
+        .material_token = material_token,
+        .material_fill_token = material.fill_token,
+        .fill_token = material.fill_token,
+        .edge_token = material.edge_token,
+        .border_token = SemanticColorToken.border_subtle,
+        .content_color_token = SemanticColorToken.text_primary,
+        .focus_token = SemanticColorToken.focus,
+        .state_token = material.edge_token,
+        .radius_token = material.radius_token,
+        .material_elevation_token = tier_elevation,
+        .elevation_token = tier_elevation,
+        .content_spacing_token = surface_content_spacing_token(spec.tier),
+        .fill_alpha = semantic_color_paint(material.fill_token).alpha,
+        .border_alpha = elevation.edge_highlight_alpha,
+    };
+    if (spec.mode == SurfaceMode.actionable && spec.interaction.hovered != 0) {
+        style.fill_token = SemanticColorToken.surface_interactive;
+        style.border_token = SemanticColorToken.border_emphasis;
+        style.state_token = SemanticColorToken.accent;
+        style.fill_alpha = 60000;
+        style.border_alpha = 26000;
+    }
+    if (spec.mode == SurfaceMode.actionable && spec.interaction.selected != 0) {
+        style.fill_token = SemanticColorToken.surface_selected;
+        style.border_token = SemanticColorToken.border_emphasis;
+        style.state_token = SemanticColorToken.accent;
+        style.fill_alpha = 61000;
+        style.border_alpha = 36000;
+    }
+    if (spec.mode == SurfaceMode.actionable && spec.interaction.pressed != 0) {
+        style.fill_token = SemanticColorToken.accent_emphasis;
+        style.border_token = SemanticColorToken.accent;
+        style.state_token = SemanticColorToken.accent;
+        style.fill_alpha = 62000;
+        style.border_alpha = 42000;
+        style.elevation_token = SemanticElevationToken.base;
+    }
+    if (spec.mode == SurfaceMode.actionable && spec.interaction.loading != 0) {
+        style.fill_token = SemanticColorToken.surface_inset;
+        style.content_color_token = SemanticColorToken.text_secondary;
+        style.state_token = SemanticColorToken.accent;
+        style.fill_alpha = 54000;
+        style.elevation_token = SemanticElevationToken.base;
+    }
+    if (spec.mode == SurfaceMode.actionable && spec.interaction.error != 0) {
+        style.border_token = SemanticColorToken.status_error;
+        style.state_token = SemanticColorToken.status_error;
+        style.border_alpha = 65535;
+    }
+    if (spec.mode == SurfaceMode.actionable && spec.interaction.enabled == 0) {
+        style.fill_token = SemanticColorToken.surface_inset;
+        style.border_token = SemanticColorToken.border_subtle;
+        style.content_color_token = SemanticColorToken.text_disabled;
+        style.state_token = SemanticColorToken.text_disabled;
+        style.fill_alpha = 36000;
+        style.border_alpha = 9000;
+        style.elevation_token = SemanticElevationToken.base;
+    }
+    return style;
+}
+
+fn surface_chrome_bounds(spec:  SurfaceSpec) Rect {
+    if (spec.mode == SurfaceMode.actionable && spec.interaction.pressed != 0) {
+        let inset: i64 = 2 * unit_scale();
+        return rect(spec.bounds.x + inset, spec.bounds.y + inset,
+            spec.bounds.width - inset * 2,
+            spec.bounds.height - inset * 2);
+    }
+    return spec.bounds;
+}
+
+fn surface_resolved_radius(token: SemanticRadiusToken, bounds: Rect) i64 {
+    let radius: i64 = semantic_radius(token);
+    let shortest: i64 = bounds.width;
+    if (bounds.height < shortest) { shortest = bounds.height; }
+    let maximum: i64 = shortest / 2;
+    if (radius > maximum) { radius = maximum; }
+    if (radius < unit_scale()) { radius = unit_scale(); }
+    return radius;
+}
+
+fn surface_content_bounds(spec:  SurfaceSpec) Rect {
+    let spacing: FlexSpacingToken = surface_content_spacing_token(spec.tier);
+    let horizontal: i64 = flex_spacing(spacing, spec.density);
+    let vertical: i64 = flex_spacing(spacing, spec.density);
+    let trailing: i64 = horizontal;
+    if (spec.mode == SurfaceMode.actionable &&
+        (spec.interaction.loading != 0 || spec.interaction.error != 0 ||
+         spec.interaction.enabled == 0)) {
+        trailing = horizontal + flex_spacing(FlexSpacingToken.xlarge,
+            spec.density);
+    }
+    if (horizontal + trailing >= spec.bounds.width) {
+        trailing = spec.bounds.width - horizontal - unit_scale();
+    }
+    if (trailing < 0) { trailing = 0; }
+    return rect(spec.bounds.x + horizontal, spec.bounds.y + vertical,
+        spec.bounds.width - horizontal - trailing,
+        spec.bounds.height - vertical * 2);
+}
+
+fn surface_spec_valid(spec:  SurfaceSpec) i32 {
+    if (node_key_equal(spec.id, hit_root_key()) != 0 ||
+        node_key_equal(spec.id, semantic_none_key()) != 0 ||
+        node_key_equal(spec.parent, semantic_none_key()) != 0 ||
+        spec.name.len <= 0 || spec.name.len > surface_name_byte_limit() ||
+        spec.description.len > surface_description_byte_limit() ||
+        semantic_text_input_valid(spec.name) == 0 ||
+        semantic_text_input_valid(spec.description) == 0 ||
+        surface_tier_valid(spec.tier) == 0 ||
+        surface_mode_valid(spec.mode) == 0 ||
+        surface_density_valid(spec.density) == 0 ||
+        surface_live_region_valid(spec.live_region) == 0 ||
+        hit_geometry_valid(spec.bounds) == 0 ||
+        spec.focus_order < 0 || spec.focus_order > 1000000000 ||
+        spec.z_order < 0 || spec.z_order > 1000000000 ||
+        spec.limits.display_operations < 0 || spec.limits.hit_nodes < 0 ||
+        spec.limits.semantic_nodes < 0) { return 0; }
+    if (spec.bounds.width < surface_minimum_extent(spec) ||
+        spec.bounds.height < surface_minimum_extent(spec)) { return 0; }
+    if (spec.mode == SurfaceMode.group) {
+        if (spec.focus_order != 0 ||
+            surface_group_interaction_valid(spec.interaction) == 0) { return 0; }
+    } else {
+        if (spec.focus_order <= 0 ||
+            surface_action_interaction_valid(spec.interaction) == 0) { return 0; }
+    }
+    let content: Rect = surface_content_bounds(spec);
+    return (content.width > 0 && content.height > 0) as i32;
+}
+
+fn surface_state_value(spec:  SurfaceSpec) []u8 {
+    if (spec.mode == SurfaceMode.group) { return "Content group"; }
+    if (spec.interaction.loading != 0) { return "Loading"; }
+    if (spec.interaction.error != 0) { return "Error"; }
+    if (spec.interaction.enabled == 0) { return "Disabled"; }
+    if (spec.interaction.pressed != 0) { return "Pressed"; }
+    if (spec.interaction.selected != 0) { return "Selected"; }
+    if (spec.interaction.focused != 0) { return "Focused"; }
+    if (spec.interaction.hovered != 0) { return "Hovered"; }
+    return "Ready";
+}
+
+fn surface_semantic_role(spec:  SurfaceSpec) SemanticRole {
+    if (spec.mode == SurfaceMode.actionable) { return SemanticRole.button; }
+    return SemanticRole.group;
+}
+
+fn surface_effectively_enabled(spec:  SurfaceSpec) i32 {
+    if (spec.mode != SurfaceMode.actionable) { return 0; }
+    return button_effectively_enabled(spec.interaction);
+}
+
+fn surface_mix(hash: i64, value: i64) i64 {
+    return (hash * 1099511628211) ^ value;
+}
+
+fn surface_text_hash(hash: i64, value:  []u8) i64 {
+    let result: i64 = surface_mix(hash, value.len as i64);
+    let index: i32 = 0;
+    while (index < value.len) {
+        result = surface_mix(result, value[index] as i64);
+        index = index + 1;
+    }
+    return result;
+}
+
+fn surface_evidence_hash(spec:  SurfaceSpec,
+    artifact: SurfaceArtifact) i64 {
+    let hash: i64 = surface_mix(17, artifact.id.value);
+    hash = surface_mix(hash, artifact.id.generation);
+    hash = surface_mix(hash, spec.parent.value);
+    hash = surface_mix(hash, spec.parent.generation);
+    hash = surface_mix(hash, artifact.bounds.x);
+    hash = surface_mix(hash, artifact.bounds.y);
+    hash = surface_mix(hash, artifact.bounds.width);
+    hash = surface_mix(hash, artifact.bounds.height);
+    hash = surface_mix(hash, artifact.chrome_bounds.x);
+    hash = surface_mix(hash, artifact.chrome_bounds.y);
+    hash = surface_mix(hash, artifact.chrome_bounds.width);
+    hash = surface_mix(hash, artifact.chrome_bounds.height);
+    hash = surface_mix(hash, artifact.content_bounds.x);
+    hash = surface_mix(hash, artifact.content_bounds.y);
+    hash = surface_mix(hash, artifact.content_bounds.width);
+    hash = surface_mix(hash, artifact.content_bounds.height);
+    hash = surface_mix(hash, artifact.tier as i64);
+    hash = surface_mix(hash, artifact.mode as i64);
+    hash = surface_mix(hash, spec.focus_order);
+    hash = surface_mix(hash, spec.z_order);
+    hash = surface_mix(hash, spec.density as i64);
+    hash = surface_mix(hash, spec.live_region as i64);
+    hash = surface_mix(hash, artifact.interaction.hovered as i64);
+    hash = surface_mix(hash, artifact.interaction.focused as i64);
+    hash = surface_mix(hash, artifact.interaction.focus_visible as i64);
+    hash = surface_mix(hash, artifact.interaction.pressed as i64);
+    hash = surface_mix(hash, artifact.interaction.selected as i64);
+    hash = surface_mix(hash, artifact.interaction.enabled as i64);
+    hash = surface_mix(hash, artifact.interaction.loading as i64);
+    hash = surface_mix(hash, artifact.interaction.error as i64);
+    hash = surface_mix(hash, artifact.style.material_token as i64);
+    hash = surface_mix(hash, artifact.style.material_fill_token as i64);
+    hash = surface_mix(hash, artifact.style.fill_token as i64);
+    hash = surface_mix(hash, artifact.style.edge_token as i64);
+    hash = surface_mix(hash, artifact.style.border_token as i64);
+    hash = surface_mix(hash, artifact.style.content_color_token as i64);
+    hash = surface_mix(hash, artifact.style.focus_token as i64);
+    hash = surface_mix(hash, artifact.style.state_token as i64);
+    hash = surface_mix(hash, artifact.style.radius_token as i64);
+    hash = surface_mix(hash, artifact.style.material_elevation_token as i64);
+    hash = surface_mix(hash, artifact.style.elevation_token as i64);
+    hash = surface_mix(hash, artifact.style.content_spacing_token as i64);
+    hash = surface_mix(hash, artifact.style.fill_alpha);
+    hash = surface_mix(hash, artifact.style.border_alpha);
+    hash = surface_mix(hash, artifact.resolved_radius);
+    hash = surface_mix(hash, artifact.effectively_enabled as i64);
+    hash = surface_mix(hash, artifact.hover_treatment_visible as i64);
+    hash = surface_mix(hash, artifact.focus_ring_visible as i64);
+    hash = surface_mix(hash, artifact.pressed_treatment_visible as i64);
+    hash = surface_mix(hash, artifact.selected_marker_visible as i64);
+    hash = surface_mix(hash, artifact.disabled_treatment_visible as i64);
+    hash = surface_mix(hash, artifact.loading_treatment_visible as i64);
+    hash = surface_mix(hash, artifact.error_treatment_visible as i64);
+    hash = surface_mix(hash, artifact.semantics_role as i64);
+    hash = surface_text_hash(hash, spec.name);
+    return surface_text_hash(hash, spec.description);
+}
+
+fn surface_empty_artifact(spec:  SurfaceSpec) SurfaceArtifact {
+    let style: SurfaceResolvedStyle = surface_style(spec);
+    let chrome: Rect = surface_chrome_bounds(spec);
+    return SurfaceArtifact{
+        .id = spec.id,
+        .bounds = spec.bounds,
+        .chrome_bounds = chrome,
+        .content_bounds = rect(0, 0, 0, 0),
+        .tier = spec.tier,
+        .mode = spec.mode,
+        .interaction = spec.interaction,
+        .style = style,
+        .resolved_radius = surface_resolved_radius(style.radius_token, chrome),
+        .effectively_enabled = 0,
+        .hover_treatment_visible = 0,
+        .focus_ring_visible = 0,
+        .pressed_treatment_visible = 0,
+        .selected_marker_visible = 0,
+        .disabled_treatment_visible = 0,
+        .loading_treatment_visible = 0,
+        .error_treatment_visible = 0,
+        .semantics_role = surface_semantic_role(spec),
+        .display_op_start = 0 - 1,
+        .display_op_end = 0 - 1,
+        .hit_node_index = 0 - 1,
+        .semantics_node_index = 0 - 1,
+        .evidence_hash = 0,
+    };
+}
+
+fn surface_build_result(spec:  SurfaceSpec,
+    error: SurfaceBuildError) SurfaceBuildResult {
+    return SurfaceBuildResult{
+        .artifact = surface_empty_artifact(spec),
+        .error = error,
+        .capacity_error = SurfaceCapacityError.none,
+        .display_error = DisplayError.none,
+        .hit_error = HitTreeError.none,
+        .semantics_error = SemanticsError.none,
+    };
+}
+
+fn surface_checkpoint(display:  *DisplayList,
+    hits:  *HitTree,
+    semantics:  *SemanticsTree) SurfaceCheckpoint {
+    return SurfaceCheckpoint{
+        .display_length = display.*.ops.len,
+        .display_revision = display.*.revision,
+        .display_hash = display.*.content_hash,
+        .display_last_error = display.*.last_error,
+        .display_error_index = display.*.error_index,
+        .hit_length = hits.*.nodes.len,
+        .hit_revision = hits.*.revision,
+        .hit_last_error = hits.*.last_error,
+        .hit_error_node = hits.*.error_node,
+        .semantics = semantics_tree_checkpoint(semantics.*),
+    };
+}
+
+fn surface_rollback(display:  *DisplayList,
+    hits:  *HitTree,
+    semantics:  *SemanticsTree,
+    checkpoint: SurfaceCheckpoint) void {
+    display.*.ops.len = checkpoint.display_length;
+    display.*.revision = checkpoint.display_revision;
+    display.*.content_hash = checkpoint.display_hash;
+    display.*.last_error = checkpoint.display_last_error;
+    display.*.error_index = checkpoint.display_error_index;
+    hits.*.nodes.len = checkpoint.hit_length;
+    hits.*.revision = checkpoint.hit_revision;
+    hits.*.last_error = checkpoint.hit_last_error;
+    hits.*.error_node = checkpoint.hit_error_node;
+    _ = semantics_tree_rollback(semantics, checkpoint.semantics);
+}
+
+fn surface_budget(limits: SurfaceBuildLimits) SurfaceBuildBudget {
+    return SurfaceBuildBudget{
+        .limits = limits,
+        .display_operations = 0,
+        .hit_nodes = 0,
+        .semantic_nodes = 0,
+    };
+}
+
+fn surface_take_display(budget:  *SurfaceBuildBudget) i32 {
+    if (budget.*.display_operations >= budget.*.limits.display_operations) {
+        return 0;
+    }
+    budget.*.display_operations = budget.*.display_operations + 1;
+    return 1;
+}
+
+fn surface_take_hit(budget:  *SurfaceBuildBudget) i32 {
+    if (budget.*.hit_nodes >= budget.*.limits.hit_nodes) { return 0; }
+    budget.*.hit_nodes = budget.*.hit_nodes + 1;
+    return 1;
+}
+
+fn surface_take_semantic(budget:  *SurfaceBuildBudget) i32 {
+    if (budget.*.semantic_nodes >= budget.*.limits.semantic_nodes) { return 0; }
+    budget.*.semantic_nodes = budget.*.semantic_nodes + 1;
+    return 1;
+}
+
+fn surface_draw_result() SurfaceDrawResult {
+    return SurfaceDrawResult{
+        .error = SurfaceBuildError.none,
+        .capacity_error = SurfaceCapacityError.none,
+        .display_error = DisplayError.none,
+    };
+}
+
+fn surface_push_round(display:  *DisplayList,
+    budget:  *SurfaceBuildBudget,
+    owner: NodeKey, bounds: Rect, radius: i64,
+    paint: Paint) SurfaceDrawResult {
+    let result: SurfaceDrawResult = surface_draw_result();
+    if (surface_take_display(budget) == 0) {
+        result.error = SurfaceBuildError.capacity_error;
+        result.capacity_error = SurfaceCapacityError.display_operations;
+        return result;
+    }
+    let op: DisplayOp = display_op(DisplayOpKind.fill_rounded_rect, owner);
+    op.bounds = bounds;
+    op.parameter = radius;
+    op.paint = paint;
+    let error: DisplayError = display_list_push(display, op);
+    if (error != DisplayError.none) {
+        result.error = SurfaceBuildError.display_error;
+        result.display_error = error;
+    }
+    return result;
+}
+
+fn surface_push_rect(display:  *DisplayList,
+    budget:  *SurfaceBuildBudget,
+    owner: NodeKey, bounds: Rect, paint: Paint) SurfaceDrawResult {
+    let result: SurfaceDrawResult = surface_draw_result();
+    if (surface_take_display(budget) == 0) {
+        result.error = SurfaceBuildError.capacity_error;
+        result.capacity_error = SurfaceCapacityError.display_operations;
+        return result;
+    }
+    let op: DisplayOp = display_op(DisplayOpKind.fill_rect, owner);
+    op.bounds = bounds;
+    op.paint = paint;
+    let error: DisplayError = display_list_push(display, op);
+    if (error != DisplayError.none) {
+        result.error = SurfaceBuildError.display_error;
+        result.display_error = error;
+    }
+    return result;
+}
+
+fn surface_copy_draw_failure(result:  *SurfaceBuildResult,
+    draw: SurfaceDrawResult) void {
+    result.*.error = draw.error;
+    result.*.capacity_error = draw.capacity_error;
+    result.*.display_error = draw.display_error;
+}
+
+fn surface_emit(spec:  SurfaceSpec,
+    display:  *DisplayList,
+    hits:  *HitTree,
+    semantics:  *SemanticsTree) SurfaceBuildResult {
+    let result: SurfaceBuildResult = surface_build_result(
+        spec, SurfaceBuildError.none);
+    if (surface_spec_valid(spec) == 0) {
+        result.error = SurfaceBuildError.invalid_spec;
+        return result;
+    }
+    if (display.*.sealed != 0) {
+        result.error = SurfaceBuildError.display_error;
+        result.display_error = DisplayError.sealed;
+        return result;
+    }
+
+    let checkpoint: SurfaceCheckpoint = surface_checkpoint(display,
+        hits, semantics);
+    let budget: SurfaceBuildBudget = surface_budget(spec.limits);
+    let style: SurfaceResolvedStyle = surface_style(spec);
+    let chrome: Rect = surface_chrome_bounds(spec);
+    let radius: i64 = surface_resolved_radius(style.radius_token, chrome);
+    let enabled: i32 = surface_effectively_enabled(spec);
+    let elevation: ResolvedElevationToken = semantic_elevation(
+        style.elevation_token);
+    let draw: SurfaceDrawResult = surface_draw_result();
+
+    if (spec.mode == SurfaceMode.actionable &&
+        spec.interaction.focus_visible != 0 && enabled != 0) {
+        let extent: i64 = 3 * unit_scale();
+        draw = surface_push_round(display, &budget, spec.id,
+            rect(chrome.x - extent, chrome.y - extent,
+                chrome.width + extent * 2, chrome.height + extent * 2),
+            radius + extent,
+            semantic_color_with_alpha(style.focus_token, 43000));
+    }
+    if (draw.error == SurfaceBuildError.none &&
+        elevation.ambient_shadow_alpha > 0 &&
+        spec.interaction.pressed == 0 &&
+        (spec.mode == SurfaceMode.group || enabled != 0)) {
+        let spread: i64 = elevation.ambient_shadow_blur;
+        draw = surface_push_round(display, &budget, spec.id,
+            rect(chrome.x - spread,
+                chrome.y + elevation.ambient_shadow_y - spread,
+                chrome.width + spread * 2,
+                chrome.height + spread * 2),
+            radius + spread,
+            semantic_color_with_alpha(SemanticColorToken.shadow,
+                elevation.ambient_shadow_alpha));
+        if (draw.error == SurfaceBuildError.none &&
+            elevation.contact_shadow_alpha > 0) {
+            let contact_spread: i64 = elevation.contact_shadow_blur;
+            draw = surface_push_round(display, &budget, spec.id,
+                rect(chrome.x - contact_spread,
+                    chrome.y + elevation.contact_shadow_y - contact_spread,
+                    chrome.width + contact_spread * 2,
+                    chrome.height + contact_spread * 2),
+                radius + contact_spread,
+                semantic_color_with_alpha(SemanticColorToken.shadow,
+                    elevation.contact_shadow_alpha));
+        }
+    }
+    if (draw.error == SurfaceBuildError.none) {
+        draw = surface_push_round(display, &budget, spec.id,
+            chrome, radius,
+            semantic_color_with_alpha(style.border_token,
+                style.border_alpha));
+    }
+    if (draw.error == SurfaceBuildError.none) {
+        let edge: i64 = unit_scale();
+        draw = surface_push_round(display, &budget, spec.id,
+            rect(chrome.x + edge, chrome.y + edge,
+                chrome.width - edge * 2, chrome.height - edge * 2),
+            radius - edge,
+            semantic_color_with_alpha(style.fill_token, style.fill_alpha));
+    }
+    if (draw.error == SurfaceBuildError.none) {
+        let edge_inset: i64 = flex_spacing(FlexSpacingToken.small,
+            spec.density);
+        draw = surface_push_rect(display, &budget, spec.id,
+            rect(chrome.x + edge_inset, chrome.y + unit_scale(),
+                chrome.width - edge_inset * 2, unit_scale()),
+            semantic_color_with_alpha(style.edge_token,
+                13000 + (spec.tier as i64) * 3000));
+    }
+    if (draw.error == SurfaceBuildError.none &&
+        spec.mode == SurfaceMode.actionable && spec.interaction.hovered != 0) {
+        let marker_width: i64 = 3 * unit_scale();
+        let marker_height: i64 = 18 * unit_scale();
+        draw = surface_push_round(display, &budget, spec.id,
+            rect(chrome.x + chrome.width - marker_width - 5 * unit_scale(),
+                chrome.y + (chrome.height - marker_height) / 2,
+                marker_width, marker_height), unit_scale(),
+            semantic_color_with_alpha(style.state_token, 65535));
+    }
+    if (draw.error == SurfaceBuildError.none &&
+        spec.mode == SurfaceMode.actionable && spec.interaction.selected != 0) {
+        let marker_height: i64 = 3 * unit_scale();
+        let inset: i64 = flex_spacing(FlexSpacingToken.large, spec.density);
+        draw = surface_push_round(display, &budget, spec.id,
+            rect(chrome.x + inset,
+                chrome.y + chrome.height - marker_height -
+                    flex_spacing(FlexSpacingToken.tiny, spec.density),
+                chrome.width - inset * 2, marker_height),
+            unit_scale(),
+            semantic_color_with_alpha(style.state_token, 65535));
+    }
+    if (draw.error == SurfaceBuildError.none &&
+        spec.mode == SurfaceMode.actionable && spec.interaction.loading != 0) {
+        let track_width: i64 = 22 * unit_scale();
+        let track_height: i64 = 4 * unit_scale();
+        let track_x: i64 = chrome.x + chrome.width -
+            flex_spacing(FlexSpacingToken.large, spec.density) - track_width;
+        let track_y: i64 = chrome.y + (chrome.height - track_height) / 2;
+        draw = surface_push_round(display, &budget, spec.id,
+            rect(track_x, track_y, track_width, track_height),
+            track_height / 2,
+            semantic_color_with_alpha(style.state_token, 21000));
+        if (draw.error == SurfaceBuildError.none) {
+            draw = surface_push_round(display, &budget, spec.id,
+                rect(track_x, track_y, 13 * unit_scale(), track_height),
+                track_height / 2,
+                semantic_color_with_alpha(style.state_token, 65535));
+        }
+    }
+    if (draw.error == SurfaceBuildError.none &&
+        spec.mode == SurfaceMode.actionable && spec.interaction.error != 0) {
+        let rail_width: i64 = flex_spacing(FlexSpacingToken.tiny,
+            spec.density);
+        let rail_height: i64 = flex_spacing(FlexSpacingToken.xlarge,
+            spec.density);
+        let rail_x: i64 = chrome.x + chrome.width -
+            flex_spacing(FlexSpacingToken.large, spec.density) - rail_width;
+        let rail_y: i64 = chrome.y + (chrome.height - rail_height) / 2;
+        draw = surface_push_round(display, &budget, spec.id,
+            rect(rail_x, rail_y, rail_width, rail_height),
+            rail_width / 2,
+            semantic_color_with_alpha(style.state_token, 65535));
+    }
+    if (draw.error == SurfaceBuildError.none &&
+        spec.mode == SurfaceMode.actionable && spec.interaction.enabled == 0) {
+        let mark_width: i64 = 14 * unit_scale();
+        let mark_x: i64 = chrome.x + chrome.width -
+            flex_spacing(FlexSpacingToken.large, spec.density) - mark_width;
+        let mark_y: i64 = chrome.y + chrome.height / 2 - 3 * unit_scale();
+        draw = surface_push_rect(display, &budget, spec.id,
+            rect(mark_x, mark_y, mark_width, 2 * unit_scale()),
+            semantic_color_with_alpha(style.state_token, 50000));
+        if (draw.error == SurfaceBuildError.none) {
+            draw = surface_push_rect(display, &budget, spec.id,
+                rect(mark_x, mark_y + 5 * unit_scale(),
+                    9 * unit_scale(), 2 * unit_scale()),
+                semantic_color_with_alpha(style.state_token, 30000));
+        }
+    }
+    if (draw.error != SurfaceBuildError.none) {
+        surface_rollback(display, hits, semantics, checkpoint);
+        surface_copy_draw_failure(&result, draw);
+        return result;
+    }
+
+    if (surface_take_hit(&budget) == 0) {
+        surface_rollback(display, hits, semantics, checkpoint);
+        result.error = SurfaceBuildError.capacity_error;
+        result.capacity_error = SurfaceCapacityError.hit_nodes;
+        return result;
+    }
+    let hit: HitNode = hit_node(spec.id, spec.parent, spec.bounds);
+    hit.clip = spec.bounds;
+    hit.has_clip = 1;
+    hit.z_order = spec.z_order;
+    hit.enabled = enabled;
+    hit.focusable = enabled;
+    let hit_error: HitTreeError = hit_tree_add(hits, hit);
+    if (hit_error != HitTreeError.none) {
+        surface_rollback(display, hits, semantics, checkpoint);
+        result.error = SurfaceBuildError.hit_error;
+        result.hit_error = hit_error;
+        return result;
+    }
+
+    if (surface_take_semantic(&budget) == 0) {
+        surface_rollback(display, hits, semantics, checkpoint);
+        result.error = SurfaceBuildError.capacity_error;
+        result.capacity_error = SurfaceCapacityError.semantic_nodes;
+        return result;
+    }
+    let semantic: SemanticsSpec = semantics_spec(spec.id, spec.parent,
+        surface_semantic_role(spec), spec.name);
+    semantic.description = spec.description;
+    semantic.value = surface_state_value(spec);
+    semantic.has_bounds = 1;
+    semantic.bounds = spec.bounds;
+    semantic.live_region = spec.live_region;
+    if (spec.mode == SurfaceMode.actionable) {
+        semantic.focus_order = spec.focus_order;
+        semantic.disabled = (enabled == 0) as i32;
+        semantic.focused = (spec.interaction.focused != 0 && enabled != 0) as i32;
+        semantic.selected = spec.interaction.selected;
+        if (enabled != 0) {
+            semantic.action_mask = semantic_actions_add(
+                semantic_actions(SemanticAction.activate),
+                SemanticAction.focus);
+        }
+    }
+    let semantic_error: SemanticsError = semantics_add(semantics, semantic);
+    if (semantic_error != SemanticsError.none) {
+        surface_rollback(display, hits, semantics, checkpoint);
+        result.error = SurfaceBuildError.semantics_error;
+        result.semantics_error = semantic_error;
+        return result;
+    }
+
+    result.artifact = SurfaceArtifact{
+        .id = spec.id,
+        .bounds = spec.bounds,
+        .chrome_bounds = chrome,
+        .content_bounds = surface_content_bounds(spec),
+        .tier = spec.tier,
+        .mode = spec.mode,
+        .interaction = spec.interaction,
+        .style = style,
+        .resolved_radius = radius,
+        .effectively_enabled = enabled,
+        .hover_treatment_visible = (spec.mode == SurfaceMode.actionable &&
+            spec.interaction.hovered != 0) as i32,
+        .focus_ring_visible = (spec.mode == SurfaceMode.actionable &&
+            spec.interaction.focus_visible != 0 && enabled != 0) as i32,
+        .pressed_treatment_visible = (spec.mode == SurfaceMode.actionable &&
+            spec.interaction.pressed != 0) as i32,
+        .selected_marker_visible = (spec.mode == SurfaceMode.actionable &&
+            spec.interaction.selected != 0) as i32,
+        .disabled_treatment_visible = (spec.mode == SurfaceMode.actionable &&
+            spec.interaction.enabled == 0) as i32,
+        .loading_treatment_visible = (spec.mode == SurfaceMode.actionable &&
+            spec.interaction.loading != 0) as i32,
+        .error_treatment_visible = (spec.mode == SurfaceMode.actionable &&
+            spec.interaction.error != 0) as i32,
+        .semantics_role = surface_semantic_role(spec),
+        .display_op_start = checkpoint.display_length,
+        .display_op_end = display.*.ops.len,
+        .hit_node_index = checkpoint.hit_length,
+        .semantics_node_index = checkpoint.semantics.length,
+        .evidence_hash = 0,
+    };
+    result.artifact.evidence_hash = surface_evidence_hash(spec,
+        result.artifact);
+    return result;
+}

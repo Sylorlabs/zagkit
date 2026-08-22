@@ -1,0 +1,139 @@
+@import("../src/showcase/linux_preview_semantics.zag")
+@import("../src/automation/talkback.zag")
+
+struct TestState { passed: i32, failed: i32 }
+fn expect(state: *TestState, condition: i32, name: []u8) void {
+    if (condition != 0) {
+        state.*.passed = state.*.passed + 1; _zag_print("ok  "); _zag_println(name);
+    } else {
+        state.*.failed = state.*.failed + 1; _zag_print("FAIL "); _zag_println(name);
+    }
+}
+
+fn main() i32 {
+    let state: TestState = TestState{ .passed = 0, .failed = 0 };
+    let tree: SemanticsTree = linux_preview_semantics(1120, 720,
+        linux_preview_initial_navigation());
+    let medium_layout: LinuxPreviewLayout = linux_preview_layout(1120, 720);
+    expect(&state, tree.last_error == SemanticsError.none &&
+        tree.nodes.len == linux_preview_semantic_node_count(1120, 720),
+        "the native preview exposes one complete owned semantic tree");
+    let components_index: i32 = semantics_find_index(tree, linux_preview_nav_id(2));
+    let overview_index: i32 = semantics_find_index(tree, linux_preview_nav_id(0));
+    expect(&state, components_index >= 0 && overview_index >= 0 &&
+        tree.nodes.data[components_index].selected == 0 &&
+        tree.nodes.data[components_index].disabled == 1 &&
+        tree.nodes.data[components_index].action_mask == 0 &&
+        tree.nodes.data[overview_index].selected == 1 &&
+        tree.nodes.data[overview_index].disabled == 0,
+        "navigation selection truth uses stable semantic IDs");
+    let expected_components: Rect = linux_preview_navigation_item_bounds(
+        medium_layout, 2, linux_preview_navigation_count());
+    expect(&state,
+        tree.nodes.data[components_index].bounds.x == expected_components.x &&
+        tree.nodes.data[components_index].bounds.y == expected_components.y &&
+        tree.nodes.data[components_index].bounds.width == expected_components.width &&
+        tree.nodes.data[components_index].bounds.height == expected_components.height,
+        "semantic hit bounds come from the shared Flex placement authority");
+    let session: TalkbackSession = talkback_session_make(talkback_capabilities());
+    let query: TalkbackResponse = talkback_dispatch(&session, tree,
+        rect(0, 0, 1120 * unit_scale(), 720 * unit_scale()),
+        talkback_request(1, TalkbackCommand.query,
+            linux_preview_nav_id(2), tree.revision));
+    expect(&state, query.status == TalkbackStatus.accepted &&
+        query.resolved_role == SemanticRole.tab && query.has_bounds == 1 &&
+        (query.state_flags & 1) != 0,
+        "Talkback queries the disabled planned route by stable ID without pixels");
+    let disabled_click: TalkbackResponse = talkback_dispatch(&session, tree,
+        rect(0, 0, 1120 * unit_scale(), 720 * unit_scale()),
+        talkback_request(3, TalkbackCommand.click,
+            linux_preview_nav_id(2), tree.revision));
+    expect(&state, disabled_click.status == TalkbackStatus.action_unavailable,
+        "unfinished navigation destinations fail closed instead of changing a highlight");
+    let click: TalkbackResponse = talkback_dispatch(&session, tree,
+        rect(0, 0, 1120 * unit_scale(), 720 * unit_scale()),
+        talkback_request(2, TalkbackCommand.click,
+            linux_preview_inspect_id(), tree.revision));
+    expect(&state, click.status == TalkbackStatus.accepted && click.emitted_action == 1,
+        "Talkback emits the declared Inspect action through semantic identity");
+    let chart_index: i32 = semantics_find_index(tree,
+        linux_preview_chart_table_id());
+    let chart_value_index: i32 = semantics_find_index(tree,
+        linux_preview_chart_cell_id(1));
+    expect(&state, chart_index >= 0 && chart_value_index >= 0 &&
+        tree.nodes.data[chart_index].role == SemanticRole.table &&
+        tree.nodes.data[chart_index].row_count == 8 &&
+        tree.nodes.data[chart_index].column_count == 2 &&
+        tree.nodes.data[chart_value_index].value.len > 0,
+        "the visible chart exposes axes context and an equivalent semantic table");
+    let state_chip_index: i32 = semantics_find_index(tree,
+        linux_preview_chip_id(0));
+    let layout_chip_index: i32 = semantics_find_index(tree,
+        linux_preview_chip_id(1));
+    let render_chip_index: i32 = semantics_find_index(tree,
+        linux_preview_chip_id(3));
+    expect(&state, state_chip_index >= 0 && layout_chip_index >= 0 &&
+        render_chip_index >= 0 &&
+        tree.nodes.data[state_chip_index].role == SemanticRole.tab &&
+        tree.nodes.data[state_chip_index].selected == 1 &&
+        tree.nodes.data[layout_chip_index].selected == 0 &&
+        tree.nodes.data[render_chip_index].disabled == 1 &&
+        tree.nodes.data[render_chip_index].action_mask == 0,
+        "the stage selector has explicit selected default and disabled states");
+    expect(&state, semantics_find_index(tree, linux_preview_activity_id()) < 0,
+        "the medium layout does not expose an invisible competing status rail");
+    let resized: SemanticsTree = linux_preview_semantics(1400, 800,
+        linux_preview_initial_navigation());
+    let expanded_layout: LinuxPreviewLayout = linux_preview_layout(1400, 800);
+    let resized_index: i32 = semantics_find_index(resized, linux_preview_nav_id(0));
+    expect(&state, resized_index >= 0 &&
+        resized.nodes.data[resized_index].bounds.width >
+            tree.nodes.data[components_index].bounds.width &&
+        talkback_tree_hash(resized) != talkback_tree_hash(tree),
+        "resize recomputes semantic geometry while retaining stable IDs");
+    let activity_index: i32 = semantics_find_index(resized,
+        linux_preview_activity_id());
+    expect(&state, resized.nodes.len == linux_preview_semantic_node_count(1400, 800) &&
+        activity_index >= 0 &&
+        resized.nodes.data[activity_index].role == SemanticRole.list &&
+        resized.nodes.data[activity_index].bounds.x == expanded_layout.status.x,
+        "expanded layout exposes one explicitly read-only system-status rail");
+    let overview_bounds: Rect = linux_preview_navigation_item_bounds(
+        medium_layout, 0, linux_preview_navigation_count());
+    let component_bounds: Rect = linux_preview_navigation_item_bounds(
+        medium_layout, 2, linux_preview_navigation_count());
+    let expanded_component_bounds: Rect = linux_preview_navigation_item_bounds(
+        expanded_layout, 2, linux_preview_navigation_count());
+    expect(&state, linux_preview_navigation_at_pixel(
+            ((overview_bounds.x + overview_bounds.width / 2) / unit_scale()) as i32,
+            ((overview_bounds.y + overview_bounds.height / 2) / unit_scale()) as i32,
+            1120, 720) == 0 &&
+        linux_preview_navigation_hit_at_pixel(
+            ((component_bounds.x + component_bounds.width / 2) / unit_scale()) as i32,
+            ((component_bounds.y + component_bounds.height / 2) / unit_scale()) as i32,
+            1120, 720) == 2 &&
+        linux_preview_navigation_at_pixel(
+            ((component_bounds.x + component_bounds.width / 2) / unit_scale()) as i32,
+            ((component_bounds.y + component_bounds.height / 2) / unit_scale()) as i32,
+            1120, 720) == 0 - 1 &&
+        linux_preview_navigation_at_pixel(
+            ((expanded_component_bounds.x + expanded_component_bounds.width / 2) /
+                unit_scale()) as i32,
+            ((expanded_component_bounds.y + expanded_component_bounds.height / 2) /
+                unit_scale()) as i32,
+            1400, 800) == 0 - 1 &&
+        linux_preview_navigation_at_pixel(0, 0, 1120, 720) == 0 - 1,
+        "physical pointer routing distinguishes enabled disabled and outside bounds");
+    let compact: SemanticsTree = linux_preview_semantics(800, 600,
+        linux_preview_initial_navigation());
+    expect(&state, compact.nodes.len == linux_preview_semantic_node_count(800, 600) &&
+        semantics_find_index(compact, linux_preview_chart_table_id()) < 0 &&
+        semantics_find_index(compact, linux_preview_compact_summary_id()) >= 0,
+        "compact semantics replace the unfittable chart with an honest summary");
+    talkback_session_free(&session); semantics_tree_free(&compact);
+    semantics_tree_free(&resized); semantics_tree_free(&tree);
+    _zag_print("Linux preview semantics: pass="); _zag_print_i64(state.passed as i64);
+    _zag_print(" fail="); _zag_print_i64(state.failed as i64); _zag_println("");
+    if (state.failed == 0) { return 0; }
+    return 1;
+}

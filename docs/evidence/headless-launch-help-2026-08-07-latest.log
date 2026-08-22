@@ -1,0 +1,9 @@
+Usage:
+  ./zagkit init [path]
+  ./zagkit build [--path <path>] [--output <binary>]
+  ./zagkit run [--project <path>] [--binary <binary>] [--output <png>] [--headless-only] [--show-ascii] [--open]
+  ./zagkit test
+
+Current status: this command only exposes the headless reference and contract
+test surface. It does not launch a native desktop, Wayland, macOS,
+Windows, iOS, or Android shell yet.

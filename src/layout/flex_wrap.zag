@@ -1,0 +1,387 @@
+@import("std:list")
+@import("adaptive.zag")
+
+enum FlexLineAlignment { start, center, end, space_between, space_around, space_evenly, stretch }
+enum FlexWrapError { none, too_many_items, invalid_item, invalid_style, arithmetic_overflow }
+
+struct FlexWrapStyle {
+    flex: FlexStyle,
+    line_gap: i64,
+    line_alignment: FlexLineAlignment,
+    wrap: i32,
+}
+
+struct FlexLine {
+    start: i32,
+    count: i32,
+    cross_extent: i64,
+    cross_offset: i64,
+}
+
+struct FlexWrapResult {
+    placements: ArrayList[FlexPlacement],
+    lines: ArrayList[FlexLine],
+    container: Size,
+    overflow_main: i64,
+    overflow_cross: i64,
+    duplicate_ids: i32,
+    wrapped: i32,
+    layout_hash: i64,
+    error: FlexWrapError,
+    error_index: i32,
+}
+
+fn flex_wrap_style(style: FlexStyle, line_gap: i64) FlexWrapStyle {
+    let actual_gap: i64 = line_gap;
+    if (actual_gap < 0) { actual_gap = 0; }
+    return FlexWrapStyle{
+        .flex = style,
+        .line_gap = actual_gap,
+        .line_alignment = FlexLineAlignment.start,
+        .wrap = 1,
+    };
+}
+
+fn flex_wrap_free(result: *FlexWrapResult) void {
+    free[FlexPlacement](&result.*.placements);
+    free[FlexLine](&result.*.lines);
+}
+
+fn flex_wrap_empty_result(error: FlexWrapError, error_index: i32) FlexWrapResult {
+    let result: FlexWrapResult = FlexWrapResult{
+        .placements = make[FlexPlacement](1),
+        .lines = make[FlexLine](1),
+        .container = size(0, 0),
+        .overflow_main = 0,
+        .overflow_cross = 0,
+        .duplicate_ids = 0,
+        .wrapped = 0,
+        .layout_hash = 0,
+        .error = error,
+        .error_index = error_index,
+    };
+    result.layout_hash = flex_wrap_hash(result);
+    return result;
+}
+
+fn flex_wrap_checked_add(a: i64, b: i64) i64 {
+    if (a < 0 || b < 0 || a > unbounded_extent() - b) { return 0 - 1; }
+    return a + b;
+}
+
+fn flex_wrap_item_valid(item: FlexItem) i32 {
+    return (item.id > 0 && item.basis >= 0 && item.basis <= unbounded_extent() &&
+        item.min_main >= 0 && item.max_main >= item.min_main && item.max_main <= unbounded_extent() &&
+        item.grow >= 0 && item.grow <= 4096 && item.shrink >= 0 && item.shrink <= 4096 &&
+        item.cross >= 0 && item.cross <= unbounded_extent() / 4 &&
+        item.baseline >= 0 && item.baseline <= item.cross) as i32;
+}
+
+fn flex_wrap_mix(hash: i64, value: i64) i64 {
+    return (hash * 1099511628211) ^ value;
+}
+
+fn flex_wrap_validate(items: ArrayList[FlexItem], constraints: Constraints, style: FlexWrapStyle) FlexWrapError {
+    if (items.len > 1000000) { return FlexWrapError.too_many_items; }
+    if (constraints.min_width > unbounded_extent() || constraints.max_width > unbounded_extent() ||
+        constraints.min_height > unbounded_extent() || constraints.max_height > unbounded_extent() ||
+        style.flex.gap > unbounded_extent() / 4 || style.line_gap > unbounded_extent() / 4 ||
+        style.flex.padding.top > unbounded_extent() / 4 ||
+        style.flex.padding.right > unbounded_extent() / 4 ||
+        style.flex.padding.bottom > unbounded_extent() / 4 ||
+        style.flex.padding.left > unbounded_extent() / 4) {
+        return FlexWrapError.invalid_style;
+    }
+    let i: i32 = 0;
+    while (i < items.len) {
+        if (flex_wrap_item_valid(items.data[i]) == 0) { return FlexWrapError.invalid_item; }
+        i = i + 1;
+    }
+    return FlexWrapError.none;
+}
+
+fn flex_line_cross_extent(items: ArrayList[FlexItem], start: i32, count: i32, style: FlexStyle) i64 {
+    let extent: i64 = 0;
+    let max_baseline: i64 = 0;
+    let max_descent: i64 = 0;
+    let i: i32 = start;
+    while (i < start + count) {
+        let cross: i64 = items.data[i].cross;
+        if (cross > extent) { extent = cross; }
+        if (style.axis == FlexAxis.row && style.cross_alignment == CrossAlignment.baseline) {
+            let baseline: i64 = clamp_i64(items.data[i].baseline, 0, cross);
+            let descent: i64 = cross - baseline;
+            if (baseline > max_baseline) { max_baseline = baseline; }
+            if (descent > max_descent) { max_descent = descent; }
+        }
+        i = i + 1;
+    }
+    if (max_baseline + max_descent > extent) { extent = max_baseline + max_descent; }
+    return extent;
+}
+
+fn flex_wrap_hash(result: FlexWrapResult) i64 {
+    let hash: i64 = flex_wrap_mix(flex_wrap_mix(17, result.container.width), result.container.height);
+    hash = flex_wrap_mix(hash, result.overflow_main);
+    hash = flex_wrap_mix(hash, result.overflow_cross);
+    hash = flex_wrap_mix(hash, result.duplicate_ids as i64);
+    hash = flex_wrap_mix(hash, result.wrapped as i64);
+    hash = flex_wrap_mix(hash, result.error as i64);
+    hash = flex_wrap_mix(hash, result.error_index as i64);
+    hash = flex_wrap_mix(hash, result.lines.len as i64);
+    let i: i32 = 0;
+    while (i < result.lines.len) {
+        let line: FlexLine = result.lines.data[i];
+        hash = flex_wrap_mix(hash, line.start as i64);
+        hash = flex_wrap_mix(hash, line.count as i64);
+        hash = flex_wrap_mix(hash, line.cross_extent);
+        hash = flex_wrap_mix(hash, line.cross_offset);
+        i = i + 1;
+    }
+    hash = flex_wrap_mix(hash, result.placements.len as i64);
+    i = 0;
+    while (i < result.placements.len) {
+        let placement: FlexPlacement = result.placements.data[i];
+        hash = flex_wrap_mix(hash, placement.id);
+        hash = flex_wrap_mix(hash, placement.frame.x);
+        hash = flex_wrap_mix(hash, placement.frame.y);
+        hash = flex_wrap_mix(hash, placement.frame.width);
+        hash = flex_wrap_mix(hash, placement.frame.height);
+        hash = flex_wrap_mix(hash, placement.baseline);
+        i = i + 1;
+    }
+    return hash;
+}
+
+fn flex_wrap_layout(items: ArrayList[FlexItem], raw_constraints: Constraints, raw_wrap_style: FlexWrapStyle) FlexWrapResult {
+    let constraints: Constraints = normalize_constraints(raw_constraints);
+    let wrap_style: FlexWrapStyle = raw_wrap_style;
+    let validation: FlexWrapError = flex_wrap_validate(items, constraints, wrap_style);
+    if (validation != FlexWrapError.none) {
+        let index: i32 = 0 - 1;
+        if (validation == FlexWrapError.invalid_item) {
+            index = 0;
+            while (index < items.len && flex_wrap_item_valid(items.data[index]) != 0) { index = index + 1; }
+        }
+        return flex_wrap_empty_result(validation, index);
+    }
+    if (wrap_style.line_gap < 0) { wrap_style.line_gap = 0; }
+    if (wrap_style.flex.gap < 0) { wrap_style.flex.gap = 0; }
+    wrap_style.flex.padding = flex_safe_insets(wrap_style.flex.padding);
+
+    let main_padding: i64 = flex_main_padding(wrap_style.flex.padding, wrap_style.flex.axis);
+    let cross_padding: i64 = flex_cross_padding(wrap_style.flex.padding, wrap_style.flex.axis);
+    let main_limit: i64 = flex_main_max(constraints, wrap_style.flex.axis);
+    let desired_main: i64 = main_limit;
+    let i: i32 = 0;
+    if (main_limit >= unbounded_extent()) {
+        desired_main = main_padding;
+        while (i < items.len) {
+            desired_main = flex_wrap_checked_add(desired_main, flex_item_main(items.data[i]));
+            if (desired_main < 0) { return flex_wrap_empty_result(FlexWrapError.arithmetic_overflow, i); }
+            if (i > 0) {
+                desired_main = flex_wrap_checked_add(desired_main, wrap_style.flex.gap);
+                if (desired_main < 0) { return flex_wrap_empty_result(FlexWrapError.arithmetic_overflow, i); }
+            }
+            i = i + 1;
+        }
+    }
+    let container_main: i64 = desired_main;
+    if (main_limit < unbounded_extent()) { container_main = main_limit; }
+    container_main = clamp_i64(container_main, flex_main_min(constraints, wrap_style.flex.axis), main_limit);
+    let inner_main: i64 = container_main - main_padding;
+    if (inner_main < 0) { inner_main = 0; }
+
+    let lines: ArrayList[FlexLine] = make[FlexLine](16);
+    let line_start: i32 = 0;
+    let line_count: i32 = 0;
+    let line_used: i64 = 0;
+    i = 0;
+    while (i < items.len) {
+        let item_main: i64 = flex_item_main(items.data[i]);
+        let next_used: i64 = line_used;
+        if (line_count > 0) { next_used = flex_wrap_checked_add(next_used, wrap_style.flex.gap); }
+        if (next_used >= 0) { next_used = flex_wrap_checked_add(next_used, item_main); }
+        if (next_used < 0) {
+            free[FlexLine](&lines);
+            return flex_wrap_empty_result(FlexWrapError.arithmetic_overflow, i);
+        }
+        if (wrap_style.wrap != 0 && line_count > 0 && next_used > inner_main) {
+            push[FlexLine](&lines, FlexLine{
+                .start = line_start,
+                .count = line_count,
+                .cross_extent = flex_line_cross_extent(items, line_start, line_count, wrap_style.flex),
+                .cross_offset = 0,
+            });
+            line_start = i;
+            line_count = 0;
+            line_used = 0;
+        }
+        if (line_count > 0) { line_used = flex_wrap_checked_add(line_used, wrap_style.flex.gap); }
+        if (line_used >= 0) { line_used = flex_wrap_checked_add(line_used, item_main); }
+        if (line_used < 0) {
+            free[FlexLine](&lines);
+            return flex_wrap_empty_result(FlexWrapError.arithmetic_overflow, i);
+        }
+        line_count = line_count + 1;
+        i = i + 1;
+    }
+    if (line_count > 0) {
+        push[FlexLine](&lines, FlexLine{
+            .start = line_start,
+            .count = line_count,
+            .cross_extent = flex_line_cross_extent(items, line_start, line_count, wrap_style.flex),
+            .cross_offset = 0,
+        });
+    }
+
+    let lines_cross: i64 = 0;
+    i = 0;
+    while (i < lines.len) {
+        lines_cross = flex_wrap_checked_add(lines_cross, lines.data[i].cross_extent);
+        if (lines_cross < 0) {
+            free[FlexLine](&lines);
+            return flex_wrap_empty_result(FlexWrapError.arithmetic_overflow, i);
+        }
+        i = i + 1;
+    }
+    let line_gap_total: i64 = 0;
+    i = 1;
+    while (i < lines.len) {
+        line_gap_total = flex_wrap_checked_add(line_gap_total, wrap_style.line_gap);
+        if (line_gap_total < 0) {
+            free[FlexLine](&lines);
+            return flex_wrap_empty_result(FlexWrapError.arithmetic_overflow, i);
+        }
+        i = i + 1;
+    }
+    let desired_cross: i64 = flex_wrap_checked_add(cross_padding, lines_cross);
+    if (desired_cross >= 0) { desired_cross = flex_wrap_checked_add(desired_cross, line_gap_total); }
+    if (desired_cross < 0) {
+        free[FlexLine](&lines);
+        return flex_wrap_empty_result(FlexWrapError.arithmetic_overflow, 0 - 1);
+    }
+    let cross_limit: i64 = flex_cross_max(constraints, wrap_style.flex.axis);
+    let container_cross: i64 = clamp_i64(desired_cross, flex_cross_min(constraints, wrap_style.flex.axis), cross_limit);
+    let available_cross: i64 = container_cross - cross_padding;
+    let positive_extra: i64 = available_cross - lines_cross - line_gap_total;
+    if (positive_extra < 0) { positive_extra = 0; }
+    let leading: i64 = 0;
+    let extra_line_gap: i64 = 0;
+    let stretch_remainder: i64 = 0;
+    switch (wrap_style.line_alignment) {
+        .start => { }
+        .center => { leading = positive_extra / 2; }
+        .end => { leading = positive_extra; }
+        .space_between => {
+            if (lines.len > 1) { extra_line_gap = positive_extra / ((lines.len - 1) as i64); }
+        }
+        .space_around => {
+            if (lines.len > 0) {
+                extra_line_gap = positive_extra / (lines.len as i64);
+                leading = extra_line_gap / 2;
+            }
+        }
+        .space_evenly => {
+            if (lines.len > 0) {
+                extra_line_gap = positive_extra / ((lines.len + 1) as i64);
+                leading = extra_line_gap;
+            }
+        }
+        .stretch => {
+            if (lines.len > 0) { stretch_remainder = positive_extra; }
+        }
+    }
+
+    let placements: ArrayList[FlexPlacement] = make[FlexPlacement](items.len);
+    let cross_cursor: i64 = leading;
+    let overflow_main: i64 = 0;
+    let stretched: i64 = 0;
+    i = 0;
+    while (i < lines.len) {
+        let line: FlexLine = lines.data[i];
+        let line_cross: i64 = line.cross_extent;
+        if (wrap_style.line_alignment == FlexLineAlignment.stretch && lines.len > 0) {
+            let share: i64 = 0;
+            if (i + 1 == lines.len) { share = stretch_remainder - stretched; }
+            else { share = stretch_remainder / (lines.len as i64); }
+            line_cross = line_cross + share;
+            stretched = stretched + share;
+        }
+        let line_items: ArrayList[FlexItem] = make[FlexItem](line.count);
+        let j: i32 = 0;
+        while (j < line.count) {
+            push[FlexItem](&line_items, items.data[line.start + j]);
+            j = j + 1;
+        }
+        let line_style: FlexStyle = wrap_style.flex;
+        line_style.padding = insets_all(0);
+        let line_constraints: Constraints = tight_constraints(inner_main, line_cross);
+        if (wrap_style.flex.axis == FlexAxis.column) {
+            line_constraints = tight_constraints(line_cross, inner_main);
+        }
+        let laid_out: FlexResult = flex_layout(line_items, line_constraints, line_style);
+        if (laid_out.error != FlexError.none) {
+            let error_index: i32 = laid_out.error_index;
+            if (error_index >= 0) { error_index = error_index + line.start; }
+            flex_free(&laid_out);
+            free[FlexItem](&line_items);
+            free[FlexPlacement](&placements);
+            free[FlexLine](&lines);
+            return flex_wrap_empty_result(FlexWrapError.arithmetic_overflow, error_index);
+        }
+        if (laid_out.overflow > overflow_main) { overflow_main = laid_out.overflow; }
+
+        let band_offset: i64 = cross_cursor;
+        lines.data[i].cross_extent = line_cross;
+        if (wrap_style.flex.axis == FlexAxis.row) {
+            lines.data[i].cross_offset = wrap_style.flex.padding.top + band_offset;
+        } else if (wrap_style.flex.direction == LayoutDirection.ltr) {
+            lines.data[i].cross_offset = wrap_style.flex.padding.left + band_offset;
+        } else {
+            lines.data[i].cross_offset = container_cross - wrap_style.flex.padding.right - band_offset - line_cross;
+        }
+
+        j = 0;
+        while (j < laid_out.placements.len) {
+            let placement: FlexPlacement = laid_out.placements.data[j];
+            if (wrap_style.flex.axis == FlexAxis.row) {
+                placement.frame.x = placement.frame.x + wrap_style.flex.padding.left;
+                placement.frame.y = placement.frame.y + wrap_style.flex.padding.top + band_offset;
+                placement.baseline = placement.baseline + wrap_style.flex.padding.top + band_offset;
+            } else {
+                placement.frame.y = placement.frame.y + wrap_style.flex.padding.top;
+                placement.frame.x = placement.frame.x + lines.data[i].cross_offset;
+                placement.baseline = placement.baseline + wrap_style.flex.padding.top;
+            }
+            push[FlexPlacement](&placements, placement);
+            j = j + 1;
+        }
+        flex_free(&laid_out);
+        free[FlexItem](&line_items);
+        cross_cursor = cross_cursor + line_cross;
+        if (i + 1 < lines.len) { cross_cursor = cross_cursor + wrap_style.line_gap + extra_line_gap; }
+        i = i + 1;
+    }
+
+    let output_size: Size = switch (wrap_style.flex.axis) {
+        .row => size(container_main, container_cross),
+        .column => size(container_cross, container_main),
+    };
+    let overflow_cross: i64 = desired_cross - container_cross;
+    if (overflow_cross < 0) { overflow_cross = 0; }
+    let result: FlexWrapResult = FlexWrapResult{
+        .placements = placements,
+        .lines = lines,
+        .container = output_size,
+        .overflow_main = overflow_main,
+        .overflow_cross = overflow_cross,
+        .duplicate_ids = flex_has_duplicate_id(items),
+        .wrapped = (lines.len > 1) as i32,
+        .layout_hash = 0,
+        .error = FlexWrapError.none,
+        .error_index = 0 - 1,
+    };
+    result.layout_hash = flex_wrap_hash(result);
+    return result;
+}

@@ -1,0 +1,249 @@
+@import("../semantics/semantics.zag")
+@import("../design/tokens.zag")
+@import("linux_preview_model.zag")
+@import("linux_preview_layout.zag")
+
+fn linux_preview_navigation_hit_at_pixel(x: i32, y: i32,
+    width: i32, height: i32) i32 {
+    let layout: LinuxPreviewLayout = linux_preview_layout(width, height);
+    if (layout.error != LinuxPreviewLayoutError.none) { return 0 - 1; }
+    let fixed_x: i64 = (x as i64) * unit_scale();
+    let fixed_y: i64 = (y as i64) * unit_scale();
+    let index: i32 = 0;
+    while (index < linux_preview_navigation_count()) {
+        let bounds: Rect = linux_preview_navigation_item_bounds(layout, index,
+            linux_preview_navigation_count());
+        if (rect_contains(bounds, fixed_x, fixed_y) != 0) { return index; }
+        index = index + 1;
+    }
+    return 0 - 1;
+}
+
+fn linux_preview_navigation_at_pixel(x: i32, y: i32,
+    width: i32, height: i32) i32 {
+    let index: i32 = linux_preview_navigation_hit_at_pixel(x, y, width, height);
+    if (index >= 0 && linux_preview_navigation_enabled(index) != 0) {
+        return index;
+    }
+    return 0 - 1;
+}
+
+fn linux_preview_root_id() NodeKey { return node_key(20000); }
+fn linux_preview_navigation_id() NodeKey { return node_key(20100); }
+fn linux_preview_nav_id(index: i32) NodeKey { return node_key(20200 + index); }
+fn linux_preview_main_id() NodeKey { return node_key(20300); }
+fn linux_preview_inspect_id() NodeKey { return node_key(20302); }
+fn linux_preview_chip_id(index: i32) NodeKey { return node_key(20400 + index); }
+fn linux_preview_activity_id() NodeKey { return node_key(20500); }
+fn linux_preview_activity_item_id(index: i32) NodeKey { return node_key(20600 + index); }
+fn linux_preview_chart_table_id() NodeKey { return node_key(20700); }
+fn linux_preview_chart_cell_id(index: i32) NodeKey { return node_key(20710 + index); }
+fn linux_preview_compact_summary_id() NodeKey { return node_key(20740); }
+
+fn linux_preview_semantic_node_count(width: i32, height: i32) i32 {
+    let layout: LinuxPreviewLayout = linux_preview_layout(width, height);
+    if (layout.error != LinuxPreviewLayoutError.none) { return 2; }
+    // Window, navigation group + six tabs, main group, heading, and Inspect.
+    let count: i32 = 11;
+    if (layout.chart_visible != 0) {
+        // Four stage tabs, chart table, and sixteen table cells.
+        count = count + 21;
+    } else {
+        count = count + 1;
+    }
+    if (layout.status_visible != 0) {
+        count = count + 6;
+    }
+    return count;
+}
+
+fn linux_preview_chart_sample_name(index: i32) []u8 {
+    if (index == 1) { return "Sample 2"; }
+    if (index == 2) { return "Sample 3"; }
+    if (index == 3) { return "Sample 4"; }
+    if (index == 4) { return "Sample 5"; }
+    if (index == 5) { return "Sample 6"; }
+    if (index == 6) { return "Sample 7"; }
+    if (index == 7) { return "Sample 8"; }
+    return "Sample 1";
+}
+
+fn linux_preview_chart_sample_value(index: i32) []u8 {
+    if (index == 1) { return "18.8 milliseconds"; }
+    if (index == 2) { return "17.4 milliseconds"; }
+    if (index == 3) { return "15.9 milliseconds"; }
+    if (index == 4) { return "14.7 milliseconds"; }
+    if (index == 5) { return "13.3 milliseconds"; }
+    if (index == 6) { return "12.1 milliseconds"; }
+    if (index == 7) { return "10.8 milliseconds"; }
+    return "20.2 milliseconds";
+}
+
+fn linux_preview_add_semantic(tree: *SemanticsTree, spec: SemanticsSpec) i32 {
+    return (semantics_add(tree, spec) == SemanticsError.none) as i32;
+}
+
+fn linux_preview_semantics(width: i32, height: i32,
+    selected_navigation: i32) SemanticsTree {
+    let selected_route: i32 = linux_preview_navigation_normalize(
+        selected_navigation);
+    let layout: LinuxPreviewLayout = linux_preview_layout(width, height);
+    let tree: SemanticsTree = semantics_tree_make();
+    let root: SemanticsSpec = semantics_spec(linux_preview_root_id(),
+        semantic_root_key(), SemanticRole.window, "Zagkit Studio Linux Preview");
+    root.description = "Experimental native Zagkit component and renderer preview";
+    root.has_bounds = 1;
+    root.bounds = rect(0, 0, (width as i64) * unit_scale(),
+        (height as i64) * unit_scale());
+    _ = linux_preview_add_semantic(&tree, root);
+
+    if (layout.error != LinuxPreviewLayoutError.none) {
+        let unsupported: SemanticsSpec = semantics_spec(
+            linux_preview_compact_summary_id(), linux_preview_root_id(),
+            SemanticRole.text, "Unsupported preview size");
+        unsupported.description =
+            "The Linux desktop preview needs at least 480 by 360 logical pixels";
+        unsupported.has_bounds = 1;
+        unsupported.bounds = root.bounds;
+        _ = linux_preview_add_semantic(&tree, unsupported);
+        return tree;
+    }
+
+    let navigation: SemanticsSpec = semantics_spec(linux_preview_navigation_id(),
+        linux_preview_root_id(), SemanticRole.group, "Primary navigation");
+    navigation.has_bounds = 1;
+    navigation.bounds = layout.navigation;
+    _ = linux_preview_add_semantic(&tree, navigation);
+    let nav_index: i32 = 0;
+    while (nav_index < linux_preview_navigation_count()) {
+        let name: []u8 = linux_preview_navigation_name(nav_index);
+        let tab: SemanticsSpec = semantics_spec(linux_preview_nav_id(nav_index),
+            linux_preview_navigation_id(), SemanticRole.tab, name);
+        tab.value = linux_preview_navigation_value(nav_index);
+        let nav_enabled: i32 = linux_preview_navigation_enabled(nav_index);
+        tab.disabled = (nav_enabled == 0) as i32;
+        if (nav_enabled != 0) {
+            tab.action_mask = semantic_actions_add(
+                semantic_actions_add(semantic_actions(SemanticAction.activate),
+                    SemanticAction.select), SemanticAction.focus);
+            tab.focus_order = nav_index + 1;
+        }
+        tab.selected = (nav_index == selected_route) as i32;
+        tab.set_size = linux_preview_navigation_count();
+        tab.position_in_set = nav_index + 1;
+        tab.has_bounds = 1;
+        tab.bounds = linux_preview_navigation_item_bounds(layout, nav_index,
+            linux_preview_navigation_count());
+        _ = linux_preview_add_semantic(&tree, tab);
+        nav_index = nav_index + 1;
+    }
+
+    let main: SemanticsSpec = semantics_spec(linux_preview_main_id(),
+        linux_preview_root_id(), SemanticRole.group,
+        linux_preview_main_heading(selected_route));
+    main.description = linux_preview_main_description(selected_route);
+    main.has_bounds = 1;
+    main.bounds = layout.main;
+    _ = linux_preview_add_semantic(&tree, main);
+    let heading: SemanticsSpec = semantics_spec(node_key(20301),
+        linux_preview_main_id(), SemanticRole.text,
+        linux_preview_main_heading(selected_route));
+    heading.has_bounds = 1;
+    heading.bounds = layout.page_heading;
+    _ = linux_preview_add_semantic(&tree, heading);
+    let inspect: SemanticsSpec = semantics_spec(linux_preview_inspect_id(),
+        linux_preview_main_id(), SemanticRole.button, "Inspect renderer pipeline");
+    inspect.action_mask = semantic_actions_add(semantic_actions(SemanticAction.activate),
+        SemanticAction.focus);
+    inspect.focus_order = 7; inspect.has_bounds = 1;
+    inspect.bounds = linux_preview_inspect_bounds(layout);
+    _ = linux_preview_add_semantic(&tree, inspect);
+
+    if (layout.chart_visible != 0) {
+        let chip_index: i32 = 0;
+        while (chip_index < 4) {
+            let name: []u8 = "State";
+            if (chip_index == 1) { name = "Layout"; }
+            else if (chip_index == 2) { name = "Motion"; }
+            else if (chip_index == 3) { name = "Render"; }
+            let chip: SemanticsSpec = semantics_spec(
+                linux_preview_chip_id(chip_index), linux_preview_main_id(),
+                SemanticRole.tab, name);
+            chip.action_mask = semantic_actions_add(
+                semantic_actions(SemanticAction.activate), SemanticAction.focus);
+            chip.focus_order = 8 + chip_index; chip.has_bounds = 1;
+            chip.selected = (chip_index == 0) as i32;
+            chip.set_size = 4; chip.position_in_set = chip_index + 1;
+            if (chip_index == 3) {
+                chip.disabled = 1; chip.action_mask = 0;
+            }
+            chip.bounds = linux_preview_segment_bounds(layout, chip_index, 4);
+            _ = linux_preview_add_semantic(&tree, chip);
+            chip_index = chip_index + 1;
+        }
+
+        let chart: SemanticsSpec = semantics_spec(linux_preview_chart_table_id(),
+            linux_preview_main_id(), SemanticRole.table, "CPU frame time samples");
+        chart.description =
+            "Frame time in milliseconds by sample; 16.7 millisecond deadline";
+        chart.row_count = 8; chart.column_count = 2; chart.has_bounds = 1;
+        chart.bounds = layout.chart;
+        _ = linux_preview_add_semantic(&tree, chart);
+        let sample_index: i32 = 0;
+        while (sample_index < 8) {
+            let sample_cell: SemanticsSpec = semantics_spec(
+                linux_preview_chart_cell_id(sample_index * 2),
+                linux_preview_chart_table_id(), SemanticRole.cell,
+                linux_preview_chart_sample_name(sample_index));
+            sample_cell.row_index = sample_index; sample_cell.column_index = 0;
+            sample_cell.row_span = 1; sample_cell.column_span = 1;
+            _ = linux_preview_add_semantic(&tree, sample_cell);
+            let value_cell: SemanticsSpec = semantics_spec(
+                linux_preview_chart_cell_id(sample_index * 2 + 1),
+                linux_preview_chart_table_id(), SemanticRole.cell, "Frame time");
+            value_cell.value = linux_preview_chart_sample_value(sample_index);
+            value_cell.row_index = sample_index; value_cell.column_index = 1;
+            value_cell.row_span = 1; value_cell.column_span = 1;
+            _ = linux_preview_add_semantic(&tree, value_cell);
+            sample_index = sample_index + 1;
+        }
+    } else {
+        let summary: SemanticsSpec = semantics_spec(
+            linux_preview_compact_summary_id(), linux_preview_main_id(),
+            SemanticRole.text, "Frame pacing summary");
+        summary.description =
+            "The full accessible performance chart is available at 960 by 720 and larger";
+        summary.value = "P99 12.1 milliseconds; 16.7 millisecond display deadline";
+        summary.has_bounds = 1;
+        summary.bounds = layout.compact_summary;
+        _ = linux_preview_add_semantic(&tree, summary);
+    }
+
+    if (layout.status_visible != 0) {
+        let activity: SemanticsSpec = semantics_spec(linux_preview_activity_id(),
+            linux_preview_root_id(), SemanticRole.list, "System status");
+        activity.description =
+            "Read-only runtime capability and conformance status";
+        activity.row_count = 5; activity.column_count = 1;
+        activity.has_bounds = 1; activity.bounds = layout.status;
+        _ = linux_preview_add_semantic(&tree, activity);
+        let activity_index: i32 = 0;
+        while (activity_index < 5) {
+            let category: ShowcaseCategory = showcase_category_at(activity_index);
+            let name: []u8 = showcase_category_name(category);
+            let item: SemanticsSpec = semantics_spec(
+                linux_preview_activity_item_id(activity_index),
+                linux_preview_activity_id(), SemanticRole.list_item, name);
+            item.description = showcase_category_description(category);
+            item.value = showcase_category_value(category);
+            item.row_index = activity_index; item.row_span = 1;
+            item.column_index = 0; item.column_span = 1;
+            item.has_bounds = 1;
+            item.bounds = linux_preview_status_item_bounds(layout,
+                activity_index, 5);
+            _ = linux_preview_add_semantic(&tree, item);
+            activity_index = activity_index + 1;
+        }
+    }
+    return tree;
+}

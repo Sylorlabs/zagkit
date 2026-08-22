@@ -1,0 +1,582 @@
+@import("std:list")
+@import("../core/geometry.zag")
+@import("../semantics/semantics.zag")
+
+enum TalkbackTargetKind { semantic_id, pixel }
+
+enum TalkbackCommand {
+    discover,
+    query,
+    click,
+    type_text,
+    key,
+    focus,
+    scroll,
+    drag,
+    gesture,
+    wait_for,
+    assert_value,
+    screenshot,
+    timeline,
+    capability_report,
+    snapshot,
+    replay,
+}
+
+enum TalkbackScrollAxis {
+    none,
+    horizontal,
+    vertical,
+    both,
+}
+
+enum TalkbackStatus {
+    accepted,
+    invalid_request,
+    invalid_timeout,
+    stale_semantics,
+    target_not_found,
+    action_unavailable,
+    pixel_fallback_disabled,
+    pixel_out_of_bounds,
+    unsupported_command,
+}
+
+struct TalkbackPixelFallbackTarget {
+    status: TalkbackStatus,
+    source_id: NodeKey,
+    bounds_x: i64,
+    bounds_y: i64,
+    logical_bounds: Rect,
+    pixel_x: i64,
+    pixel_y: i64,
+    action_available: i32,
+    evidence_hash: i64,
+}
+
+struct TalkbackCapabilities {
+    protocol_major: i64,
+    protocol_minor: i64,
+    semantic_query: i32,
+    id_actions: i32,
+    pixel_fallback: i32,
+    key_actions: i32,
+    drag_actions: i32,
+    gesture_actions: i32,
+    wait_actions: i32,
+    assert_actions: i32,
+    snapshot_actions: i32,
+    screenshots: i32,
+    replay: i32,
+}
+
+struct TalkbackRequest {
+    request_id: i64,
+    command: TalkbackCommand,
+    target_kind: TalkbackTargetKind,
+    target_id: NodeKey,
+    semantics_revision: i64,
+    timeout_ms: i64,
+    pixel_x: i64,
+    pixel_y: i64,
+    scale_numerator: i64,
+    scale_denominator: i64,
+    scroll_axis: TalkbackScrollAxis,
+    scroll_delta_x: i64,
+    scroll_delta_y: i64,
+}
+
+struct TalkbackResponse {
+    request_id: i64,
+    status: TalkbackStatus,
+    target_kind: TalkbackTargetKind,
+    target_id: NodeKey,
+    semantics_revision: i64,
+    event_sequence: i64,
+    resolved_node_index: i32,
+    result_count: i32,
+    emitted_action: i32,
+    resolved_role: SemanticRole,
+    action_mask: i64,
+    has_bounds: i32,
+    bounds: Rect,
+    row_count: i64,
+    column_count: i64,
+    row_index: i64,
+    column_index: i64,
+    level: i64,
+    expanded: i32,
+    name_length: i32,
+    description_length: i32,
+    value_length: i32,
+    state_flags: i32,
+    evidence_hash: i64,
+}
+
+struct TalkbackEvent {
+    sequence: i64,
+    request_id: i64,
+    command: TalkbackCommand,
+    target_kind: TalkbackTargetKind,
+    target_id: NodeKey,
+    status: TalkbackStatus,
+    semantics_revision: i64,
+    pixel_x: i64,
+    pixel_y: i64,
+    scale_numerator: i64,
+    scale_denominator: i64,
+    scroll_axis: TalkbackScrollAxis,
+    scroll_delta_x: i64,
+    scroll_delta_y: i64,
+}
+
+struct TalkbackSession {
+    capabilities: TalkbackCapabilities,
+    events: ArrayList[TalkbackEvent],
+    next_sequence: i64,
+}
+
+fn talkback_capabilities() TalkbackCapabilities {
+    return TalkbackCapabilities{
+        .protocol_major = 0,
+        .protocol_minor = 2,
+        .semantic_query = 1,
+        .id_actions = 1,
+        .pixel_fallback = 0,
+        .key_actions = 1,
+        .drag_actions = 1,
+        .gesture_actions = 1,
+        .wait_actions = 1,
+        .assert_actions = 1,
+        .snapshot_actions = 1,
+        .screenshots = 0,
+        .replay = 1,
+    };
+}
+
+fn talkback_session_make(capabilities: TalkbackCapabilities) TalkbackSession {
+    return TalkbackSession{
+        .capabilities = capabilities,
+        .events = make[TalkbackEvent](16),
+        .next_sequence = 1,
+    };
+}
+
+fn talkback_session_free(session: *TalkbackSession) void {
+    free[TalkbackEvent](&session.*.events);
+}
+
+fn talkback_request(request_id: i64, command: TalkbackCommand, target_id: NodeKey, semantics_revision: i64) TalkbackRequest {
+    return TalkbackRequest{
+        .request_id = request_id,
+        .command = command,
+        .target_kind = TalkbackTargetKind.semantic_id,
+        .target_id = target_id,
+        .semantics_revision = semantics_revision,
+        .timeout_ms = 1000,
+        .pixel_x = 0,
+        .pixel_y = 0,
+        .scale_numerator = 1,
+        .scale_denominator = 1,
+        .scroll_axis = TalkbackScrollAxis.none,
+        .scroll_delta_x = 0,
+        .scroll_delta_y = 0,
+    };
+}
+
+fn talkback_scroll_request(request_id: i64, target_id: NodeKey,
+    semantics_revision: i64, axis: TalkbackScrollAxis,
+    delta_x: i64, delta_y: i64) TalkbackRequest {
+    let request: TalkbackRequest = talkback_request(request_id,
+        TalkbackCommand.scroll, target_id, semantics_revision);
+    request.scroll_axis = axis;
+    request.scroll_delta_x = delta_x;
+    request.scroll_delta_y = delta_y;
+    return request;
+}
+
+fn talkback_pixel_request(request_id: i64, command: TalkbackCommand, pixel_x: i64, pixel_y: i64, scale_numerator: i64, scale_denominator: i64) TalkbackRequest {
+    let request: TalkbackRequest = talkback_request(request_id, command, semantic_root_key(), 0 - 1);
+    request.target_kind = TalkbackTargetKind.pixel;
+    request.pixel_x = pixel_x;
+    request.pixel_y = pixel_y;
+    request.scale_numerator = scale_numerator;
+    request.scale_denominator = scale_denominator;
+    return request;
+}
+
+fn talkback_evidence_mix(hash: i64, value: i64) i64 {
+    return (hash * 1099511628211) ^ value;
+}
+
+fn talkback_capability_hash(capabilities: TalkbackCapabilities) i64 {
+    let hash: i64 = talkback_evidence_mix(17, capabilities.protocol_major);
+    let hash2: i64 = talkback_evidence_mix(hash, capabilities.protocol_minor);
+    let hash3: i64 = talkback_evidence_mix(hash2, capabilities.semantic_query);
+    let hash4: i64 = talkback_evidence_mix(hash3, capabilities.id_actions);
+    let hash5: i64 = talkback_evidence_mix(hash4, capabilities.pixel_fallback);
+    let hash6: i64 = talkback_evidence_mix(hash5, capabilities.key_actions);
+    let hash7: i64 = talkback_evidence_mix(hash6, capabilities.drag_actions);
+    let hash8: i64 = talkback_evidence_mix(hash7, capabilities.gesture_actions);
+    let hash9: i64 = talkback_evidence_mix(hash8, capabilities.wait_actions);
+    let hash10: i64 = talkback_evidence_mix(hash9, capabilities.assert_actions);
+    let hash11: i64 = talkback_evidence_mix(hash10, capabilities.snapshot_actions);
+    let hash12: i64 = talkback_evidence_mix(hash11, capabilities.screenshots);
+    return talkback_evidence_mix(hash12, capabilities.replay);
+}
+
+fn talkback_tree_hash(tree: SemanticsTree) i64 {
+    let hash: i64 = talkback_evidence_mix(17, tree.revision);
+    let result: i64 = talkback_evidence_mix(hash, tree.nodes.len as i64);
+    let i: i32 = 0;
+    let hash_result: i64 = result;
+    while (i < tree.nodes.len) {
+        hash_result = talkback_evidence_mix(hash_result, semantic_node_evidence_hash(tree.nodes.data[i]));
+        i = i + 1;
+    }
+    return hash_result;
+}
+
+fn talkback_event_hash(event: TalkbackEvent) i64 {
+    let hash: i64 = talkback_evidence_mix(17, event.sequence);
+    let hash2: i64 = talkback_evidence_mix(hash, event.request_id);
+    let hash3: i64 = talkback_evidence_mix(hash2, event.command as i64);
+    let hash4: i64 = talkback_evidence_mix(hash3, event.target_kind as i64);
+    let hash5: i64 = talkback_evidence_mix(hash4, event.target_id.value);
+    let hash6: i64 = talkback_evidence_mix(hash5, event.target_id.generation);
+    let hash7: i64 = talkback_evidence_mix(hash6, event.status as i64);
+    let hash8: i64 = talkback_evidence_mix(hash7, event.semantics_revision);
+    let hash9: i64 = talkback_evidence_mix(hash8, event.pixel_x);
+    let hash10: i64 = talkback_evidence_mix(hash9, event.pixel_y);
+    let hash11: i64 = talkback_evidence_mix(hash10, event.scale_numerator);
+    return talkback_evidence_mix(hash11, event.scale_denominator);
+}
+
+fn talkback_session_hash(session: *TalkbackSession) i64 {
+    let hash: i64 = talkback_evidence_mix(17, session.*.events.len as i64);
+    let result: i64 = talkback_evidence_mix(hash, session.*.next_sequence);
+    let i: i32 = 0;
+    while (i < session.*.events.len) {
+        result = talkback_evidence_mix(result, talkback_event_hash(session.*.events.data[i]));
+        i = i + 1;
+    }
+    return result;
+}
+
+fn talkback_command_has_target(command: TalkbackCommand) i32 {
+    return switch (command) {
+        .discover => 0,
+        .query => 1,
+        .click => 1,
+        .type_text => 1,
+        .key => 1,
+        .focus => 1,
+        .scroll => 1,
+        .drag => 1,
+        .gesture => 1,
+        .wait_for => 1,
+        .assert_value => 1,
+        .screenshot => 0,
+        .timeline => 0,
+        .capability_report => 0,
+        .snapshot => 0,
+        .replay => 0,
+    };
+}
+
+fn talkback_action_supported(capabilities: TalkbackCapabilities, target_kind: TalkbackTargetKind, pixel_action: i32) i32 {
+    if (target_kind == TalkbackTargetKind.pixel) {
+        if (pixel_action == 0) { return 0; }
+        return capabilities.pixel_fallback;
+    }
+    return capabilities.id_actions;
+}
+
+fn talkback_command_supported(capabilities: TalkbackCapabilities, command: TalkbackCommand, target_kind: TalkbackTargetKind) i32 {
+    let command_supported = switch (command) {
+        .discover => capabilities.semantic_query,
+        .query => capabilities.semantic_query,
+        .click => talkback_action_supported(capabilities, target_kind, 1),
+        .type_text => talkback_action_supported(capabilities, target_kind, 0),
+        .key => capabilities.key_actions,
+        .focus => talkback_action_supported(capabilities, target_kind, 0),
+        .scroll => talkback_action_supported(capabilities, target_kind, 1),
+        .drag => capabilities.drag_actions,
+        .gesture => capabilities.gesture_actions,
+        .wait_for => capabilities.wait_actions,
+        .assert_value => capabilities.assert_actions,
+        .screenshot => capabilities.screenshots,
+        .timeline => 1,
+        .capability_report => 1,
+        .snapshot => capabilities.snapshot_actions,
+        .replay => capabilities.replay,
+    };
+
+    if (
+        target_kind == TalkbackTargetKind.pixel &&
+        (
+            command == TalkbackCommand.key ||
+            command == TalkbackCommand.drag ||
+            command == TalkbackCommand.gesture
+        )
+    ) {
+        return 0;
+    }
+
+    return command_supported;
+}
+
+fn talkback_required_action(command: TalkbackCommand) i64 {
+    return switch (command) {
+        .click => semantic_action_bit(SemanticAction.activate),
+        .type_text => semantic_action_bit(SemanticAction.set_value),
+        .focus => semantic_action_bit(SemanticAction.focus),
+        .scroll => semantic_action_bit(SemanticAction.scroll),
+        .key => semantic_action_bit(SemanticAction.activate),
+        .discover => 0,
+        .query => 0,
+        .drag => 0,
+        .gesture => 0,
+        .wait_for => 0,
+        .assert_value => 0,
+        .screenshot => 0,
+        .timeline => 0,
+        .capability_report => 0,
+        .snapshot => 0,
+        .replay => 0,
+    };
+}
+
+fn talkback_emits_action(command: TalkbackCommand) i32 {
+    return switch (command) {
+        .discover => 0,
+        .query => 0,
+        .click => 1,
+        .type_text => 1,
+        .key => 1,
+        .focus => 1,
+        .scroll => 1,
+        .drag => 1,
+        .gesture => 1,
+        .wait_for => 1,
+        .assert_value => 1,
+        .screenshot => 0,
+        .timeline => 0,
+        .capability_report => 0,
+        .snapshot => 1,
+        .replay => 1,
+    };
+}
+
+fn talkback_record(session: *TalkbackSession, tree_revision: i64, request: TalkbackRequest, status: TalkbackStatus) TalkbackResponse {
+    let sequence: i64 = session.*.next_sequence;
+    session.*.next_sequence = session.*.next_sequence + 1;
+    let recorded_event: TalkbackEvent = TalkbackEvent{
+        .sequence = sequence,
+        .request_id = request.request_id,
+        .command = request.command,
+        .target_kind = request.target_kind,
+        .target_id = request.target_id,
+        .status = status,
+        .semantics_revision = tree_revision,
+        .pixel_x = request.pixel_x,
+        .pixel_y = request.pixel_y,
+        .scale_numerator = request.scale_numerator,
+        .scale_denominator = request.scale_denominator,
+        .scroll_axis = request.scroll_axis,
+        .scroll_delta_x = request.scroll_delta_x,
+        .scroll_delta_y = request.scroll_delta_y,
+    };
+    push[TalkbackEvent](&session.*.events, recorded_event);
+    return TalkbackResponse{
+        .request_id = request.request_id,
+        .status = status,
+        .target_kind = request.target_kind,
+        .target_id = request.target_id,
+        .semantics_revision = tree_revision,
+        .event_sequence = sequence,
+        .resolved_node_index = 0 - 1,
+        .result_count = 0,
+        .emitted_action = 0,
+        .resolved_role = SemanticRole.group,
+        .action_mask = 0,
+        .has_bounds = 0,
+        .bounds = rect(0, 0, 0, 0),
+        .row_count = 0 - 1,
+        .column_count = 0 - 1,
+        .row_index = 0 - 1,
+        .column_index = 0 - 1,
+        .level = 0,
+        .expanded = 0 - 1,
+        .name_length = 0,
+        .description_length = 0,
+        .value_length = 0,
+        .state_flags = 0,
+        .evidence_hash = talkback_event_hash(recorded_event),
+    };
+}
+
+fn talkback_dispatch(session: *TalkbackSession, tree: SemanticsTree, viewport: Rect, request: TalkbackRequest) TalkbackResponse {
+    if (request.request_id <= 0) {
+        return talkback_record(session, tree.revision, request, TalkbackStatus.invalid_request);
+    }
+    if (request.timeout_ms <= 0 || request.timeout_ms > 300000) {
+        return talkback_record(session, tree.revision, request, TalkbackStatus.invalid_timeout);
+    }
+    if (talkback_command_has_target(request.command) != 0 &&
+        request.target_kind == TalkbackTargetKind.pixel &&
+        session.*.capabilities.pixel_fallback == 0) {
+        return talkback_record(session, tree.revision, request, TalkbackStatus.pixel_fallback_disabled);
+    }
+    if (talkback_command_supported(session.*.capabilities, request.command, request.target_kind) == 0) {
+        return talkback_record(session, tree.revision, request, TalkbackStatus.unsupported_command);
+    }
+    if (talkback_command_has_target(request.command) == 0) {
+        let response: TalkbackResponse = talkback_record(session, tree.revision, request, TalkbackStatus.accepted);
+        if (request.command == TalkbackCommand.discover) { response.result_count = tree.nodes.len; }
+        if (request.command == TalkbackCommand.timeline) { response.result_count = session.*.events.len; }
+        if (request.command == TalkbackCommand.capability_report) { response.result_count = 1; }
+        if (request.command == TalkbackCommand.screenshot) { response.result_count = 0; }
+        if (request.command == TalkbackCommand.snapshot) { response.result_count = 1; }
+        if (request.command == TalkbackCommand.replay) { response.result_count = 1; }
+        if (request.command == TalkbackCommand.discover) { response.evidence_hash = talkback_tree_hash(tree); }
+        if (request.command == TalkbackCommand.timeline) { response.evidence_hash = talkback_session_hash(session); }
+        if (request.command == TalkbackCommand.capability_report) { response.evidence_hash = talkback_capability_hash(session.*.capabilities); }
+        if (request.command == TalkbackCommand.screenshot) {
+            response.evidence_hash = 0;
+        }
+        if (request.command == TalkbackCommand.snapshot) {
+            response.evidence_hash = talkback_tree_hash(tree);
+        }
+        if (request.command == TalkbackCommand.replay) {
+            response.evidence_hash = talkback_tree_hash(tree);
+            response.row_count = session.*.events.len;
+        }
+        if (request.command == TalkbackCommand.wait_for) { response.result_count = 0; }
+        if (talkback_emits_action(request.command) != 0) { response.emitted_action = 1; }
+        return response;
+    }
+
+    if (request.target_kind == TalkbackTargetKind.pixel) {
+        if (request.scale_numerator <= 0 || request.scale_numerator > 16 ||
+            request.scale_denominator <= 0 || request.scale_denominator > 16 ||
+            request.pixel_x < 0 || request.pixel_y < 0) {
+            return talkback_record(session, tree.revision, request, TalkbackStatus.invalid_request);
+        }
+        let logical_x: i64 = (request.pixel_x * unit_scale() * request.scale_denominator) / request.scale_numerator;
+        let logical_y: i64 = (request.pixel_y * unit_scale() * request.scale_denominator) / request.scale_numerator;
+        if (rect_contains(viewport, logical_x, logical_y) == 0) {
+            return talkback_record(session, tree.revision, request, TalkbackStatus.pixel_out_of_bounds);
+        }
+        let response: TalkbackResponse = talkback_record(session, tree.revision, request, TalkbackStatus.accepted);
+        if (talkback_emits_action(request.command) != 0) { response.emitted_action = 1; }
+        response.evidence_hash = talkback_tree_hash(tree);
+        return response;
+    }
+
+    if (request.semantics_revision >= 0 && request.semantics_revision != tree.revision) {
+        return talkback_record(session, tree.revision, request, TalkbackStatus.stale_semantics);
+    }
+    let node_index: i32 = semantics_find_index(tree, request.target_id);
+    if (node_index < 0 || tree.nodes.data[node_index].hidden != 0) {
+        return talkback_record(session, tree.revision, request, TalkbackStatus.target_not_found);
+    }
+    let required_action: i64 = talkback_required_action(request.command);
+    // Disabled nodes remain discoverable and queryable. Only commands that
+    // require an action fail closed when that action is unavailable.
+    if (required_action != 0 &&
+        (tree.nodes.data[node_index].disabled != 0 ||
+         (tree.nodes.data[node_index].action_mask & required_action) == 0)) {
+        return talkback_record(session, tree.revision, request, TalkbackStatus.action_unavailable);
+    }
+    let response: TalkbackResponse = talkback_record(session, tree.revision, request, TalkbackStatus.accepted);
+    response.resolved_node_index = node_index;
+    response.result_count = 1;
+    response.resolved_role = tree.nodes.data[node_index].role;
+    response.action_mask = tree.nodes.data[node_index].action_mask;
+    response.has_bounds = tree.nodes.data[node_index].has_bounds;
+    response.bounds = tree.nodes.data[node_index].bounds;
+    response.row_count = tree.nodes.data[node_index].row_count;
+    response.column_count = tree.nodes.data[node_index].column_count;
+    response.row_index = tree.nodes.data[node_index].row_index;
+    response.column_index = tree.nodes.data[node_index].column_index;
+    response.level = tree.nodes.data[node_index].level;
+    response.expanded = tree.nodes.data[node_index].expanded;
+    response.name_length = tree.nodes.data[node_index].name.len;
+    response.description_length = tree.nodes.data[node_index].description.len;
+    response.value_length = tree.nodes.data[node_index].value.len;
+    response.state_flags = tree.nodes.data[node_index].disabled;
+    if (tree.nodes.data[node_index].selected != 0) {
+        response.state_flags = response.state_flags | 2;
+    }
+    if (tree.nodes.data[node_index].hidden != 0) {
+        response.state_flags = response.state_flags | 4;
+    }
+    if (tree.nodes.data[node_index].focused != 0) {
+        response.state_flags = response.state_flags | 8;
+    }
+    response.evidence_hash = semantic_node_evidence_hash(tree.nodes.data[node_index]);
+    if (required_action != 0 || talkback_emits_action(request.command) != 0) {
+        response.emitted_action = 1;
+    }
+    return response;
+}
+
+fn talkback_state_focused_bit() i64 { return 8; }
+fn talkback_state_selected_bit() i64 { return 2; }
+fn talkback_state_disabled_bit() i64 { return 1; }
+
+fn talkback_pixel_fallback_for_id(tree: SemanticsTree,
+    viewport: Rect, target_id: NodeKey, command: TalkbackCommand,
+    scale_numerator: i64, scale_denominator: i64) TalkbackPixelFallbackTarget {
+    let fallback: TalkbackPixelFallbackTarget = TalkbackPixelFallbackTarget{
+        .status = TalkbackStatus.target_not_found,
+        .source_id = target_id,
+        .bounds_x = 0,
+        .bounds_y = 0,
+        .logical_bounds = rect(0, 0, 0, 0),
+        .pixel_x = 0,
+        .pixel_y = 0,
+        .action_available = 0,
+        .evidence_hash = 0,
+    };
+    let nodes: ArrayList[SemanticsNode] = tree.nodes;
+    let node_index: i32 = semantics_find_index(tree, target_id);
+    if (node_index < 0 || node_index >= nodes.len) { return fallback; }
+    let node_bounds: Rect = nodes.data[node_index].bounds;
+    let node_evidence: i64 = semantic_node_evidence_hash(nodes.data[node_index]);
+    let center_x: i64 = node_bounds.x + node_bounds.width / 2;
+    let center_y: i64 = node_bounds.y + node_bounds.height / 2;
+    let pixel_x: i64 = (center_x * scale_numerator) /
+        (scale_denominator * unit_scale());
+    let pixel_y: i64 = (center_y * scale_numerator) /
+        (scale_denominator * unit_scale());
+    let viewport_right: i64 = viewport.x + viewport.width;
+    let viewport_bottom: i64 = viewport.y + viewport.height;
+    if (center_x < viewport.x || center_x > viewport_right ||
+        center_y < viewport.y || center_y > viewport_bottom) {
+        let out_of_bounds: TalkbackPixelFallbackTarget = TalkbackPixelFallbackTarget{
+            .status = TalkbackStatus.pixel_out_of_bounds,
+            .source_id = target_id,
+            .bounds_x = node_bounds.x,
+            .bounds_y = node_bounds.y,
+            .logical_bounds = node_bounds,
+            .pixel_x = pixel_x,
+            .pixel_y = pixel_y,
+            .action_available = 0,
+            .evidence_hash = node_evidence,
+        };
+        return out_of_bounds;
+    }
+    return TalkbackPixelFallbackTarget{
+        .status = TalkbackStatus.accepted,
+        .source_id = target_id,
+        .bounds_x = node_bounds.x,
+        .bounds_y = node_bounds.y,
+        .logical_bounds = node_bounds,
+        .pixel_x = pixel_x,
+        .pixel_y = pixel_y,
+        .action_available = 1,
+        .evidence_hash = node_evidence,
+    };
+}

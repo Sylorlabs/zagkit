@@ -1,0 +1,488 @@
+@import("../render/cpu_raster.zag")
+@import("../text/glyph_run.zag")
+@import("../design/tokens.zag")
+
+fn preview_fx(value: i64) i64 { return value * unit_scale(); }
+
+fn preview_x(value: i64, width: i32) i64 {
+    return (value * (width as i64) * unit_scale()) / 1120;
+}
+
+fn preview_y(value: i64, height: i32) i64 {
+    return (value * (height as i64) * unit_scale()) / 720;
+}
+
+fn preview_scale(value: i64, width: i32, height: i32) i64 {
+    let x: i64 = preview_x(value, width);
+    let y: i64 = preview_y(value, height);
+    if (x < y) { return x; }
+    return y;
+}
+
+fn preview_type(token: SemanticTypeToken, width: i32, height: i32) i64 {
+    return preview_scale(semantic_type_size(token) / unit_scale(), width, height);
+}
+
+fn preview_radius(token: SemanticRadiusToken, width: i32, height: i32) i64 {
+    return preview_scale(semantic_radius(token) / unit_scale(), width, height);
+}
+
+fn preview_background_band_paint(band: i32) Paint {
+    // The banding is a deterministic CPU fallback for a future gradient op.
+    // Its endpoints are local effect variants of the semantic canvas token.
+    let canvas: Paint = semantic_color_paint(SemanticColorToken.canvas);
+    return paint_rgba16(canvas.red + 200 + (band as i64) * 45,
+        canvas.green + 400 + (band as i64) * 70,
+        canvas.blue + 1100 + (band as i64) * 125, 65535);
+}
+
+fn preview_navigation_name(index: i32) []u8 {
+    if (index == 1) { return "Components"; }
+    if (index == 2) { return "Motion"; }
+    if (index == 3) { return "Typography"; }
+    if (index == 4) { return "Talkback"; }
+    if (index == 5) { return "Settings"; }
+    return "Overview";
+}
+
+fn preview_chip_name(index: i32) []u8 {
+    if (index == 1) { return "Layout"; }
+    if (index == 2) { return "Motion"; }
+    if (index == 3) { return "Render"; }
+    return "State";
+}
+
+fn preview_category(index: i32) ShowcaseCategory {
+    return showcase_category_at(index);
+}
+
+fn preview_push_rect(list: *DisplayList, id: i64, bounds: Rect,
+    paint: Paint) i32 {
+    let op: DisplayOp = display_op(DisplayOpKind.fill_rect, node_key(id));
+    op.bounds = bounds;
+    op.paint = paint;
+    return (display_list_push(list, op) == DisplayError.none) as i32;
+}
+
+fn preview_push_stroke(list: *DisplayList, id: i64, bounds: Rect,
+    paint: Paint, width: i64) i32 {
+    let op: DisplayOp = display_op(DisplayOpKind.stroke_rect, node_key(id));
+    op.bounds = bounds;
+    op.paint = paint;
+    op.paint.stroke_width = width;
+    return (display_list_push(list, op) == DisplayError.none) as i32;
+}
+
+fn preview_add_path(list: *DisplayList, id: i64, path: *PathData,
+    paint: Paint) i32 {
+    if (path_seal(path) != PathError.none) { path_free(path); return 0; }
+    let encoded: PathEncodeResult = path_encode(path.*);
+    path_free(path);
+    let resource_error: RenderResourceError = display_list_add_resource(list,
+        render_resource_spec(id, RenderResourceKind.path,
+            encoded.bytes.data[0..encoded.bytes.len], path_resource_format_tag())
+    );
+    path_encode_free(&encoded);
+    if (resource_error != RenderResourceError.none) { return 0; }
+    let op: DisplayOp = display_op(DisplayOpKind.draw_path, node_key(id));
+    op.resource_id = id;
+    op.paint = paint;
+    return (display_list_push(list, op) == DisplayError.none) as i32;
+}
+
+fn preview_add_text(list: *DisplayList, face: OpenTypeFace, id_base: i64,
+    text: []u8, size: i64, x: i64, baseline: i64, paint: Paint) i32 {
+    let run: NominalGlyphRun = nominal_glyph_run_ltr(
+        face, text, size, x, baseline);
+    if (run.error != GlyphRunError.none) { nominal_glyph_run_free(&run); return 0; }
+    let glyph_index: i32 = 0;
+    while (glyph_index < run.glyphs.len) {
+        let glyph: PositionedGlyph = run.glyphs.data[glyph_index];
+        let outline: GlyphOutline = opentype_glyph_outline(face, glyph.glyph_id);
+        if (outline.error != OpenTypeError.none) {
+            opentype_glyph_outline_free(&outline); nominal_glyph_run_free(&run); return 0;
+        }
+        if (outline.points.len > 0) {
+            let glyph_path: GlyphPathResult = glyph_outline_to_path(outline,
+                face.units_per_em, run.font_size, glyph.origin_x, glyph.origin_y);
+            opentype_glyph_outline_free(&outline);
+            if (glyph_path.error != GlyphPathError.none) {
+                glyph_path_result_free(&glyph_path); nominal_glyph_run_free(&run); return 0;
+            }
+            let resource_id: i64 = id_base + glyph_index;
+            if (preview_add_path(list, resource_id, &glyph_path.path, paint) == 0) {
+                nominal_glyph_run_free(&run); return 0;
+            }
+        } else {
+            opentype_glyph_outline_free(&outline);
+        }
+        glyph_index = glyph_index + 1;
+    }
+    nominal_glyph_run_free(&run);
+    return 1;
+}
+
+fn preview_round_rect(list: *DisplayList, id: i64, x: i64, y: i64,
+    width: i64, height: i64, radius: i64, paint: Paint) i32 {
+    let r: i64 = radius;
+    if (r * 2 > width) { r = width / 2; }
+    if (r * 2 > height) { r = height / 2; }
+    let op: DisplayOp = display_op(DisplayOpKind.fill_rounded_rect, node_key(id));
+    op.bounds = rect(x, y, width, height);
+    op.parameter = r;
+    op.paint = paint;
+    return (display_list_push(list, op) == DisplayError.none) as i32;
+}
+
+fn preview_circle(list: *DisplayList, id: i64, center_x: i64,
+    center_y: i64, radius: i64, paint: Paint) i32 {
+    return preview_round_rect(list, id, center_x - radius, center_y - radius,
+        radius * 2, radius * 2, radius, paint);
+}
+
+fn preview_glass_panel(list: *DisplayList, id: i64, x: i64, y: i64,
+    width: i64, height: i64, radius: i64) void {
+    let elevation: ResolvedElevationToken = semantic_elevation(
+        SemanticElevationToken.panel);
+    // Ambient shadow: soft, larger offset.
+    let ambient_blur: i64 = elevation.ambient_shadow_blur;
+    _ = preview_round_rect(list, id,
+        x - ambient_blur, y + elevation.ambient_shadow_y,
+        width + ambient_blur * 2, height + ambient_blur * 2,
+        radius + ambient_blur,
+        semantic_color_with_alpha(SemanticColorToken.shadow,
+            elevation.ambient_shadow_alpha));
+    // Contact shadow: tight, small offset.
+    let contact_blur: i64 = elevation.contact_shadow_blur;
+    _ = preview_round_rect(list, id + 1,
+        x - contact_blur, y + elevation.contact_shadow_y,
+        width + contact_blur * 2, height + contact_blur * 2,
+        radius + contact_blur,
+        semantic_color_with_alpha(SemanticColorToken.shadow,
+            elevation.contact_shadow_alpha));
+    // Fill rect.
+    _ = preview_round_rect(list, id + 2, x, y, width, height, radius,
+        semantic_color_paint(SemanticColorToken.surface_base));
+    // Edge highlight: top edge hairline.
+    _ = preview_round_rect(list, id + 3, x + unit_scale(), y + unit_scale(),
+        width - 2 * unit_scale(), 2 * unit_scale(), radius,
+        semantic_color_with_alpha(SemanticColorToken.edge_highlight,
+            elevation.edge_highlight_alpha));
+}
+
+fn linux_preview_scene_internal(width: i32, height: i32,
+    face: OpenTypeFace, has_font: i32, selected_navigation: i32) DisplayList {
+    let list: DisplayList = display_list_make();
+    let full: Rect = rect(0, 0, (width as i64) * unit_scale(),
+        (height as i64) * unit_scale());
+    _ = preview_push_rect(&list, 1, full,
+        semantic_color_paint(SemanticColorToken.canvas));
+
+    // A deterministic deep-space gradient made of retained bands. It is not a
+    // shader approximation, so the CPU oracle remains the exact visual truth.
+    let band: i32 = 0;
+    while (band < 48) {
+        let y0: i64 = ((height as i64) * (band as i64)) / 48;
+        let y1: i64 = ((height as i64) * ((band + 1) as i64)) / 48;
+        _ = preview_push_rect(&list, 100 + band as i64,
+            rect(0, y0 * unit_scale(), (width as i64) * unit_scale(),
+                (y1 - y0 + 1) * unit_scale()),
+            preview_background_band_paint(band));
+        band = band + 1;
+    }
+
+    let glow_step: i32 = 0;
+    while (glow_step < 9) {
+        let radius: i64 = preview_x(210 - (glow_step as i64) * 17, width);
+        _ = preview_circle(&list, 300 + glow_step as i64,
+            preview_x(850, width), preview_y(122, height), radius,
+            semantic_color_with_alpha(SemanticColorToken.ambient_cool,
+                1700 + (glow_step as i64) * 900));
+        glow_step = glow_step + 1;
+    }
+    let warm_step: i32 = 0;
+    while (warm_step < 7) {
+        let radius: i64 = preview_x(160 - (warm_step as i64) * 18, width);
+        _ = preview_circle(&list, 330 + warm_step as i64,
+            preview_x(1035, width), preview_y(650, height), radius,
+            semantic_color_with_alpha(SemanticColorToken.ambient_warm,
+                1200 + (warm_step as i64) * 850));
+        warm_step = warm_step + 1;
+    }
+
+    preview_glass_panel(&list, 400,
+        preview_x(24, width), preview_y(20, height),
+        preview_x(1072, width), preview_y(64, height),
+        preview_radius(SemanticRadiusToken.card, width, height));
+    preview_glass_panel(&list, 410,
+        preview_x(24, width), preview_y(104, height),
+        preview_x(212, width), preview_y(592, height),
+        preview_radius(SemanticRadiusToken.panel, width, height));
+    preview_glass_panel(&list, 420,
+        preview_x(256, width), preview_y(104, height),
+        preview_x(548, width), preview_y(592, height),
+        preview_radius(SemanticRadiusToken.panel, width, height));
+    preview_glass_panel(&list, 430,
+        preview_x(824, width), preview_y(104, height),
+        preview_x(272, width), preview_y(592, height),
+        preview_radius(SemanticRadiusToken.panel, width, height));
+
+    // Brand mark and quiet title rhythm.
+    _ = preview_circle(&list, 500, preview_x(58, width), preview_y(52, height),
+        preview_x(15, width), semantic_color_paint(SemanticColorToken.accent));
+    _ = preview_circle(&list, 501, preview_x(62, width), preview_y(48, height),
+        preview_x(7, width), semantic_color_with_alpha(
+            SemanticColorToken.edge_highlight, 56000));
+    if (has_font == 0) {
+        _ = preview_round_rect(&list, 502, preview_x(88, width), preview_y(39, height),
+            preview_x(128, width), preview_y(12, height), preview_x(6, width),
+            semantic_color_paint(SemanticColorToken.text_primary));
+        _ = preview_round_rect(&list, 503, preview_x(88, width), preview_y(58, height),
+            preview_x(76, width), preview_y(7, height), preview_x(4, width),
+            semantic_color_paint(SemanticColorToken.text_secondary));
+    }
+    _ = preview_round_rect(&list, 504, preview_x(935, width), preview_y(36, height),
+        preview_x(132, width), preview_y(32, height), preview_x(16, width),
+        semantic_color_paint(SemanticColorToken.accent_emphasis));
+
+    // Left navigation: stable spacing, selected state, and aligned glyph marks.
+    let nav: i32 = 0;
+    while (nav < 6) {
+        let ny: i64 = preview_y(142 + (nav as i64) * 70, height);
+        if (nav == selected_navigation) {
+            _ = preview_round_rect(&list, 600 + nav as i64,
+                preview_x(42, width), ny - preview_y(13, height),
+                preview_x(176, width), preview_y(48, height), preview_x(15, width),
+                semantic_color_paint(SemanticColorToken.surface_selected));
+        }
+        let nav_mark_alpha: i64 = 42000;
+        if (nav == selected_navigation) { nav_mark_alpha = 65535; }
+        _ = preview_round_rect(&list, 620 + nav as i64,
+            preview_x(58, width), ny, preview_x(20, width), preview_y(20, height),
+            preview_x(7, width), semantic_color_with_alpha(
+                SemanticColorToken.accent, nav_mark_alpha));
+        if (has_font == 0) {
+            _ = preview_round_rect(&list, 640 + nav as i64,
+                preview_x(94, width), ny + preview_y(4, height),
+                preview_x(86 + ((nav % 3) as i64) * 18, width), preview_y(10, height),
+                preview_x(5, width), semantic_color_paint(
+                    SemanticColorToken.text_secondary));
+        }
+        nav = nav + 1;
+    }
+
+    // Main product card with a continuous path visualization.
+    _ = preview_round_rect(&list, 700, preview_x(284, width), preview_y(132, height),
+        preview_x(492, width), preview_y(72, height), preview_x(20, width),
+        semantic_color_paint(SemanticColorToken.surface_raised));
+    if (has_font == 0) {
+        _ = preview_round_rect(&list, 701, preview_x(310, width), preview_y(151, height),
+            preview_x(184, width), preview_y(14, height), preview_x(7, width),
+            semantic_color_paint(SemanticColorToken.text_primary));
+        _ = preview_round_rect(&list, 702, preview_x(310, width), preview_y(175, height),
+            preview_x(116, width), preview_y(8, height), preview_x(4, width),
+            semantic_color_paint(SemanticColorToken.text_secondary));
+    }
+    _ = preview_round_rect(&list, 703, preview_x(650, width), preview_y(148, height),
+        preview_x(98, width), preview_y(34, height), preview_x(17, width),
+        semantic_color_paint(SemanticColorToken.accent));
+
+    _ = preview_round_rect(&list, 710, preview_x(284, width), preview_y(224, height),
+        preview_x(492, width), preview_y(282, height), preview_x(22, width),
+        semantic_color_paint(SemanticColorToken.surface_inset));
+    let grid_line: i32 = 0;
+    while (grid_line < 8) {
+        _ = preview_push_rect(&list, 720 + grid_line as i64,
+            rect(preview_x(310 + (grid_line as i64) * 60, width), preview_y(246, height),
+                preview_x(1, width), preview_y(236, height)),
+            semantic_color_paint(SemanticColorToken.chart_grid));
+        grid_line = grid_line + 1;
+    }
+    let horizontal: i32 = 0;
+    while (horizontal < 5) {
+        _ = preview_push_rect(&list, 740 + horizontal as i64,
+            rect(preview_x(308, width), preview_y(258 + (horizontal as i64) * 48, height),
+                preview_x(442, width), preview_y(1, height)),
+            semantic_color_paint(SemanticColorToken.chart_grid));
+        horizontal = horizontal + 1;
+    }
+    // Explicit axes and a 16.7 ms frame-deadline reference distinguish this
+    // chart component from a decorative dot grid.
+    _ = preview_push_rect(&list, 750,
+        rect(preview_x(308, width), preview_y(246, height), preview_x(2, width),
+            preview_y(238, height)),
+        semantic_color_paint(SemanticColorToken.chart_axis));
+    _ = preview_push_rect(&list, 751,
+        rect(preview_x(308, width), preview_y(482, height), preview_x(442, width),
+            preview_y(2, height)),
+        semantic_color_paint(SemanticColorToken.chart_axis));
+    _ = preview_push_rect(&list, 752,
+        rect(preview_x(308, width), preview_y(354, height), preview_x(442, width),
+            preview_y(1, height)),
+        semantic_color_with_alpha(SemanticColorToken.border_emphasis, 30000));
+    let curve_point: i32 = 0;
+    while (curve_point < 24) {
+        let px: i64 = 320 + (curve_point as i64) * 17;
+        let phase: i64 = curve_point % 8;
+        let py: i64 = 390 - phase * 12 + ((curve_point / 8) as i64) * 15;
+        let series_color: SemanticColorToken = SemanticColorToken.chart_series_primary;
+        if (curve_point >= 8) {
+            series_color = SemanticColorToken.chart_series_secondary;
+        }
+        if (curve_point >= 16) {
+            series_color = SemanticColorToken.chart_series_tertiary;
+        }
+        _ = preview_circle(&list, 760 + curve_point as i64,
+            preview_x(px, width), preview_y(py, height), preview_x(5, width),
+            semantic_color_paint(series_color));
+        curve_point = curve_point + 1;
+    }
+    _ = preview_circle(&list, 790, preview_x(580, width), preview_y(252, height),
+        preview_x(4, width), semantic_color_paint(
+            SemanticColorToken.chart_series_primary));
+    _ = preview_circle(&list, 791, preview_x(644, width), preview_y(252, height),
+        preview_x(4, width), semantic_color_paint(
+            SemanticColorToken.chart_series_secondary));
+    _ = preview_circle(&list, 792, preview_x(702, width), preview_y(252, height),
+        preview_x(4, width), semantic_color_paint(
+            SemanticColorToken.chart_series_tertiary));
+
+    // Bottom action strip and right-side activity cards.
+    let chip: i32 = 0;
+    while (chip < 4) {
+        let chip_paint: Paint = semantic_color_paint(
+            SemanticColorToken.surface_interactive);
+        if (chip == 0) {
+            chip_paint = semantic_color_paint(SemanticColorToken.surface_selected);
+        } else if (chip == 3) {
+            chip_paint = semantic_color_with_alpha(
+                SemanticColorToken.surface_interactive, 32000);
+        }
+        _ = preview_round_rect(&list, 800 + chip as i64,
+            preview_x(284 + (chip as i64) * 124, width), preview_y(530, height),
+            preview_x(108, width), preview_y(42, height), preview_x(16, width),
+            chip_paint);
+        chip = chip + 1;
+    }
+    let activity: i32 = 0;
+    while (activity < 5) {
+        let ay: i64 = 138 + (activity as i64) * 96;
+        _ = preview_round_rect(&list, 840 + activity as i64,
+            preview_x(848, width), preview_y(ay, height),
+            preview_x(224, width), preview_y(74, height), preview_x(18, width),
+            semantic_color_paint(SemanticColorToken.surface_panel));
+        let category: ShowcaseCategory = preview_category(activity);
+        _ = preview_circle(&list, 860 + activity as i64,
+            preview_x(876, width), preview_y(ay + 27, height), preview_x(11, width),
+            semantic_color_paint(showcase_category_color(category)));
+        if (has_font == 0) {
+            _ = preview_round_rect(&list, 880 + activity as i64,
+                preview_x(900, width), preview_y(ay + 17, height),
+                preview_x(126, width), preview_y(10, height), preview_x(5, width),
+                semantic_color_paint(SemanticColorToken.text_primary));
+            _ = preview_round_rect(&list, 900 + activity as i64,
+                preview_x(900, width), preview_y(ay + 38, height),
+                preview_x(88, width), preview_y(7, height), preview_x(4, width),
+                semantic_color_paint(SemanticColorToken.text_secondary));
+        }
+        activity = activity + 1;
+    }
+
+    _ = preview_push_stroke(&list, 950,
+        rect(preview_x(24, width), preview_y(20, height),
+            preview_x(1072, width), preview_y(64, height)),
+        semantic_color_paint(SemanticColorToken.border_emphasis), unit_scale());
+    if (has_font != 0) {
+        let title_size: i64 = preview_type(SemanticTypeToken.title, width, height);
+        let body_size: i64 = preview_type(SemanticTypeToken.body, width, height);
+        let quiet: Paint = semantic_color_paint(SemanticColorToken.text_secondary);
+        let bright: Paint = semantic_color_paint(SemanticColorToken.text_primary);
+        _ = preview_add_text(&list, face, 10000, "Zagkit Studio", title_size,
+            preview_x(88, width), preview_y(61, height), bright);
+        _ = preview_add_text(&list, face, 10100, "Preview", body_size,
+            preview_x(968, width), preview_y(58, height), bright);
+        let nav_text: i32 = 0;
+        while (nav_text < 6) {
+            let nav_paint: Paint = quiet;
+            if (nav_text == selected_navigation) { nav_paint = bright; }
+            _ = preview_add_text(&list, face, 10200 + (nav_text as i64) * 100,
+                preview_navigation_name(nav_text), body_size,
+                preview_x(94, width), preview_y(158 + (nav_text as i64) * 70, height),
+                nav_paint);
+            nav_text = nav_text + 1;
+        }
+        _ = preview_add_text(&list, face, 10800, "Renderer performance",
+            preview_type(SemanticTypeToken.heading, width, height), preview_x(310, width),
+            preview_y(170, height), bright);
+        _ = preview_add_text(&list, face, 10900, "CPU oracle. Cold, warm, and resize samples.",
+            preview_type(SemanticTypeToken.code, width, height), preview_x(310, width),
+            preview_y(190, height), quiet);
+        _ = preview_add_text(&list, face, 11000, "Inspect",
+            preview_type(SemanticTypeToken.label, width, height), preview_x(670, width),
+            preview_y(171, height), bright);
+        let caption_size: i64 = preview_type(SemanticTypeToken.caption, width, height);
+        _ = preview_add_text(&list, face, 12000, "24 ms", caption_size,
+            preview_x(268, width), preview_y(262, height), quiet);
+        _ = preview_add_text(&list, face, 12100, "16.7", caption_size,
+            preview_x(270, width), preview_y(359, height), quiet);
+        _ = preview_add_text(&list, face, 12200, "0 ms", caption_size,
+            preview_x(274, width), preview_y(484, height), quiet);
+        _ = preview_add_text(&list, face, 12300, "sample", caption_size,
+            preview_x(704, width), preview_y(500, height), quiet);
+        _ = preview_add_text(&list, face, 12400, "cold", caption_size,
+            preview_x(588, width), preview_y(256, height), quiet);
+        _ = preview_add_text(&list, face, 12500, "warm", caption_size,
+            preview_x(652, width), preview_y(256, height), quiet);
+        _ = preview_add_text(&list, face, 12600, "resize", caption_size,
+            preview_x(710, width), preview_y(256, height), quiet);
+        let chip_text: i32 = 0;
+        while (chip_text < 4) {
+            let chip_text_paint: Paint = quiet;
+            if (chip_text == 0) { chip_text_paint = bright; }
+            else if (chip_text == 3) {
+                chip_text_paint = semantic_color_paint(
+                    SemanticColorToken.text_disabled);
+            }
+            _ = preview_add_text(&list, face, 11100 + (chip_text as i64) * 100,
+                preview_chip_name(chip_text),
+                preview_type(SemanticTypeToken.label, width, height),
+                preview_x(318 + (chip_text as i64) * 124, width),
+                preview_y(557, height), chip_text_paint);
+            chip_text = chip_text + 1;
+        }
+        let activity_text: i32 = 0;
+        _ = preview_add_text(&list, face, 11450, "SYSTEM STATUS",
+            caption_size, preview_x(848, width), preview_y(126, height), quiet);
+        while (activity_text < 5) {
+            let category: ShowcaseCategory = preview_category(activity_text);
+            _ = preview_add_text(&list, face, 11500 + (activity_text as i64) * 100,
+                showcase_category_name(category), body_size,
+                preview_x(900, width),
+                preview_y(169 + (activity_text as i64) * 96, height), bright);
+            _ = preview_add_text(&list, face, 13000 + (activity_text as i64) * 100,
+                showcase_category_value(category), caption_size,
+                preview_x(900, width),
+                preview_y(190 + (activity_text as i64) * 96, height), quiet);
+            activity_text = activity_text + 1;
+        }
+    }
+    _ = display_list_seal(&list);
+    return list;
+}
+
+fn linux_preview_scene(width: i32, height: i32) DisplayList {
+    let empty: OpenTypeFace = opentype_face_empty();
+    let list: DisplayList = linux_preview_scene_internal(width, height, empty, 0, 1);
+    opentype_face_free(&empty);
+    return list;
+}
+
+fn linux_preview_scene_with_font(width: i32, height: i32,
+    face: OpenTypeFace) DisplayList {
+    return linux_preview_scene_internal(width, height, face, 1, 1);
+}
+
+fn linux_preview_scene_with_font_state(width: i32, height: i32,
+    face: OpenTypeFace, selected_navigation: i32) DisplayList {
+    return linux_preview_scene_internal(width, height, face, 1, selected_navigation);
+}

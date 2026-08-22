@@ -1,0 +1,1164 @@
+@import("std:list")
+@import("../core/geometry.zag")
+@import("../core/view_contract.zag")
+@import("../design/tokens.zag")
+@import("../input/hit_test.zag")
+@import("../layout/adaptive.zag")
+@import("../render/display_list.zag")
+@import("../semantics/semantics.zag")
+
+// SegmentedControl is one retained single-selection group. The application owns
+// SegmentedControlModel; events flow through segmented_control_reduce and the
+// resulting model flows back into emission. Options are caller-owned for the
+// duration of segmented_control_emit and are never retained by the component.
+// Roving tab-stop position, semantic focus ownership, and focus-ring modality
+// are separate model facts; construction never fabricates native focus.
+
+fn segmented_control_no_index() i32 { return 0 - 1; }
+fn segmented_control_maximum_segments() i32 { return 12; }
+fn segmented_control_label_byte_limit() i32 { return 4096; }
+fn segmented_control_description_byte_limit() i32 { return 16384; }
+
+enum SegmentedControlEventKind {
+    pointer_enter,
+    pointer_leave,
+    pointer_down,
+    pointer_up_inside,
+    pointer_cancel,
+    focus_target,
+    focus_lost,
+    key_previous,
+    key_next,
+    key_home,
+    key_end,
+    activate_focused,
+    select_target,
+    disable_target,
+    enable_target,
+}
+
+enum SegmentedControlPurpose { view_switcher, value_picker }
+
+enum SegmentedControlBuildError {
+    none,
+    invalid_spec,
+    capacity_error,
+    display_error,
+    hit_error,
+    semantics_error,
+}
+
+enum SegmentedControlCapacityError {
+    none,
+    display_operations,
+    hit_nodes,
+    semantic_nodes,
+}
+
+struct SegmentedControlOption {
+    id: NodeKey,
+    label: []u8,
+    description: []u8,
+}
+
+struct SegmentedControlModel {
+    segment_count: i32,
+    selected_index: i32,
+    roving_index: i32,
+    has_focus: i32,
+    focus_visible: i32,
+    hovered_index: i32,
+    pressed_index: i32,
+    enabled_mask: i64,
+}
+
+struct SegmentedControlEvent {
+    kind: SegmentedControlEventKind,
+    target_index: i32,
+}
+
+struct SegmentedControlTransition {
+    model: SegmentedControlModel,
+    previous_selected_index: i32,
+    selected_index: i32,
+    selection_changed: i32,
+    roving_changed: i32,
+    focus_changed: i32,
+    activated: i32,
+    rejected: i32,
+}
+
+struct SegmentedControlBuildLimits {
+    display_operations: i32,
+    hit_nodes: i32,
+    semantic_nodes: i32,
+}
+
+struct SegmentedControlBuildBudget {
+    limits: SegmentedControlBuildLimits,
+    display_operations: i32,
+    hit_nodes: i32,
+    semantic_nodes: i32,
+}
+
+struct SegmentedControlSpec {
+    id: NodeKey,
+    parent: NodeKey,
+    bounds: Rect,
+    name: []u8,
+    description: []u8,
+    focus_order_base: i64,
+    z_order: i64,
+    density: FlexDensity,
+    purpose: SegmentedControlPurpose,
+    model: SegmentedControlModel,
+    limits: SegmentedControlBuildLimits,
+}
+
+struct SegmentedControlResolvedStyle {
+    fill_token: SemanticColorToken,
+    border_token: SemanticColorToken,
+    label_color_token: SemanticColorToken,
+    focus_token: SemanticColorToken,
+    marker_token: SemanticColorToken,
+    fill_alpha: i64,
+    border_alpha: i64,
+    radius: i64,
+    elevation: SemanticElevationToken,
+    selected: i32,
+    hovered: i32,
+    focused: i32,
+    has_focus: i32,
+    focus_visible: i32,
+    pressed: i32,
+    disabled: i32,
+}
+
+struct SegmentedControlArtifact {
+    id: NodeKey,
+    bounds: Rect,
+    segment_count: i32,
+    selected_index: i32,
+    selected_id: NodeKey,
+    selected_bounds: Rect,
+    roving_index: i32,
+    has_focus: i32,
+    focus_visible: i32,
+    selected_marker_visible: i32,
+    rail_fill_token: SemanticColorToken,
+    rail_border_token: SemanticColorToken,
+    rail_radius_token: SemanticRadiusToken,
+    rail_elevation_token: SemanticElevationToken,
+    label_type_token: SemanticTypeToken,
+    purpose: SegmentedControlPurpose,
+    group_role: SemanticRole,
+    display_op_start: i32,
+    display_op_end: i32,
+    group_hit_node_index: i32,
+    group_semantics_node_index: i32,
+    evidence_hash: i64,
+}
+
+struct SegmentedControlBuildResult {
+    artifact: SegmentedControlArtifact,
+    error: SegmentedControlBuildError,
+    capacity_error: SegmentedControlCapacityError,
+    display_error: DisplayError,
+    hit_error: HitTreeError,
+    semantics_error: SemanticsError,
+}
+
+struct SegmentedControlCheckpoint {
+    display_length: i32,
+    display_revision: i64,
+    display_hash: i64,
+    display_last_error: DisplayError,
+    display_error_index: i32,
+    hit_length: i32,
+    hit_revision: i64,
+    hit_last_error: HitTreeError,
+    hit_error_node: NodeKey,
+    semantics: SemanticsCheckpoint,
+}
+
+fn segmented_control_bit(index: i32) i64 {
+    return (1 as i64) << index;
+}
+
+fn segmented_control_index_in_range(model: SegmentedControlModel,
+    index: i32) i32 {
+    return (index >= 0 && index < model.segment_count) as i32;
+}
+
+fn segmented_control_index_enabled(model: SegmentedControlModel,
+    index: i32) i32 {
+    if (segmented_control_index_in_range(model, index) == 0) { return 0; }
+    return ((model.enabled_mask & segmented_control_bit(index)) != 0) as i32;
+}
+
+fn segmented_control_all_enabled_mask(segment_count: i32) i64 {
+    let mask: i64 = 0;
+    let index: i32 = 0;
+    while (index < segment_count && index < segmented_control_maximum_segments()) {
+        mask = mask | segmented_control_bit(index);
+        index = index + 1;
+    }
+    return mask;
+}
+
+fn segmented_control_model(segment_count: i32,
+    selected_index: i32) SegmentedControlModel {
+    return SegmentedControlModel{
+        .segment_count = segment_count,
+        .selected_index = selected_index,
+        .roving_index = selected_index,
+        .has_focus = 0,
+        .focus_visible = 0,
+        .hovered_index = segmented_control_no_index(),
+        .pressed_index = segmented_control_no_index(),
+        .enabled_mask = segmented_control_all_enabled_mask(segment_count),
+    };
+}
+
+fn segmented_control_model_valid(model: SegmentedControlModel) i32 {
+    if (model.segment_count < 2 ||
+        model.segment_count > segmented_control_maximum_segments()) { return 0; }
+    let allowed: i64 = segmented_control_all_enabled_mask(model.segment_count);
+    if (model.enabled_mask <= 0 || (model.enabled_mask & (0 - 1 - allowed)) != 0 ||
+        segmented_control_index_enabled(model, model.selected_index) == 0) { return 0; }
+    if (segmented_control_index_enabled(model, model.roving_index) == 0 ||
+        (model.has_focus != 0 && model.has_focus != 1) ||
+        (model.focus_visible != 0 && model.focus_visible != 1) ||
+        (model.focus_visible != 0 && model.has_focus == 0)) { return 0; }
+    if (model.hovered_index != segmented_control_no_index() &&
+        segmented_control_index_enabled(model, model.hovered_index) == 0) { return 0; }
+    if (model.pressed_index != segmented_control_no_index() &&
+        segmented_control_index_enabled(model, model.pressed_index) == 0) { return 0; }
+    return 1;
+}
+
+fn segmented_control_event(kind: SegmentedControlEventKind,
+    target_index: i32) SegmentedControlEvent {
+    return SegmentedControlEvent{ .kind = kind, .target_index = target_index };
+}
+
+fn segmented_control_event_uses_target(kind: SegmentedControlEventKind) i32 {
+    return switch (kind) {
+        .pointer_enter => 1, .pointer_leave => 1, .pointer_down => 1,
+        .pointer_up_inside => 1, .focus_target => 1, .focus_lost => 1,
+        .select_target => 1, .disable_target => 1, .enable_target => 1,
+        .pointer_cancel => 0, .key_previous => 0, .key_next => 0,
+        .key_home => 0, .key_end => 0, .activate_focused => 0,
+    };
+}
+
+fn segmented_control_next_enabled(model: SegmentedControlModel,
+    start: i32, direction: i32) i32 {
+    let current: i32 = start;
+    if (current < 0 || current >= model.segment_count) {
+        current = model.selected_index;
+    }
+    let attempt: i32 = 0;
+    while (attempt < model.segment_count) {
+        current = current + direction;
+        if (current < 0) { current = model.segment_count - 1; }
+        if (current >= model.segment_count) { current = 0; }
+        if (segmented_control_index_enabled(model, current) != 0) {
+            return current;
+        }
+        attempt = attempt + 1;
+    }
+    return segmented_control_no_index();
+}
+
+fn segmented_control_edge_enabled(model: SegmentedControlModel,
+    from_end: i32) i32 {
+    let index: i32 = 0;
+    let direction: i32 = 1;
+    if (from_end != 0) {
+        index = model.segment_count - 1;
+        direction = 0 - 1;
+    }
+    let attempt: i32 = 0;
+    while (attempt < model.segment_count) {
+        if (segmented_control_index_enabled(model, index) != 0) { return index; }
+        index = index + direction;
+        attempt = attempt + 1;
+    }
+    return segmented_control_no_index();
+}
+
+fn segmented_control_transition(model: SegmentedControlModel)
+    SegmentedControlTransition {
+    return SegmentedControlTransition{
+        .model = model,
+        .previous_selected_index = model.selected_index,
+        .selected_index = model.selected_index,
+        .selection_changed = 0,
+        .roving_changed = 0,
+        .focus_changed = 0,
+        .activated = 0,
+        .rejected = 0,
+    };
+}
+
+fn segmented_control_select(transition:  *SegmentedControlTransition,
+    index: i32, activate: i32) void {
+    if (segmented_control_index_enabled(transition.*.model, index) == 0) {
+        transition.*.rejected = 1;
+        return;
+    }
+    if (transition.*.model.selected_index != index) {
+        transition.*.model.selected_index = index;
+        transition.*.selection_changed = 1;
+    }
+    if (transition.*.model.roving_index != index) {
+        transition.*.model.roving_index = index;
+        transition.*.roving_changed = 1;
+    }
+    if (activate != 0) { transition.*.activated = 1; }
+}
+
+fn segmented_control_set_focus(
+    transition:  *SegmentedControlTransition,
+    has_focus: i32, focus_visible: i32) void {
+    if (transition.*.model.has_focus != has_focus ||
+        transition.*.model.focus_visible != focus_visible) {
+        transition.*.focus_changed = 1;
+    }
+    transition.*.model.has_focus = has_focus;
+    transition.*.model.focus_visible = focus_visible;
+}
+
+fn segmented_control_reduce(current: SegmentedControlModel,
+    event: SegmentedControlEvent) SegmentedControlTransition {
+    let result: SegmentedControlTransition = segmented_control_transition(current);
+    if (segmented_control_model_valid(current) == 0) {
+        result.rejected = 1;
+        return result;
+    }
+    if (segmented_control_event_uses_target(event.kind) != 0 &&
+        segmented_control_index_in_range(current, event.target_index) == 0) {
+        result.rejected = 1;
+        return result;
+    }
+
+    switch (event.kind) {
+        .pointer_enter => {
+            if (segmented_control_index_enabled(current, event.target_index) != 0) {
+                result.model.hovered_index = event.target_index;
+            } else { result.rejected = 1; }
+        }
+        .pointer_leave => {
+            if (result.model.hovered_index == event.target_index) {
+                result.model.hovered_index = segmented_control_no_index();
+            }
+            if (result.model.pressed_index == event.target_index) {
+                result.model.pressed_index = segmented_control_no_index();
+            }
+        }
+        .pointer_down => {
+            if (segmented_control_index_enabled(current, event.target_index) != 0) {
+                result.model.pressed_index = event.target_index;
+                if (result.model.roving_index != event.target_index) {
+                    result.model.roving_index = event.target_index;
+                    result.roving_changed = 1;
+                }
+                segmented_control_set_focus(&result, 1, 0);
+            } else { result.rejected = 1; }
+        }
+        .pointer_up_inside => {
+            if (current.pressed_index == event.target_index &&
+                segmented_control_index_enabled(current, event.target_index) != 0) {
+                segmented_control_select(&result, event.target_index, 1);
+            } else { result.rejected = 1; }
+            result.model.pressed_index = segmented_control_no_index();
+        }
+        .pointer_cancel => {
+            result.model.pressed_index = segmented_control_no_index();
+        }
+        .focus_target => {
+            if (segmented_control_index_enabled(current, event.target_index) != 0) {
+                if (result.model.roving_index != event.target_index) {
+                    result.model.roving_index = event.target_index;
+                    result.roving_changed = 1;
+                }
+                segmented_control_set_focus(&result, 1, 1);
+            } else { result.rejected = 1; }
+        }
+        .focus_lost => {
+            if (result.model.roving_index == event.target_index) {
+                segmented_control_set_focus(&result, 0, 0);
+            }
+            result.model.pressed_index = segmented_control_no_index();
+        }
+        .key_previous => {
+            let origin: i32 = current.roving_index;
+            if (current.has_focus == 0) { origin = current.selected_index; }
+            let previous: i32 = segmented_control_next_enabled(current,
+                origin, 0 - 1);
+            segmented_control_select(&result, previous, 1);
+            segmented_control_set_focus(&result, 1, 1);
+        }
+        .key_next => {
+            let origin: i32 = current.roving_index;
+            if (current.has_focus == 0) { origin = current.selected_index; }
+            let next: i32 = segmented_control_next_enabled(current,
+                origin, 1);
+            segmented_control_select(&result, next, 1);
+            segmented_control_set_focus(&result, 1, 1);
+        }
+        .key_home => {
+            segmented_control_select(&result,
+                segmented_control_edge_enabled(current, 0), 1);
+            segmented_control_set_focus(&result, 1, 1);
+        }
+        .key_end => {
+            segmented_control_select(&result,
+                segmented_control_edge_enabled(current, 1), 1);
+            segmented_control_set_focus(&result, 1, 1);
+        }
+        .activate_focused => {
+            let target: i32 = current.roving_index;
+            if (current.has_focus == 0) { target = current.selected_index; }
+            segmented_control_select(&result, target, 1);
+            segmented_control_set_focus(&result, 1, 1);
+        }
+        .select_target => {
+            segmented_control_select(&result, event.target_index, 1);
+        }
+        .disable_target => {
+            if (segmented_control_index_enabled(current, event.target_index) == 0 ||
+                current.enabled_mask == segmented_control_bit(event.target_index)) {
+                result.rejected = 1;
+            } else {
+                result.model.enabled_mask = result.model.enabled_mask &
+                    (0 - 1 - segmented_control_bit(event.target_index));
+                if (result.model.hovered_index == event.target_index) {
+                    result.model.hovered_index = segmented_control_no_index();
+                }
+                if (result.model.pressed_index == event.target_index) {
+                    result.model.pressed_index = segmented_control_no_index();
+                }
+                if (result.model.selected_index == event.target_index) {
+                    let replacement: i32 = segmented_control_next_enabled(
+                        result.model, event.target_index, 1);
+                    segmented_control_select(&result, replacement, 0);
+                } else if (result.model.roving_index == event.target_index) {
+                    result.model.roving_index = result.model.selected_index;
+                    result.roving_changed = 1;
+                }
+            }
+        }
+        .enable_target => {
+            if (segmented_control_index_enabled(current, event.target_index) != 0) {
+                result.rejected = 1;
+            } else {
+                result.model.enabled_mask = result.model.enabled_mask |
+                    segmented_control_bit(event.target_index);
+            }
+        }
+    }
+    result.selected_index = result.model.selected_index;
+    return result;
+}
+
+fn segmented_control_build_limits() SegmentedControlBuildLimits {
+    return SegmentedControlBuildLimits{
+        .display_operations = 128,
+        .hit_nodes = segmented_control_maximum_segments() + 1,
+        .semantic_nodes = segmented_control_maximum_segments() + 1,
+    };
+}
+
+// Convenience constructor for static/literal group text. Dynamic borrowed text
+// stays in a caller-scoped SegmentedControlSpec literal until Zag has an
+// explicit returned-borrow relation distinct from call-duration @borrows.
+fn segmented_control_spec(id: NodeKey, parent: NodeKey, bounds: Rect,
+    name: []u8, model: SegmentedControlModel) SegmentedControlSpec {
+    return SegmentedControlSpec{
+        .id = id,
+        .parent = parent,
+        .bounds = bounds,
+        .name = name,
+        .description = "Single-selection segmented control",
+        .focus_order_base = 1,
+        .z_order = 0,
+        .density = FlexDensity.standard,
+        .purpose = SegmentedControlPurpose.view_switcher,
+        .model = model,
+        .limits = segmented_control_build_limits(),
+    };
+}
+
+fn segmented_control_density_valid(density: FlexDensity) i32 {
+    let value: i64 = density as i64;
+    return (value >= FlexDensity.compact as i64 &&
+        value <= FlexDensity.touch as i64) as i32;
+}
+
+fn segmented_control_purpose_valid(purpose: SegmentedControlPurpose) i32 {
+    let value: i64 = purpose as i64;
+    return (value >= SegmentedControlPurpose.view_switcher as i64 &&
+        value <= SegmentedControlPurpose.value_picker as i64) as i32;
+}
+
+fn segmented_control_option_role(
+    spec:  SegmentedControlSpec) SemanticRole {
+    if (spec.purpose == SegmentedControlPurpose.value_picker) {
+        return SemanticRole.radio;
+    }
+    return SemanticRole.tab;
+}
+
+fn segmented_control_group_role(
+    spec:  SegmentedControlSpec) SemanticRole {
+    if (spec.purpose == SegmentedControlPurpose.value_picker) {
+        return SemanticRole.radio_group;
+    }
+    return SemanticRole.tab_list;
+}
+
+fn segmented_control_padding(density: FlexDensity) i64 {
+    return flex_spacing(FlexSpacingToken.micro, density);
+}
+
+fn segmented_control_gap(density: FlexDensity) i64 {
+    return flex_spacing(FlexSpacingToken.micro, density);
+}
+
+fn segmented_control_minimum_target() i64 { return 44 * unit_scale(); }
+
+fn segmented_control_minimum_width(model: SegmentedControlModel,
+    density: FlexDensity) i64 {
+    return segmented_control_padding(density) * 2 +
+        segmented_control_minimum_target() * model.segment_count as i64 +
+        segmented_control_gap(density) * (model.segment_count - 1) as i64;
+}
+
+fn segmented_control_minimum_height(density: FlexDensity) i64 {
+    return segmented_control_minimum_target() +
+        segmented_control_padding(density) * 2;
+}
+
+fn segmented_control_segment_bounds(spec:  SegmentedControlSpec,
+    index: i32) Rect {
+    if (segmented_control_index_in_range(spec.model, index) == 0) {
+        return rect(0, 0, 0, 0);
+    }
+    let padding: i64 = segmented_control_padding(spec.density);
+    let gap: i64 = segmented_control_gap(spec.density);
+    let available: i64 = spec.bounds.width - padding * 2 -
+        gap * (spec.model.segment_count - 1) as i64;
+    let base: i64 = available / spec.model.segment_count as i64;
+    let remainder: i64 = available % spec.model.segment_count as i64;
+    let extra_before: i64 = index as i64;
+    if (extra_before > remainder) { extra_before = remainder; }
+    let width: i64 = base;
+    if (index as i64 < remainder) { width = width + 1; }
+    return rect(spec.bounds.x + padding +
+            index as i64 * (base + gap) + extra_before,
+        spec.bounds.y + padding, width, spec.bounds.height - padding * 2);
+}
+
+fn segmented_control_content_bounds(spec:  SegmentedControlSpec,
+    index: i32) Rect {
+    let bounds: Rect = segmented_control_segment_bounds(spec, index);
+    if (bounds.width <= 0 || bounds.height <= 0) { return bounds; }
+    let horizontal: i64 = flex_spacing(FlexSpacingToken.large, spec.density);
+    let vertical: i64 = flex_spacing(FlexSpacingToken.small, spec.density);
+    return rect(bounds.x + horizontal, bounds.y + vertical,
+        bounds.width - horizontal * 2, bounds.height - vertical * 2);
+}
+
+fn segmented_control_style(spec:  SegmentedControlSpec,
+    index: i32) SegmentedControlResolvedStyle {
+    let selected: i32 = (spec.model.selected_index == index) as i32;
+    let hovered: i32 = (spec.model.hovered_index == index) as i32;
+    let has_focus: i32 = (spec.model.has_focus != 0 &&
+        spec.model.roving_index == index) as i32;
+    let focus_visible: i32 = (has_focus != 0 &&
+        spec.model.focus_visible != 0) as i32;
+    let focused: i32 = focus_visible;
+    let pressed: i32 = (spec.model.pressed_index == index) as i32;
+    let disabled: i32 = (segmented_control_index_enabled(spec.model, index) == 0) as i32;
+    let style: SegmentedControlResolvedStyle = SegmentedControlResolvedStyle{
+        .fill_token = SemanticColorToken.surface_base,
+        .border_token = SemanticColorToken.border_subtle,
+        .label_color_token = SemanticColorToken.text_primary,
+        .focus_token = SemanticColorToken.focus,
+        .marker_token = SemanticColorToken.accent,
+        .fill_alpha = 9000,
+        .border_alpha = 7000,
+        .radius = semantic_radius(SemanticRadiusToken.control) -
+            segmented_control_padding(spec.density),
+        .elevation = SemanticElevationToken.base,
+        .selected = selected,
+        .hovered = hovered,
+        .focused = focused,
+        .has_focus = has_focus,
+        .focus_visible = focus_visible,
+        .pressed = pressed,
+        .disabled = disabled,
+    };
+    if (hovered != 0) {
+        style.fill_token = SemanticColorToken.surface_interactive;
+        style.fill_alpha = 40000;
+        style.border_alpha = 15000;
+    }
+    if (selected != 0) {
+        style.fill_token = SemanticColorToken.surface_selected;
+        style.border_token = SemanticColorToken.border_emphasis;
+        style.fill_alpha = 52000;
+        style.border_alpha = 22000;
+        style.elevation = SemanticElevationToken.panel;
+    }
+    if (pressed != 0) {
+        style.fill_token = SemanticColorToken.accent_emphasis;
+        style.border_token = SemanticColorToken.accent;
+        style.fill_alpha = 50000;
+        style.border_alpha = 30000;
+        style.elevation = SemanticElevationToken.base;
+    }
+    if (focused != 0 && disabled == 0) {
+        style.border_token = style.focus_token;
+        style.border_alpha = 65535;
+    }
+    if (disabled != 0) {
+        style.fill_token = SemanticColorToken.surface_inset;
+        style.border_token = SemanticColorToken.border_subtle;
+        style.label_color_token = SemanticColorToken.text_disabled;
+        style.fill_alpha = 6000;
+        style.border_alpha = 4000;
+        style.elevation = SemanticElevationToken.base;
+    }
+    return style;
+}
+
+fn segmented_control_options_valid(spec:  SegmentedControlSpec,
+    options:  *ArrayList[SegmentedControlOption]) i32 {
+    if (options.*.len != spec.model.segment_count) { return 0; }
+    let index: i32 = 0;
+    while (index < options.*.len) {
+        let option: SegmentedControlOption = options.*.data[index];
+        if (node_key_equal(option.id, spec.id) != 0 ||
+            node_key_equal(option.id, hit_root_key()) != 0 ||
+            node_key_equal(option.id, semantic_none_key()) != 0 ||
+            option.label.len <= 0 ||
+            option.label.len > segmented_control_label_byte_limit() ||
+            option.description.len > segmented_control_description_byte_limit() ||
+            semantic_text_input_valid(option.label) == 0 ||
+            semantic_text_input_valid(option.description) == 0) { return 0; }
+        let previous: i32 = 0;
+        while (previous < index) {
+            if (node_key_equal(options.*.data[previous].id, option.id) != 0) {
+                return 0;
+            }
+            previous = previous + 1;
+        }
+        index = index + 1;
+    }
+    return 1;
+}
+
+fn segmented_control_spec_valid(spec:  SegmentedControlSpec,
+    options:  *ArrayList[SegmentedControlOption]) i32 {
+    if (node_key_equal(spec.id, hit_root_key()) != 0 ||
+        node_key_equal(spec.id, semantic_none_key()) != 0 ||
+        spec.name.len <= 0 ||
+        spec.name.len > segmented_control_label_byte_limit() ||
+        spec.description.len > segmented_control_description_byte_limit() ||
+        semantic_text_input_valid(spec.name) == 0 ||
+        semantic_text_input_valid(spec.description) == 0 ||
+        segmented_control_model_valid(spec.model) == 0 ||
+        segmented_control_density_valid(spec.density) == 0 ||
+        segmented_control_purpose_valid(spec.purpose) == 0 ||
+        hit_geometry_valid(spec.bounds) == 0 ||
+        spec.bounds.width < segmented_control_minimum_width(spec.model, spec.density) ||
+        spec.bounds.height < segmented_control_minimum_height(spec.density) ||
+        spec.focus_order_base <= 0 ||
+        spec.focus_order_base > 1000000000 ||
+        spec.z_order < 0 ||
+        spec.z_order > 1000000000 - spec.model.segment_count as i64 ||
+        spec.limits.display_operations < 0 ||
+        spec.limits.hit_nodes < 0 || spec.limits.semantic_nodes < 0 ||
+        segmented_control_options_valid(spec, options) == 0) { return 0; }
+    return 1;
+}
+
+fn segmented_control_empty_artifact(spec:  SegmentedControlSpec)
+    SegmentedControlArtifact {
+    return SegmentedControlArtifact{
+        .id = spec.id,
+        .bounds = spec.bounds,
+        .segment_count = spec.model.segment_count,
+        .selected_index = spec.model.selected_index,
+        .selected_id = semantic_none_key(),
+        .selected_bounds = rect(0, 0, 0, 0),
+        .roving_index = spec.model.roving_index,
+        .has_focus = spec.model.has_focus,
+        .focus_visible = spec.model.focus_visible,
+        .selected_marker_visible = 0,
+        .rail_fill_token = SemanticColorToken.surface_inset,
+        .rail_border_token = SemanticColorToken.border_subtle,
+        .rail_radius_token = SemanticRadiusToken.control,
+        .rail_elevation_token = SemanticElevationToken.base,
+        .label_type_token = SemanticTypeToken.label,
+        .purpose = spec.purpose,
+        .group_role = segmented_control_group_role(spec),
+        .display_op_start = segmented_control_no_index(),
+        .display_op_end = segmented_control_no_index(),
+        .group_hit_node_index = segmented_control_no_index(),
+        .group_semantics_node_index = segmented_control_no_index(),
+        .evidence_hash = 0,
+    };
+}
+
+fn segmented_control_build_result(spec:  SegmentedControlSpec,
+    error: SegmentedControlBuildError) SegmentedControlBuildResult {
+    return SegmentedControlBuildResult{
+        .artifact = segmented_control_empty_artifact(spec),
+        .error = error,
+        .capacity_error = SegmentedControlCapacityError.none,
+        .display_error = DisplayError.none,
+        .hit_error = HitTreeError.none,
+        .semantics_error = SemanticsError.none,
+    };
+}
+
+fn segmented_control_checkpoint(display:  *DisplayList,
+    hits:  *HitTree,
+    semantics:  *SemanticsTree) SegmentedControlCheckpoint {
+    return SegmentedControlCheckpoint{
+        .display_length = display.*.ops.len,
+        .display_revision = display.*.revision,
+        .display_hash = display.*.content_hash,
+        .display_last_error = display.*.last_error,
+        .display_error_index = display.*.error_index,
+        .hit_length = hits.*.nodes.len,
+        .hit_revision = hits.*.revision,
+        .hit_last_error = hits.*.last_error,
+        .hit_error_node = hits.*.error_node,
+        .semantics = semantics_tree_checkpoint(semantics),
+    };
+}
+
+fn segmented_control_rollback(display:  *DisplayList,
+    hits:  *HitTree,
+    semantics:  *SemanticsTree,
+    checkpoint: SegmentedControlCheckpoint) void {
+    display.*.ops.len = checkpoint.display_length;
+    display.*.revision = checkpoint.display_revision;
+    display.*.content_hash = checkpoint.display_hash;
+    display.*.last_error = checkpoint.display_last_error;
+    display.*.error_index = checkpoint.display_error_index;
+    hits.*.nodes.len = checkpoint.hit_length;
+    hits.*.revision = checkpoint.hit_revision;
+    hits.*.last_error = checkpoint.hit_last_error;
+    hits.*.error_node = checkpoint.hit_error_node;
+    _ = semantics_tree_rollback(semantics, checkpoint.semantics);
+}
+
+fn segmented_control_budget(limits: SegmentedControlBuildLimits)
+    SegmentedControlBuildBudget {
+    return SegmentedControlBuildBudget{
+        .limits = limits,
+        .display_operations = 0,
+        .hit_nodes = 0,
+        .semantic_nodes = 0,
+    };
+}
+
+fn segmented_control_take_display(
+    budget:  *SegmentedControlBuildBudget) i32 {
+    if (budget.*.display_operations >= budget.*.limits.display_operations) {
+        return 0;
+    }
+    budget.*.display_operations = budget.*.display_operations + 1;
+    return 1;
+}
+
+fn segmented_control_take_hit(
+    budget:  *SegmentedControlBuildBudget) i32 {
+    if (budget.*.hit_nodes >= budget.*.limits.hit_nodes) { return 0; }
+    budget.*.hit_nodes = budget.*.hit_nodes + 1;
+    return 1;
+}
+
+fn segmented_control_take_semantic(
+    budget:  *SegmentedControlBuildBudget) i32 {
+    if (budget.*.semantic_nodes >= budget.*.limits.semantic_nodes) { return 0; }
+    budget.*.semantic_nodes = budget.*.semantic_nodes + 1;
+    return 1;
+}
+
+fn segmented_control_push_round(spec:  SegmentedControlSpec,
+    display:  *DisplayList,
+    budget:  *SegmentedControlBuildBudget,
+    owner: NodeKey, bounds: Rect, radius: i64,
+    paint: Paint) SegmentedControlBuildResult {
+    let result: SegmentedControlBuildResult = segmented_control_build_result(
+        spec, SegmentedControlBuildError.none);
+    if (segmented_control_take_display(budget) == 0) {
+        result.error = SegmentedControlBuildError.capacity_error;
+        result.capacity_error = SegmentedControlCapacityError.display_operations;
+        return result;
+    }
+    let op: DisplayOp = display_op(DisplayOpKind.fill_rounded_rect, owner);
+    op.bounds = bounds;
+    op.parameter = radius;
+    op.paint = paint;
+    let error: DisplayError = display_list_push(display, op);
+    if (error != DisplayError.none) {
+        result.error = SegmentedControlBuildError.display_error;
+        result.display_error = error;
+    }
+    return result;
+}
+
+fn segmented_control_push_rect(spec:  SegmentedControlSpec,
+    display:  *DisplayList,
+    budget:  *SegmentedControlBuildBudget,
+    owner: NodeKey, bounds: Rect,
+    paint: Paint) SegmentedControlBuildResult {
+    let result: SegmentedControlBuildResult = segmented_control_build_result(
+        spec, SegmentedControlBuildError.none);
+    if (segmented_control_take_display(budget) == 0) {
+        result.error = SegmentedControlBuildError.capacity_error;
+        result.capacity_error = SegmentedControlCapacityError.display_operations;
+        return result;
+    }
+    let op: DisplayOp = display_op(DisplayOpKind.fill_rect, owner);
+    op.bounds = bounds;
+    op.paint = paint;
+    let error: DisplayError = display_list_push(display, op);
+    if (error != DisplayError.none) {
+        result.error = SegmentedControlBuildError.display_error;
+        result.display_error = error;
+    }
+    return result;
+}
+
+fn segmented_control_mix(hash: i64, value: i64) i64 {
+    return (hash * 1099511628211) ^ value;
+}
+
+fn segmented_control_text_hash(hash: i64, text:  []u8) i64 {
+    let result: i64 = segmented_control_mix(hash, text.len as i64);
+    let index: i32 = 0;
+    while (index < text.len) {
+        result = segmented_control_mix(result, text[index] as i64);
+        index = index + 1;
+    }
+    return result;
+}
+
+fn segmented_control_evidence_hash(spec:  SegmentedControlSpec,
+    options:  *ArrayList[SegmentedControlOption],
+    artifact: SegmentedControlArtifact) i64 {
+    let hash: i64 = segmented_control_mix(17, artifact.id.value);
+    hash = segmented_control_mix(hash, artifact.id.generation);
+    hash = segmented_control_mix(hash, artifact.bounds.x);
+    hash = segmented_control_mix(hash, artifact.bounds.y);
+    hash = segmented_control_mix(hash, artifact.bounds.width);
+    hash = segmented_control_mix(hash, artifact.bounds.height);
+    hash = segmented_control_mix(hash, spec.parent.value);
+    hash = segmented_control_mix(hash, spec.parent.generation);
+    hash = segmented_control_mix(hash, artifact.segment_count as i64);
+    hash = segmented_control_mix(hash, spec.model.selected_index as i64);
+    hash = segmented_control_mix(hash, spec.model.roving_index as i64);
+    hash = segmented_control_mix(hash, spec.model.has_focus as i64);
+    hash = segmented_control_mix(hash, spec.model.focus_visible as i64);
+    hash = segmented_control_mix(hash, spec.model.hovered_index as i64);
+    hash = segmented_control_mix(hash, spec.model.pressed_index as i64);
+    hash = segmented_control_mix(hash, spec.model.enabled_mask);
+    hash = segmented_control_mix(hash, spec.focus_order_base);
+    hash = segmented_control_mix(hash, spec.z_order);
+    hash = segmented_control_mix(hash, spec.density as i64);
+    hash = segmented_control_mix(hash, spec.purpose as i64);
+    hash = segmented_control_mix(hash, artifact.rail_fill_token as i64);
+    hash = segmented_control_mix(hash, artifact.rail_border_token as i64);
+    hash = segmented_control_mix(hash, artifact.rail_radius_token as i64);
+    hash = segmented_control_mix(hash, artifact.rail_elevation_token as i64);
+    hash = segmented_control_mix(hash, artifact.label_type_token as i64);
+    hash = segmented_control_mix(hash, artifact.group_role as i64);
+    hash = segmented_control_text_hash(hash, spec.name);
+    hash = segmented_control_text_hash(hash, spec.description);
+    let index: i32 = 0;
+    while (index < options.*.len) {
+        let option: SegmentedControlOption = options.*.data[index];
+        let bounds: Rect = segmented_control_segment_bounds(spec, index);
+        let content: Rect = segmented_control_content_bounds(spec, index);
+        let style: SegmentedControlResolvedStyle = segmented_control_style(spec, index);
+        hash = segmented_control_mix(hash, option.id.value);
+        hash = segmented_control_mix(hash, option.id.generation);
+        hash = segmented_control_mix(hash, bounds.x);
+        hash = segmented_control_mix(hash, bounds.y);
+        hash = segmented_control_mix(hash, bounds.width);
+        hash = segmented_control_mix(hash, bounds.height);
+        hash = segmented_control_mix(hash, content.x);
+        hash = segmented_control_mix(hash, content.width);
+        hash = segmented_control_mix(hash, style.fill_token as i64);
+        hash = segmented_control_mix(hash, style.border_token as i64);
+        hash = segmented_control_mix(hash, style.label_color_token as i64);
+        hash = segmented_control_mix(hash, style.fill_alpha);
+        hash = segmented_control_mix(hash, style.border_alpha);
+        hash = segmented_control_mix(hash, style.radius);
+        hash = segmented_control_mix(hash, style.elevation as i64);
+        hash = segmented_control_mix(hash, style.selected as i64);
+        hash = segmented_control_mix(hash, style.hovered as i64);
+        hash = segmented_control_mix(hash, style.focused as i64);
+        hash = segmented_control_mix(hash, style.has_focus as i64);
+        hash = segmented_control_mix(hash, style.focus_visible as i64);
+        hash = segmented_control_mix(hash, style.pressed as i64);
+        hash = segmented_control_mix(hash, style.disabled as i64);
+        hash = segmented_control_text_hash(hash, option.label);
+        hash = segmented_control_text_hash(hash, option.description);
+        index = index + 1;
+    }
+    return hash;
+}
+
+fn segmented_control_capacity_failure(spec:  SegmentedControlSpec,
+    kind: SegmentedControlCapacityError) SegmentedControlBuildResult {
+    let result: SegmentedControlBuildResult = segmented_control_build_result(
+        spec, SegmentedControlBuildError.capacity_error);
+    result.capacity_error = kind;
+    return result;
+}
+
+fn segmented_control_emit(spec:  SegmentedControlSpec,
+    options:  *ArrayList[SegmentedControlOption],
+    display:  *DisplayList, hits:  *HitTree,
+    semantics:  *SemanticsTree) SegmentedControlBuildResult {
+    let result: SegmentedControlBuildResult = segmented_control_build_result(
+        spec, SegmentedControlBuildError.none);
+    if (segmented_control_spec_valid(spec, options) == 0) {
+        result.error = SegmentedControlBuildError.invalid_spec;
+        return result;
+    }
+    if (display.*.sealed != 0) {
+        result.error = SegmentedControlBuildError.display_error;
+        result.display_error = DisplayError.sealed;
+        return result;
+    }
+    let checkpoint: SegmentedControlCheckpoint = segmented_control_checkpoint(
+        display, hits, semantics);
+    let budget: SegmentedControlBuildBudget = segmented_control_budget(spec.limits);
+    let radius: i64 = semantic_radius(SemanticRadiusToken.control);
+    let edge: i64 = unit_scale();
+    let operation: SegmentedControlBuildResult = segmented_control_push_round(
+        spec, display, &budget, spec.id, spec.bounds, radius,
+        semantic_color_with_alpha(SemanticColorToken.border_subtle, 18000));
+    if (operation.error == SegmentedControlBuildError.none) {
+        operation = segmented_control_push_round(spec, display, &budget, spec.id,
+            rect(spec.bounds.x + edge, spec.bounds.y + edge,
+                spec.bounds.width - edge * 2, spec.bounds.height - edge * 2),
+            radius - edge,
+            semantic_color_with_alpha(SemanticColorToken.surface_inset, 62000));
+    }
+    let divider: i32 = 1;
+    while (operation.error == SegmentedControlBuildError.none &&
+        divider < spec.model.segment_count) {
+        let before: Rect = segmented_control_segment_bounds(spec, divider - 1);
+        let after: Rect = segmented_control_segment_bounds(spec, divider);
+        let divider_x: i64 = before.x + before.width +
+            (after.x - before.x - before.width - unit_scale()) / 2;
+        operation = segmented_control_push_rect(spec, display, &budget, spec.id,
+            rect(divider_x, spec.bounds.y +
+                    flex_spacing(FlexSpacingToken.small, spec.density),
+                unit_scale(), spec.bounds.height -
+                    flex_spacing(FlexSpacingToken.small, spec.density) * 2),
+            semantic_color_with_alpha(SemanticColorToken.border_subtle, 16000));
+        divider = divider + 1;
+    }
+    let index: i32 = 0;
+    while (operation.error == SegmentedControlBuildError.none &&
+        index < spec.model.segment_count) {
+        let bounds: Rect = segmented_control_segment_bounds(spec, index);
+        let style: SegmentedControlResolvedStyle = segmented_control_style(spec, index);
+        let elevation: ResolvedElevationToken = semantic_elevation(style.elevation);
+        if (elevation.ambient_shadow_alpha > 0) {
+            operation = segmented_control_push_round(spec, display, &budget,
+                options.*.data[index].id,
+                rect(bounds.x - elevation.ambient_shadow_blur,
+                    bounds.y + elevation.ambient_shadow_y - elevation.ambient_shadow_blur,
+                    bounds.width + elevation.ambient_shadow_blur * 2,
+                    bounds.height + elevation.ambient_shadow_blur * 2),
+                style.radius + elevation.ambient_shadow_blur,
+                semantic_color_with_alpha(SemanticColorToken.shadow,
+                    elevation.ambient_shadow_alpha));
+        }
+        if (operation.error == SegmentedControlBuildError.none) {
+            operation = segmented_control_push_round(spec, display, &budget,
+                options.*.data[index].id, bounds, style.radius,
+                semantic_color_with_alpha(style.border_token, style.border_alpha));
+        }
+        if (operation.error == SegmentedControlBuildError.none) {
+            let inset: i64 = unit_scale();
+            if (style.pressed != 0 || style.focused != 0) {
+                inset = 2 * unit_scale();
+            }
+            operation = segmented_control_push_round(spec, display, &budget,
+                options.*.data[index].id,
+                rect(bounds.x + inset, bounds.y + inset,
+                    bounds.width - inset * 2, bounds.height - inset * 2),
+                style.radius - inset,
+                semantic_color_with_alpha(style.fill_token, style.fill_alpha));
+        }
+        if (operation.error == SegmentedControlBuildError.none &&
+            style.selected != 0) {
+            let marker_height: i64 = 3 * unit_scale();
+            let marker_inset: i64 = flex_spacing(FlexSpacingToken.large,
+                spec.density);
+            operation = segmented_control_push_round(spec, display, &budget,
+                options.*.data[index].id,
+                rect(bounds.x + marker_inset,
+                    bounds.y + bounds.height - marker_height -
+                        flex_spacing(FlexSpacingToken.tiny, spec.density),
+                    bounds.width - marker_inset * 2, marker_height),
+                marker_height / 2,
+                semantic_color_with_alpha(style.marker_token, 65535));
+        }
+        index = index + 1;
+    }
+    if (operation.error != SegmentedControlBuildError.none) {
+        segmented_control_rollback(display, hits, semantics, checkpoint);
+        return operation;
+    }
+
+    if (segmented_control_take_hit(&budget) == 0) {
+        segmented_control_rollback(display, hits, semantics, checkpoint);
+        return segmented_control_capacity_failure(spec,
+            SegmentedControlCapacityError.hit_nodes);
+    }
+    let group_hit: HitNode = hit_node(spec.id, spec.parent, spec.bounds);
+    group_hit.clip = spec.bounds;
+    group_hit.has_clip = 1;
+    group_hit.z_order = spec.z_order;
+    group_hit.enabled = 0;
+    group_hit.focusable = 0;
+    let hit_error: HitTreeError = hit_tree_add(hits, group_hit);
+    if (hit_error != HitTreeError.none) {
+        segmented_control_rollback(display, hits, semantics, checkpoint);
+        result.error = SegmentedControlBuildError.hit_error;
+        result.hit_error = hit_error;
+        return result;
+    }
+    index = 0;
+    while (index < spec.model.segment_count) {
+        if (segmented_control_take_hit(&budget) == 0) {
+            segmented_control_rollback(display, hits, semantics, checkpoint);
+            return segmented_control_capacity_failure(spec,
+                SegmentedControlCapacityError.hit_nodes);
+        }
+        let enabled: i32 = segmented_control_index_enabled(spec.model, index);
+        let child_hit: HitNode = hit_node(options.*.data[index].id,
+            spec.id, segmented_control_segment_bounds(spec, index));
+        child_hit.clip = spec.bounds;
+        child_hit.has_clip = 1;
+        child_hit.z_order = spec.z_order + 1 + index as i64;
+        child_hit.enabled = enabled;
+        child_hit.focusable = (enabled != 0 &&
+            spec.model.roving_index == index) as i32;
+        let child_hit_error: HitTreeError = hit_tree_add(hits, child_hit);
+        if (child_hit_error != HitTreeError.none) {
+            segmented_control_rollback(display, hits, semantics, checkpoint);
+            result.error = SegmentedControlBuildError.hit_error;
+            result.hit_error = child_hit_error;
+            return result;
+        }
+        index = index + 1;
+    }
+
+    if (segmented_control_take_semantic(&budget) == 0) {
+        segmented_control_rollback(display, hits, semantics, checkpoint);
+        return segmented_control_capacity_failure(spec,
+            SegmentedControlCapacityError.semantic_nodes);
+    }
+    let group_semantic: SemanticsSpec = semantics_spec(spec.id, spec.parent,
+        segmented_control_group_role(spec), spec.name);
+    group_semantic.description = spec.description;
+    group_semantic.value = "Single selection";
+    group_semantic.has_bounds = 1;
+    group_semantic.bounds = spec.bounds;
+    let semantics_error: SemanticsError = semantics_add(semantics, group_semantic);
+    if (semantics_error != SemanticsError.none) {
+        segmented_control_rollback(display, hits, semantics, checkpoint);
+        result.error = SegmentedControlBuildError.semantics_error;
+        result.semantics_error = semantics_error;
+        return result;
+    }
+    index = 0;
+    while (index < spec.model.segment_count) {
+        if (segmented_control_take_semantic(&budget) == 0) {
+            segmented_control_rollback(display, hits, semantics, checkpoint);
+            return segmented_control_capacity_failure(spec,
+                SegmentedControlCapacityError.semantic_nodes);
+        }
+        let enabled: i32 = segmented_control_index_enabled(spec.model, index);
+        let selected: i32 = (spec.model.selected_index == index) as i32;
+        let option: SegmentedControlOption = options.*.data[index];
+        let semantic: SemanticsSpec = semantics_spec(option.id, spec.id,
+            segmented_control_option_role(spec), option.label);
+        semantic.description = option.description;
+        semantic.value = "Not selected";
+        if (selected != 0) { semantic.value = "Selected"; }
+        if (enabled == 0) { semantic.value = "Unavailable"; }
+        if (enabled != 0 && spec.model.roving_index == index) {
+            semantic.focus_order = spec.focus_order_base;
+        }
+        semantic.disabled = (enabled == 0) as i32;
+        semantic.selected = selected;
+        semantic.focused = (enabled != 0 && spec.model.has_focus != 0 &&
+            spec.model.roving_index == index) as i32;
+        semantic.set_size = spec.model.segment_count as i64;
+        semantic.position_in_set = index as i64 + 1;
+        semantic.has_bounds = 1;
+        semantic.bounds = segmented_control_segment_bounds(spec, index);
+        if (enabled != 0) {
+            semantic.action_mask = semantic_actions_add(
+                semantic_actions_add(
+                    semantic_actions(SemanticAction.activate),
+                    SemanticAction.select), SemanticAction.focus);
+        }
+        let child_semantic_error: SemanticsError = semantics_add(
+            semantics, semantic);
+        if (child_semantic_error != SemanticsError.none) {
+            segmented_control_rollback(display, hits, semantics, checkpoint);
+            result.error = SegmentedControlBuildError.semantics_error;
+            result.semantics_error = child_semantic_error;
+            return result;
+        }
+        index = index + 1;
+    }
+
+    result.artifact = SegmentedControlArtifact{
+        .id = spec.id,
+        .bounds = spec.bounds,
+        .segment_count = spec.model.segment_count,
+        .selected_index = spec.model.selected_index,
+        .selected_id = options.*.data[spec.model.selected_index].id,
+        .selected_bounds = segmented_control_segment_bounds(spec,
+            spec.model.selected_index),
+        .roving_index = spec.model.roving_index,
+        .has_focus = spec.model.has_focus,
+        .focus_visible = spec.model.focus_visible,
+        .selected_marker_visible = 1,
+        .rail_fill_token = SemanticColorToken.surface_inset,
+        .rail_border_token = SemanticColorToken.border_subtle,
+        .rail_radius_token = SemanticRadiusToken.control,
+        .rail_elevation_token = SemanticElevationToken.base,
+        .label_type_token = SemanticTypeToken.label,
+        .purpose = spec.purpose,
+        .group_role = segmented_control_group_role(spec),
+        .display_op_start = checkpoint.display_length,
+        .display_op_end = display.*.ops.len,
+        .group_hit_node_index = checkpoint.hit_length,
+        .group_semantics_node_index = checkpoint.semantics.length,
+        .evidence_hash = 0,
+    };
+    result.artifact.evidence_hash = segmented_control_evidence_hash(spec,
+        options, result.artifact);
+    return result;
+}

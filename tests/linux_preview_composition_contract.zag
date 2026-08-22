@@ -1,0 +1,1149 @@
+@import("../src/showcase/linux_preview_composition.zag")
+@import("../src/render/cpu_raster.zag")
+
+struct TestState { passed: i32, failed: i32 }
+
+fn expect(state:  *TestState,
+    condition: i32, name: []u8) void {
+    if (condition != 0) {
+        state.*.passed = state.*.passed + 1;
+        _zag_print("ok  "); _zag_println(name);
+    } else {
+        state.*.failed = state.*.failed + 1;
+        _zag_print("FAIL "); _zag_println(name);
+    }
+}
+
+fn composition_rect_equal(left: Rect, right: Rect) i32 {
+    return (left.x == right.x && left.y == right.y &&
+        left.width == right.width && left.height == right.height) as i32;
+}
+
+fn composition_display_has_exact_bounds(display: DisplayList,
+    id: NodeKey, bounds: Rect) i32 {
+    let index: i32 = 0;
+    while (index < display.ops.len) {
+        let op: DisplayOp = display.ops.data[index];
+        if (node_key_equal(op.owner, id) != 0 &&
+            composition_rect_equal(op.bounds, bounds) != 0) { return 1; }
+        index = index + 1;
+    }
+    return 0;
+}
+
+fn composition_draw_path_count(display: DisplayList, id: NodeKey) i32 {
+    let count: i32 = 0;
+    let index: i32 = 0;
+    while (index < display.ops.len) {
+        let op: DisplayOp = display.ops.data[index];
+        if (op.kind == DisplayOpKind.draw_path &&
+            node_key_equal(op.owner, id) != 0) { count = count + 1; }
+        index = index + 1;
+    }
+    return count;
+}
+
+fn composition_paint_equal(left: Paint, right: Paint) i32 {
+    return (left.red == right.red && left.green == right.green &&
+        left.blue == right.blue && left.alpha == right.alpha &&
+        left.stroke_width == right.stroke_width) as i32;
+}
+
+fn composition_display_owner_has_token(display: DisplayList,
+    id: NodeKey, token: SemanticColorToken) i32 {
+    let expected: Paint = semantic_color_paint(token);
+    let index: i32 = 0;
+    while (index < display.ops.len) {
+        let op: DisplayOp = display.ops.data[index];
+        if (node_key_equal(op.owner, id) != 0 &&
+            composition_paint_equal(op.paint, expected) != 0) { return 1; }
+        index = index + 1;
+    }
+    return 0;
+}
+
+fn composition_display_owner_has_token_alpha(display: DisplayList,
+    id: NodeKey, token: SemanticColorToken, alpha: i64) i32 {
+    let expected: Paint = semantic_color_with_alpha(token, alpha);
+    let index: i32 = 0;
+    while (index < display.ops.len) {
+        let op: DisplayOp = display.ops.data[index];
+        if (node_key_equal(op.owner, id) != 0 &&
+            composition_paint_equal(op.paint, expected) != 0) { return 1; }
+        index = index + 1;
+    }
+    return 0;
+}
+
+fn composition_display_owner_has_token_bounds(display: DisplayList,
+    id: NodeKey, token: SemanticColorToken,
+    width: i64, height: i64) i32 {
+    let expected: Paint = semantic_color_paint(token);
+    let index: i32 = 0;
+    while (index < display.ops.len) {
+        let op: DisplayOp = display.ops.data[index];
+        if (node_key_equal(op.owner, id) != 0 &&
+            composition_paint_equal(op.paint, expected) != 0 &&
+            op.bounds.width == width && op.bounds.height == height) {
+            return 1;
+        }
+        index = index + 1;
+    }
+    return 0;
+}
+
+fn composition_semantic_hit_bounds_match(
+    artifact: LinuxPreviewCompositionArtifact,
+    id: NodeKey, expected: Rect) i32 {
+    let semantic_index: i32 = semantics_find_index(artifact.semantics, id);
+    let hit_index: i32 = hit_tree_find_index(artifact.hits, id);
+    if (semantic_index < 0 || hit_index < 0) { return 0; }
+    let semantic: SemanticsNode = artifact.semantics.nodes.data[semantic_index];
+    let hit: HitNode = artifact.hits.nodes.data[hit_index];
+    return (semantic.has_bounds == 1 &&
+        composition_rect_equal(semantic.bounds, expected) != 0 &&
+        composition_rect_equal(hit.bounds, expected) != 0 &&
+        composition_display_has_exact_bounds(artifact.display,
+            id, expected) != 0) as i32;
+}
+
+fn composition_chart_text_visual(
+    artifact: LinuxPreviewCompositionArtifact, id: NodeKey) i32 {
+    return (semantics_find_index(artifact.semantics, id) >= 0 &&
+        composition_draw_path_count(artifact.display, id) == 1) as i32;
+}
+
+fn composition_all_chart_text_visuals(
+    artifact: LinuxPreviewCompositionArtifact) i32 {
+    let chart: NodeKey = linux_preview_composition_chart_id();
+    if (composition_chart_text_visual(artifact,
+        performance_chart_title_id(chart)) == 0 ||
+        composition_chart_text_visual(artifact,
+            performance_chart_x_axis_id(chart)) == 0 ||
+        composition_chart_text_visual(artifact,
+            performance_chart_x_axis_unit_id(chart)) == 0 ||
+        composition_chart_text_visual(artifact,
+            performance_chart_y_axis_id(chart)) == 0 ||
+        composition_chart_text_visual(artifact,
+            performance_chart_y_axis_unit_id(chart)) == 0 ||
+        composition_chart_text_visual(artifact,
+            performance_chart_baseline_id(chart)) == 0 ||
+        composition_chart_text_visual(artifact,
+            performance_chart_deadline_id(chart)) == 0) { return 0; }
+    let index: i32 = 0;
+    while (index < 7) {
+        if (composition_chart_text_visual(artifact,
+            performance_chart_x_tick_id(chart, index)) == 0 ||
+            composition_chart_text_visual(artifact,
+                performance_chart_y_tick_id(chart, index)) == 0) { return 0; }
+        index = index + 1;
+    }
+    index = 0;
+    while (index < 3) {
+        if (composition_chart_text_visual(artifact,
+            linux_preview_composition_chart_series_id(index)) == 0) {
+            return 0;
+        }
+        index = index + 1;
+    }
+    return 1;
+}
+
+fn composition_backdrop_contract(state:  *TestState,
+    artifact: LinuxPreviewCompositionArtifact) void {
+    let contiguous: i32 = 1;
+    let next_y: i64 = 0;
+    let index: i32 = 0;
+    while (index < 48) {
+        if (index >= artifact.display.ops.len) {
+            contiguous = 0;
+        } else {
+            let op: DisplayOp = artifact.display.ops.data[index];
+            if (op.kind != DisplayOpKind.fill_rect ||
+                node_key_equal(op.owner,
+                    linux_preview_composition_root_id()) == 0 ||
+                op.bounds.x != 0 || op.bounds.y != next_y ||
+                op.bounds.width != artifact.layout.viewport.width ||
+                op.bounds.height <= 0) {
+                contiguous = 0;
+            }
+            next_y = next_y + op.bounds.height;
+        }
+        index = index + 1;
+    }
+    let samples_differ: i32 = 0;
+    if (artifact.display.ops.len >= 48) {
+        samples_differ = (composition_paint_equal(
+            artifact.display.ops.data[0].paint,
+            artifact.display.ops.data[47].paint) == 0) as i32;
+    }
+    expect(state, contiguous != 0 &&
+        next_y == artifact.layout.viewport.height && samples_differ != 0,
+        "the tokenized CPU backdrop uses 48 contiguous ambient samples without four-step banding");
+}
+
+fn composition_navigation_contract(state:  *TestState,
+    artifact: LinuxPreviewCompositionArtifact) void {
+    let index: i32 = 0;
+    let all_exact: i32 = 1;
+    while (index < linux_preview_navigation_count()) {
+        let id: NodeKey = linux_preview_composition_nav_id(index);
+        let expected: Rect = linux_preview_navigation_item_bounds(
+            artifact.layout, index, linux_preview_navigation_count());
+        if (composition_semantic_hit_bounds_match(
+            artifact, id, expected) == 0) { all_exact = 0; }
+        index = index + 1;
+    }
+    expect(state, all_exact != 0 &&
+        artifact.navigation_items_composed == 6,
+        "six NavigationItems share one Flex rectangle across display semantics and hits");
+
+    let overview_index: i32 = semantics_find_index(artifact.semantics,
+        linux_preview_composition_nav_id(0));
+    let components_index: i32 = semantics_find_index(artifact.semantics,
+        linux_preview_composition_nav_id(1));
+    let overview_hit: i32 = hit_tree_find_index(artifact.hits,
+        linux_preview_composition_nav_id(0));
+    let components_hit: i32 = hit_tree_find_index(artifact.hits,
+        linux_preview_composition_nav_id(1));
+    let navigation_index: i32 = semantics_find_index(
+        artifact.semantics, linux_preview_composition_navigation_id());
+    expect(state, navigation_index >= 0 &&
+        artifact.semantics.nodes.data[navigation_index].role ==
+            SemanticRole.tab_list &&
+        overview_index >= 0 && components_index >= 0 &&
+        overview_hit >= 0 && components_hit >= 0 &&
+        artifact.semantics.nodes.data[overview_index].role == SemanticRole.tab &&
+        artifact.semantics.nodes.data[overview_index].selected == 1 &&
+        artifact.semantics.nodes.data[overview_index].disabled == 0 &&
+        artifact.hits.nodes.data[overview_hit].enabled == 1 &&
+        artifact.semantics.nodes.data[components_index].selected == 0 &&
+        artifact.semantics.nodes.data[components_index].disabled == 0 &&
+        artifact.semantics.nodes.data[components_index].action_mask != 0 &&
+        artifact.hits.nodes.data[components_hit].enabled == 1,
+        "navigation state truth enables the hosted Overview and Components routes");
+}
+
+fn composition_surface_contract(state:  *TestState,
+    artifact: LinuxPreviewCompositionArtifact) void {
+    let expected_count: i32 = 3 + artifact.layout.status_visible +
+        (artifact.layout.chart_visible == 0) as i32;
+    let base_exact: i32 = composition_semantic_hit_bounds_match(artifact,
+        linux_preview_composition_header_id(), artifact.layout.header);
+    let panel_exact: i32 = composition_semantic_hit_bounds_match(artifact,
+        linux_preview_composition_navigation_surface_id(),
+        artifact.layout.navigation);
+    let raised_exact: i32 = composition_semantic_hit_bounds_match(artifact,
+        linux_preview_composition_main_id(), artifact.layout.main);
+    expect(state, artifact.surfaces_composed == expected_count &&
+        base_exact != 0 && panel_exact != 0 && raised_exact != 0 &&
+        composition_display_owner_has_token(artifact.display,
+            linux_preview_composition_header_id(),
+            SemanticColorToken.surface_base) != 0 &&
+        composition_display_owner_has_token(artifact.display,
+            linux_preview_composition_navigation_surface_id(),
+            SemanticColorToken.surface_panel) != 0 &&
+        composition_display_owner_has_token(artifact.display,
+            linux_preview_composition_main_id(),
+            SemanticColorToken.surface_raised) != 0,
+        "one canonical Surface proves base panel and raised hierarchy across pixels semantics and hits");
+}
+
+fn composition_controls_contract(state:  *TestState,
+    artifact: LinuxPreviewCompositionArtifact) void {
+    let inspect_bounds: Rect = linux_preview_inspect_bounds(artifact.layout);
+    let inspect_index: i32 = semantics_find_index(artifact.semantics,
+        linux_preview_composition_inspect_id());
+    expect(state, artifact.inspect_composed == 1 && inspect_index >= 0 &&
+        artifact.semantics.nodes.data[inspect_index].role == SemanticRole.button &&
+        composition_semantic_hit_bounds_match(artifact,
+            linux_preview_composition_inspect_id(), inspect_bounds) != 0,
+        "Inspect is a real Button with one shared stable ID and 44-pixel target");
+
+    if (artifact.layout.segmented_control_visible != 0) {
+        let spec: SegmentedControlSpec =
+            linux_preview_composition_segmented_spec(artifact.layout);
+        let all_exact: i32 = 1;
+        let index: i32 = 0;
+        while (index < 4) {
+            let id: NodeKey = linux_preview_composition_segment_id(index);
+            let expected: Rect = segmented_control_segment_bounds(spec, index);
+            if (composition_semantic_hit_bounds_match(
+                artifact, id, expected) == 0) { all_exact = 0; }
+            index = index + 1;
+        }
+        let state_index: i32 = semantics_find_index(artifact.semantics,
+            linux_preview_composition_segment_id(0));
+        let render_index: i32 = semantics_find_index(artifact.semantics,
+            linux_preview_composition_segment_id(3));
+        let group_index: i32 = semantics_find_index(artifact.semantics,
+            linux_preview_composition_segmented_id());
+        let state_style: SegmentedControlResolvedStyle =
+            segmented_control_style(spec, 0);
+        let layout_style: SegmentedControlResolvedStyle =
+            segmented_control_style(spec, 1);
+        let motion_style: SegmentedControlResolvedStyle =
+            segmented_control_style(spec, 2);
+        let render_style: SegmentedControlResolvedStyle =
+            segmented_control_style(spec, 3);
+        expect(state, all_exact != 0 && group_index >= 0 &&
+            artifact.semantics.nodes.data[group_index].role ==
+                SemanticRole.tab_list &&
+            artifact.segmented_control_composed == 1 &&
+            artifact.segmented_items_composed == 4 &&
+            state_index >= 0 && render_index >= 0 &&
+            artifact.semantics.nodes.data[state_index].role == SemanticRole.tab &&
+            artifact.semantics.nodes.data[state_index].selected == 1 &&
+            artifact.semantics.nodes.data[render_index].disabled == 1 &&
+            artifact.semantics.nodes.data[render_index].action_mask == 0 &&
+            artifact.semantics.nodes.data[state_index].focused == 0 &&
+            state_style.selected == 1 && layout_style.focused == 0 &&
+            motion_style.hovered == 0 && render_style.disabled == 1,
+            "resting SegmentedControl shares exact geometry and never invents hover or focus state");
+    } else {
+        expect(state, artifact.segmented_control_composed == 0 &&
+            artifact.segmented_items_composed == 0 &&
+            semantics_find_index(artifact.semantics,
+                linux_preview_composition_segment_id(0)) < 0,
+            "compact layout omits the selector instead of rendering unusable controls");
+    }
+}
+
+fn composition_chart_contract(state:  *TestState,
+    artifact: LinuxPreviewCompositionArtifact) void {
+    if (artifact.layout.chart_visible != 0) {
+        let chart_index: i32 = semantics_find_index(artifact.semantics,
+            linux_preview_composition_chart_id());
+        let table_index: i32 = semantics_find_index(artifact.semantics,
+            performance_chart_table_id(
+                linux_preview_composition_chart_id()));
+        expect(state, artifact.chart_composed == 1 &&
+            artifact.chart_text_slots_composed == 24 &&
+            chart_index >= 0 && table_index >= 0 &&
+            artifact.semantics.nodes.data[table_index].role == SemanticRole.table &&
+            artifact.semantics.nodes.data[table_index].row_count == 5 &&
+            artifact.semantics.nodes.data[table_index].column_count == 4 &&
+            composition_semantic_hit_bounds_match(artifact,
+                linux_preview_composition_chart_id(),
+                artifact.layout.chart) != 0,
+            "hosted chart shares exact layout bounds and exposes its equivalent semantic table");
+        expect(state, composition_all_chart_text_visuals(artifact) != 0,
+            "all 24 chart text slots render through Text under their existing semantic IDs");
+        expect(state, artifact.compact_summary_composed == 0 &&
+            semantics_find_index(artifact.semantics,
+                linux_preview_composition_summary_id()) < 0,
+            "chart-visible layouts do not expose a contradictory compact summary");
+    } else {
+        let summary_index: i32 = semantics_find_index(artifact.semantics,
+            linux_preview_composition_summary_id());
+        expect(state, artifact.chart_composed == 0 &&
+            artifact.chart_text_slots_composed == 0 &&
+            artifact.compact_summary_composed == 1 &&
+            summary_index >= 0 &&
+            artifact.semantics.nodes.data[summary_index].role == SemanticRole.text &&
+            composition_rect_equal(
+                artifact.semantics.nodes.data[summary_index].bounds,
+                artifact.layout.compact_summary) != 0 &&
+            composition_display_has_exact_bounds(artifact.display,
+                linux_preview_composition_summary_surface_id(),
+                artifact.layout.compact_summary) != 0,
+            "compact layout replaces the chart with an honest semantic and visual summary");
+        expect(state, semantics_find_index(artifact.semantics,
+            linux_preview_composition_chart_id()) < 0,
+            "compact composition does not publish an invisible chart target");
+    }
+}
+
+fn composition_status_contract(state:  *TestState,
+    artifact: LinuxPreviewCompositionArtifact) void {
+    if (artifact.layout.status_visible != 0) {
+        let group_index: i32 = semantics_find_index(artifact.semantics,
+            linux_preview_composition_status_id());
+        let heading_index: i32 = semantics_find_index(artifact.semantics,
+            linux_preview_composition_status_heading_id());
+        let caption_index: i32 = semantics_find_index(artifact.semantics,
+            linux_preview_composition_status_caption_id());
+        let surface_hit_index: i32 = hit_tree_find_index(artifact.hits,
+            linux_preview_composition_status_surface_id());
+        let routed: HitResult = hit_test(artifact.hits,
+            artifact.layout.status.x + artifact.layout.status.width / 2,
+            artifact.layout.status.y + artifact.layout.status.height / 2);
+        let all_read_only: i32 = (group_index >= 0 &&
+            artifact.semantics.nodes.data[group_index].role == SemanticRole.list &&
+            composition_rect_equal(
+                artifact.semantics.nodes.data[group_index].bounds,
+                artifact.layout.status_list) != 0 &&
+            heading_index >= 0 && caption_index >= 0 &&
+            hit_tree_find_index(artifact.hits,
+                linux_preview_composition_status_id()) < 0 &&
+            surface_hit_index >= 0 &&
+            artifact.hits.nodes.data[surface_hit_index].enabled == 0 &&
+            artifact.hits.nodes.data[surface_hit_index].focusable == 0 &&
+            routed.found == 0) as i32;
+        let index: i32 = 0;
+        while (index < 5) {
+            let id: NodeKey = linux_preview_composition_status_item_id(index);
+            let semantic_index: i32 = semantics_find_index(
+                artifact.semantics, id);
+            let bounds: Rect = linux_preview_status_item_bounds(
+                artifact.layout, index, 5);
+            if (semantic_index < 0 ||
+                artifact.semantics.nodes.data[semantic_index].role !=
+                    SemanticRole.list_item ||
+                artifact.semantics.nodes.data[semantic_index].action_mask != 0 ||
+                hit_tree_find_index(artifact.hits, id) >= 0 ||
+                composition_display_has_exact_bounds(
+                    artifact.display, id, bounds) == 0 ||
+                composition_display_owner_has_token_bounds(artifact.display,
+                    id, showcase_category_color(showcase_category_at(index)),
+                    flex_spacing(FlexSpacingToken.tiny,
+                        FlexDensity.standard),
+                    flex_spacing(FlexSpacingToken.xlarge,
+                        FlexDensity.standard)) == 0) {
+                all_read_only = 0;
+            }
+            index = index + 1;
+        }
+        expect(state, all_read_only != 0 &&
+            artifact.status_items_composed == 5,
+            "expanded status rail uses documented category swatches and remains strictly read-only");
+    } else {
+        expect(state, artifact.status_items_composed == 0 &&
+            semantics_find_index(artifact.semantics,
+                linux_preview_composition_status_id()) < 0 &&
+            hit_tree_find_index(artifact.hits,
+                linux_preview_composition_status_id()) < 0,
+            "medium and compact layouts omit the competing status rail completely");
+    }
+}
+
+fn composition_talkback_contract(state:  *TestState,
+    artifact: LinuxPreviewCompositionArtifact) void {
+    let session: TalkbackSession = talkback_session_make(
+        talkback_capabilities());
+    let overview: TalkbackResponse = talkback_dispatch(&session,
+        artifact.semantics, artifact.layout.viewport,
+        talkback_request(1, TalkbackCommand.query,
+            linux_preview_composition_nav_id(0),
+            artifact.semantics.revision));
+    let components: TalkbackResponse = talkback_dispatch(&session,
+        artifact.semantics, artifact.layout.viewport,
+        talkback_request(2, TalkbackCommand.click,
+            linux_preview_composition_nav_id(1),
+            artifact.semantics.revision));
+    let inspect: TalkbackResponse = talkback_dispatch(&session,
+        artifact.semantics, artifact.layout.viewport,
+        talkback_request(3, TalkbackCommand.click,
+            linux_preview_composition_inspect_id(),
+            artifact.semantics.revision));
+    let inspect_available: i32 =
+        linux_preview_token_inspector_available(artifact.layout);
+    expect(state, overview.status == TalkbackStatus.accepted &&
+        overview.resolved_role == SemanticRole.tab &&
+        (overview.state_flags & talkback_state_selected_bit()) != 0 &&
+        components.status == TalkbackStatus.accepted &&
+        components.emitted_action == 1 &&
+        (inspect_available == 0 ||
+            (inspect.status == TalkbackStatus.accepted &&
+                inspect.emitted_action == 1)),
+        "Talkback queries and activates both available routes by stable ID");
+    if (artifact.layout.chart_visible != 0) {
+        let chart: TalkbackResponse = talkback_dispatch(&session,
+            artifact.semantics, artifact.layout.viewport,
+            talkback_request(4, TalkbackCommand.query,
+                linux_preview_composition_chart_id(),
+                artifact.semantics.revision));
+        expect(state, chart.status == TalkbackStatus.accepted &&
+            chart.has_bounds == 1 &&
+            composition_rect_equal(chart.bounds, artifact.layout.chart) != 0,
+            "Talkback chart geometry is the same exact rectangle used by rendering and hits");
+    } else {
+        let summary: TalkbackResponse = talkback_dispatch(&session,
+            artifact.semantics, artifact.layout.viewport,
+            talkback_request(4, TalkbackCommand.query,
+                linux_preview_composition_summary_id(),
+                artifact.semantics.revision));
+        expect(state, summary.status == TalkbackStatus.accepted &&
+            summary.resolved_role == SemanticRole.text &&
+            summary.value_length > 0,
+            "Talkback receives compact performance truth without a pixel fallback");
+    }
+    talkback_session_free(&session);
+}
+
+fn composition_size_contract(state:  *TestState,
+    face: OpenTypeFace, width: i32, height: i32,
+    expected_mode: LinuxPreviewLayoutMode,
+    expected_chart: i32, expected_status: i32) i64 {
+    let artifact: LinuxPreviewCompositionArtifact =
+        linux_preview_composition_build(width, height, face,
+            linux_preview_initial_navigation());
+    expect(state, linux_preview_composition_valid(artifact) != 0 &&
+        artifact.layout.mode == expected_mode &&
+        artifact.layout.chart_visible == expected_chart &&
+        artifact.layout.status_visible == expected_status,
+        "responsive composition builds one valid retained artifact for the requested viewport");
+    expect(state,
+        composition_display_owner_has_token(artifact.display,
+            linux_preview_composition_header_id(),
+            SemanticColorToken.surface_base) != 0 &&
+        composition_display_owner_has_token(artifact.display,
+            linux_preview_composition_navigation_surface_id(),
+            SemanticColorToken.surface_panel) != 0 &&
+        composition_display_owner_has_token(artifact.display,
+            linux_preview_composition_main_id(),
+            SemanticColorToken.surface_raised) != 0,
+        "shell panel and raised material tiers produce a visible hierarchy from semantic tokens");
+    composition_backdrop_contract(state, artifact);
+    composition_surface_contract(state, artifact);
+    composition_navigation_contract(state, artifact);
+    composition_controls_contract(state, artifact);
+    composition_chart_contract(state, artifact);
+    composition_status_contract(state, artifact);
+    composition_talkback_contract(state, artifact);
+    let raster: CpuRasterResult = cpu_rasterize(
+        artifact.display, width, height);
+    expect(state, raster.error == CpuRasterError.none &&
+        raster.pixels_touched > 0,
+        "the sealed composition rasterizes through the deterministic CPU oracle");
+    cpu_raster_free(&raster);
+    let hash: i64 = artifact.evidence_hash;
+    linux_preview_composition_free(&artifact);
+    return hash;
+}
+
+fn unsupported_viewport_contract(state:  *TestState,
+    face: OpenTypeFace) void {
+    let unsupported: LinuxPreviewCompositionArtifact =
+        linux_preview_composition_build(320, 240, face, 0);
+    let message_index: i32 = semantics_find_index(unsupported.semantics,
+        linux_preview_composition_unsupported_id());
+    expect(state,
+        linux_preview_composition_valid(unsupported) != 0 &&
+        unsupported.error == LinuxPreviewCompositionError.none &&
+        unsupported.layout.error ==
+            LinuxPreviewLayoutError.invalid_viewport &&
+        unsupported.unsupported_size_composed == 1 &&
+        message_index >= 0 &&
+        unsupported.semantics.nodes.data[message_index].role ==
+            SemanticRole.dialog &&
+        unsupported.semantics.nodes.data[message_index].live_region ==
+            LiveRegion.polite &&
+        unsupported.navigation_items_composed == 0 &&
+        unsupported.chart_composed == 0 &&
+        unsupported.segmented_control_composed == 0,
+        "sub-minimum native viewport publishes an explicit semantic resize state instead of partial UI");
+    let query: TalkbackSession = talkback_session_make(
+        talkback_capabilities());
+    let response: TalkbackResponse = talkback_dispatch(&query,
+        unsupported.semantics, unsupported.layout.viewport,
+        talkback_request(90, TalkbackCommand.query,
+            linux_preview_composition_unsupported_id(),
+            unsupported.semantics.revision));
+    expect(state, response.status == TalkbackStatus.accepted &&
+        response.resolved_role == SemanticRole.dialog &&
+        response.has_bounds == 1 && response.value_length > 0,
+        "Talkback can inspect the unsupported-size explanation by stable ID");
+    talkback_session_free(&query);
+    let raster: CpuRasterResult = cpu_rasterize(
+        unsupported.display, 320, 240);
+    expect(state, raster.error == CpuRasterError.none &&
+        raster.pixels_touched > 0,
+        "unsupported-size state remains a sealed CPU-renderable surface");
+    cpu_raster_free(&raster);
+    linux_preview_composition_free(&unsupported);
+
+    let impossible: LinuxPreviewCompositionArtifact =
+        linux_preview_composition_build(100, 100, face, 0);
+    expect(state,
+        impossible.error == LinuxPreviewCompositionError.invalid_layout &&
+        impossible.layout.error == LinuxPreviewLayoutError.invalid_viewport &&
+        impossible.display.ops.len == 0 &&
+        impossible.semantics.nodes.len == 0 &&
+        impossible.hits.nodes.len == 0 && impossible.evidence_hash == 0,
+        "surface too small for truthful text remains a hard fail-closed error");
+    linux_preview_composition_free(&impossible);
+}
+
+fn selected_segment_contract(state:  *TestState,
+    face: OpenTypeFace, baseline_hash: i64) void {
+    let artifact: LinuxPreviewCompositionArtifact =
+        linux_preview_composition_build_with_segment(
+            1120, 720, face, 0, 2);
+    let state_index: i32 = semantics_find_index(artifact.semantics,
+        linux_preview_composition_segment_id(0));
+    let motion_index: i32 = semantics_find_index(artifact.semantics,
+        linux_preview_composition_segment_id(2));
+    let motion_series_index: i32 = semantics_find_index(
+        artifact.semantics,
+        linux_preview_composition_chart_series_id(2));
+    let state_series_index: i32 = semantics_find_index(
+        artifact.semantics,
+        linux_preview_composition_chart_series_id(0));
+    expect(state, linux_preview_composition_valid(artifact) != 0 &&
+        artifact.segmented_model.selected_index == 2 &&
+        state_index >= 0 && motion_index >= 0 &&
+        state_series_index >= 0 && motion_series_index >= 0 &&
+        artifact.semantics.nodes.data[state_index].selected == 0 &&
+        artifact.semantics.nodes.data[motion_index].selected == 1 &&
+        artifact.semantics.nodes.data[state_series_index].selected == 0 &&
+        artifact.semantics.nodes.data[motion_series_index].selected == 1 &&
+        artifact.evidence_hash != baseline_hash,
+        "application-owned segment selection changes the linked chart series pixels semantics and deterministic evidence together");
+    linux_preview_composition_free(&artifact);
+
+    let compact: LinuxPreviewCompositionArtifact =
+        linux_preview_composition_build_with_segment(
+            800, 600, face, 0, 1);
+    let summary_index: i32 = semantics_find_index(compact.semantics,
+        linux_preview_composition_summary_id());
+    expect(state, linux_preview_composition_valid(compact) != 0 &&
+        compact.chart_composed == 0 && compact.compact_summary_composed == 1 &&
+        summary_index >= 0 &&
+        semantic_text_equal(compact.semantics.nodes.data[summary_index].value,
+            "Selected fixture peak 10 milliseconds; deadline 16 milliseconds") != 0,
+        "compact replacement summarizes the same selected Layout fixture and sixteen millisecond deadline");
+    linux_preview_composition_free(&compact);
+}
+
+fn segment_interaction_truth_contract(state:  *TestState,
+    face: OpenTypeFace) void {
+    let model: SegmentedControlModel =
+        linux_preview_composition_segmented_model_for(0);
+    let transition: SegmentedControlTransition = segmented_control_reduce(
+        model, segmented_control_event(
+            SegmentedControlEventKind.pointer_enter, 2));
+    model = transition.model;
+    transition = segmented_control_reduce(model, segmented_control_event(
+        SegmentedControlEventKind.pointer_down, 2));
+    model = transition.model;
+    transition = segmented_control_reduce(model, segmented_control_event(
+        SegmentedControlEventKind.pointer_up_inside, 2));
+    model = transition.model;
+
+    let pointer_artifact: LinuxPreviewCompositionArtifact =
+        linux_preview_composition_build_with_model(
+            1120, 720, face, 0, model);
+    let pointer_index: i32 = semantics_find_index(
+        pointer_artifact.semantics,
+        linux_preview_composition_segment_id(2));
+    let pointer_spec: SegmentedControlSpec =
+        linux_preview_composition_segmented_spec(pointer_artifact.layout);
+    pointer_spec.model = model;
+    let pointer_style: SegmentedControlResolvedStyle =
+        segmented_control_style(pointer_spec, 2);
+    let session: TalkbackSession = talkback_session_make(
+        talkback_capabilities());
+    let pointer_query: TalkbackResponse = talkback_dispatch(&session,
+        pointer_artifact.semantics, pointer_artifact.layout.viewport,
+        talkback_request(120, TalkbackCommand.query,
+            linux_preview_composition_segment_id(2),
+            pointer_artifact.semantics.revision));
+    let pointer_hash: i64 = pointer_artifact.evidence_hash;
+    expect(state, linux_preview_composition_valid(pointer_artifact) != 0 &&
+        model.selected_index == 2 && model.roving_index == 2 &&
+        model.has_focus == 1 && model.focus_visible == 0 &&
+        model.hovered_index == 2 && pointer_index >= 0 &&
+        pointer_artifact.semantics.nodes.data[pointer_index].focused == 1 &&
+        pointer_style.has_focus == 1 && pointer_style.focus_visible == 0 &&
+        pointer_style.focused == 0 && pointer_style.hovered == 1 &&
+        pointer_query.status == TalkbackStatus.accepted &&
+        pointer_query.state_flags == talkback_state_selected_bit() +
+            talkback_state_focused_bit(),
+        "pointer interaction drives real hover and semantic focus without faking a keyboard focus ring");
+    linux_preview_composition_free(&pointer_artifact);
+
+    transition = segmented_control_reduce(model, segmented_control_event(
+        SegmentedControlEventKind.key_next,
+        segmented_control_no_index()));
+    model = transition.model;
+    let keyboard_artifact: LinuxPreviewCompositionArtifact =
+        linux_preview_composition_build_with_model(
+            1120, 720, face, 0, model);
+    let keyboard_index: i32 = semantics_find_index(
+        keyboard_artifact.semantics,
+        linux_preview_composition_segment_id(0));
+    let keyboard_spec: SegmentedControlSpec =
+        linux_preview_composition_segmented_spec(keyboard_artifact.layout);
+    keyboard_spec.model = model;
+    let keyboard_style: SegmentedControlResolvedStyle =
+        segmented_control_style(keyboard_spec, 0);
+    expect(state, linux_preview_composition_valid(keyboard_artifact) != 0 &&
+        model.selected_index == 0 && model.roving_index == 0 &&
+        model.has_focus == 1 && model.focus_visible == 1 &&
+        keyboard_index >= 0 &&
+        keyboard_artifact.semantics.nodes.data[keyboard_index].focused == 1 &&
+        keyboard_style.focused == 1 && keyboard_style.focus_visible == 1 &&
+        keyboard_artifact.evidence_hash != pointer_hash,
+        "keyboard transition skips the disabled segment and makes its actual focus ring observable in evidence");
+    linux_preview_composition_free(&keyboard_artifact);
+    talkback_session_free(&session);
+}
+
+fn general_interaction_truth_contract(state:  *TestState,
+    face: OpenTypeFace) void {
+    let model: SegmentedControlModel =
+        linux_preview_composition_segmented_model_for(0);
+    let target: NodeKey = linux_preview_composition_inspect_id();
+
+    let hover_state: LinuxPreviewInteractionState =
+        linux_preview_interaction_state();
+    hover_state.hovered = target;
+    let hovered: LinuxPreviewCompositionArtifact =
+        linux_preview_composition_build_with_interaction_state(
+            1360, 900, face, 0, model, 0, hover_state);
+    let hover_semantic: i32 = semantics_find_index(
+        hovered.semantics, target);
+    expect(state, linux_preview_composition_valid(hovered) != 0 &&
+        hover_semantic >= 0 &&
+        hovered.semantics.nodes.data[hover_semantic].focused == 0 &&
+        node_key_equal(hovered.interaction.hovered, target) != 0 &&
+        composition_display_owner_has_token_alpha(hovered.display,
+            target, SemanticColorToken.accent_emphasis, 61000) != 0,
+        "real pointer hover changes the canonical Inspect Button without inventing semantic focus");
+    let hover_hash: i64 = hovered.evidence_hash;
+    linux_preview_composition_free(&hovered);
+
+    let pressed_state: LinuxPreviewInteractionState =
+        linux_preview_interaction_state();
+    pressed_state.hovered = target;
+    pressed_state.pressed = target;
+    let pressed: LinuxPreviewCompositionArtifact =
+        linux_preview_composition_build_with_interaction_state(
+            1360, 900, face, 0, model, 0, pressed_state);
+    expect(state, linux_preview_composition_valid(pressed) != 0 &&
+        node_key_equal(pressed.interaction.pressed, target) != 0 &&
+        composition_display_owner_has_token_alpha(pressed.display,
+            target, SemanticColorToken.accent_emphasis, 65535) != 0 &&
+        pressed.evidence_hash != hover_hash,
+        "real pointer press has a distinct canonical fill depth and deterministic state identity");
+    let pressed_hash: i64 = pressed.evidence_hash;
+    linux_preview_composition_free(&pressed);
+
+    let focus_state: LinuxPreviewInteractionState =
+        linux_preview_interaction_state();
+    focus_state.focused = target;
+    focus_state.focus_visible = 1;
+    let focused: LinuxPreviewCompositionArtifact =
+        linux_preview_composition_build_with_interaction_state(
+            1360, 900, face, 0, model, 0, focus_state);
+    let focus_semantic: i32 = semantics_find_index(
+        focused.semantics, target);
+    let session: TalkbackSession = talkback_session_make(
+        talkback_capabilities());
+    let query: TalkbackResponse = talkback_dispatch(&session,
+        focused.semantics, focused.layout.viewport,
+        talkback_request(150, TalkbackCommand.query, target,
+            focused.semantics.revision));
+    expect(state, linux_preview_composition_valid(focused) != 0 &&
+        focus_semantic >= 0 &&
+        focused.semantics.nodes.data[focus_semantic].focused == 1 &&
+        focused.interaction.focus_visible == 1 &&
+        composition_display_owner_has_token_alpha(focused.display,
+            target, SemanticColorToken.focus, 39000) != 0 &&
+        query.status == TalkbackStatus.accepted &&
+        query.state_flags == talkback_state_focused_bit() &&
+        focused.evidence_hash != hover_hash &&
+        focused.evidence_hash != pressed_hash,
+        "keyboard focus is simultaneously visible, semantic, Talkback-queryable, and distinct from hover");
+    talkback_session_free(&session);
+    linux_preview_composition_free(&focused);
+
+    let compact_state: LinuxPreviewInteractionState =
+        linux_preview_interaction_state();
+    compact_state.focused = target;
+    compact_state.focus_visible = 1;
+    let compact: LinuxPreviewCompositionArtifact =
+        linux_preview_composition_build_with_interaction_state(
+            800, 600, face, 0, model, 0, compact_state);
+    let compact_index: i32 = semantics_find_index(compact.semantics, target);
+    expect(state, linux_preview_composition_valid(compact) != 0 &&
+        node_key_equal(compact.interaction.focused,
+            hit_root_key()) != 0 &&
+        compact.interaction.focus_visible == 0 && compact_index >= 0 &&
+        compact.semantics.nodes.data[compact_index].disabled == 1,
+        "responsive normalization clears focus when the Inspect target becomes unavailable");
+    linux_preview_composition_free(&compact);
+
+    let invalid_state: LinuxPreviewInteractionState =
+        linux_preview_interaction_state();
+    invalid_state.focus_visible = 1;
+    let invalid: LinuxPreviewCompositionArtifact =
+        linux_preview_composition_build_with_interaction_state(
+            1120, 720, face, 0, model, 0, invalid_state);
+    expect(state,
+        invalid.error == LinuxPreviewCompositionError.invalid_layout &&
+        invalid.evidence_hash == 0,
+        "focus-visible without an actual focus owner fails closed");
+    linux_preview_composition_free(&invalid);
+}
+
+fn token_inspector_contract(state:  *TestState,
+    face: OpenTypeFace, baseline_hash: i64) void {
+    let model: SegmentedControlModel =
+        linux_preview_composition_segmented_model_for(0);
+    let open: LinuxPreviewCompositionArtifact =
+        linux_preview_composition_build_with_state(
+            1360, 900, face, 0, model, 1);
+    let inspector_index: i32 = semantics_find_index(open.semantics,
+        linux_preview_composition_token_inspector_id());
+    let button_index: i32 = semantics_find_index(open.semantics,
+        linux_preview_composition_inspect_id());
+    let material_line_index: i32 = semantics_find_index(open.semantics,
+        linux_preview_composition_token_inspector_line_id(3));
+    let all_lines: i32 = 1;
+    let index: i32 = 0;
+    while (index < 10) {
+        let line_id: NodeKey =
+            linux_preview_composition_token_inspector_line_id(index);
+        if (semantics_find_index(open.semantics, line_id) < 0 ||
+            composition_draw_path_count(open.display, line_id) != 1) {
+            all_lines = 0;
+        }
+        index = index + 1;
+    }
+    expect(state, linux_preview_composition_valid(open) != 0 &&
+        open.token_inspector_open == 1 &&
+        open.token_inspector_composed == 1 &&
+        open.token_inspector_text_instances == 10 &&
+        open.surfaces_composed == 5 && inspector_index >= 0 &&
+        open.semantics.nodes.data[inspector_index].role ==
+            SemanticRole.group &&
+        composition_semantic_hit_bounds_match(open,
+            linux_preview_composition_token_inspector_id(),
+            linux_preview_token_inspector_bounds(open.layout)) != 0 &&
+        all_lines != 0 && open.evidence_hash != baseline_hash,
+        "Inspect toggles a real overlay Surface with ten visible semantic provenance lines");
+    expect(state, button_index >= 0 && material_line_index >= 0 &&
+        open.semantics.nodes.data[button_index].selected == 1 &&
+        semantic_text_equal(open.semantics.nodes.data[button_index].name,
+            "Close inspector") != 0 &&
+        semantic_text_equal(open.semantics.nodes.data[material_line_index].name,
+            "Material · material.glass.raised") != 0,
+        "inspector control state and visible material token ID agree in semantics");
+    let session: TalkbackSession = talkback_session_make(
+        talkback_capabilities());
+    let query: TalkbackResponse = talkback_dispatch(&session,
+        open.semantics, open.layout.viewport,
+        talkback_request(200, TalkbackCommand.query,
+            linux_preview_composition_token_inspector_line_id(9),
+            open.semantics.revision));
+    expect(state, query.status == TalkbackStatus.accepted &&
+        query.resolved_role == SemanticRole.text &&
+        query.action_mask == 0 && query.name_length > 0,
+        "Talkback reads the exact material fallback line without a pointer target");
+    talkback_session_free(&session);
+    linux_preview_composition_free(&open);
+
+    let compact: LinuxPreviewCompositionArtifact =
+        linux_preview_composition_build_with_state(
+            800, 600, face, 0, model, 1);
+    let compact_button: i32 = semantics_find_index(compact.semantics,
+        linux_preview_composition_inspect_id());
+    expect(state, linux_preview_composition_valid(compact) != 0 &&
+        linux_preview_token_inspector_available(compact.layout) == 0 &&
+        compact.token_inspector_open == 0 &&
+        compact.token_inspector_composed == 0 && compact_button >= 0 &&
+        compact.semantics.nodes.data[compact_button].disabled == 1 &&
+        compact.semantics.nodes.data[compact_button].action_mask == 0,
+        "a viewport that cannot fit the inspector disables the control instead of clipping an overlay");
+    linux_preview_composition_free(&compact);
+}
+
+fn components_route_contract(state:  *TestState,
+    face: OpenTypeFace) void {
+    let app: LinuxPreviewAppState = linux_preview_app_state();
+    app.selected_navigation = 1;
+    let artifact: LinuxPreviewCompositionArtifact =
+        linux_preview_composition_build_with_app_state(
+            1120, 720, face, app);
+    let viewport_id: NodeKey =
+        linux_preview_composition_components_viewport_id();
+    let gallery_id: NodeKey =
+        linux_preview_composition_component_gallery_id();
+    let viewport_index: i32 = semantics_find_index(
+        artifact.semantics, viewport_id);
+    let gallery_index: i32 = semantics_find_index(
+        artifact.semantics, gallery_id);
+    let nav_index: i32 = semantics_find_index(artifact.semantics,
+        linux_preview_composition_nav_id(1));
+    expect(state, linux_preview_composition_valid(artifact) != 0 &&
+        artifact.selected_navigation == 1 &&
+        artifact.components_available == 1 &&
+        artifact.component_gallery_composed == 1 &&
+        artifact.component_viewport_composed == 1 &&
+        artifact.chart_composed == 0 &&
+        artifact.segmented_control_composed == 0 &&
+        artifact.typography_composed == 0 &&
+        artifact.inspect_composed == 0 &&
+        viewport_index >= 0 && gallery_index >= 0 && nav_index >= 0 &&
+        artifact.semantics.nodes.data[nav_index].selected == 1 &&
+        artifact.semantics.nodes.data[viewport_index].role ==
+            SemanticRole.group &&
+        node_key_equal(artifact.semantics.nodes.data[gallery_index].parent,
+            viewport_id) != 0 &&
+        composition_rect_equal(
+            artifact.semantics.nodes.data[viewport_index].bounds,
+            artifact.layout.route_content) != 0 &&
+        semantics_find_index(artifact.semantics,
+            linux_preview_composition_chart_id()) < 0 &&
+        semantics_find_index(artifact.semantics,
+            linux_preview_composition_segmented_id()) < 0 &&
+        semantics_find_index(artifact.semantics,
+            linux_preview_composition_inspect_id()) < 0,
+        "Components is one exclusive gallery-plus-viewport route with no Overview fallthrough");
+
+    let horizontal_index: i32 = semantics_find_index(artifact.semantics,
+        scroll_viewport_horizontal_range_id(viewport_id));
+    let vertical_index: i32 = semantics_find_index(artifact.semantics,
+        scroll_viewport_vertical_range_id(viewport_id));
+    expect(state,
+        artifact.app_state.components_scroll.viewport.width ==
+            artifact.layout.route_content.width &&
+        artifact.app_state.components_scroll.viewport.height ==
+            artifact.layout.route_content.height &&
+        artifact.app_state.components_scroll.content.width ==
+            1072 * unit_scale() &&
+        artifact.app_state.components_scroll.content.height ==
+            1192 * unit_scale() &&
+        artifact.component_viewport.geometry.horizontal_track_visible == 1 &&
+        artifact.component_viewport.geometry.vertical_track_visible == 1 &&
+        horizontal_index >= 0 && vertical_index >= 0 &&
+        artifact.semantics.nodes.data[horizontal_index].role ==
+            SemanticRole.slider &&
+        artifact.semantics.nodes.data[vertical_index].role ==
+            SemanticRole.slider &&
+        artifact.component_viewport_state_hash ==
+            scroll_state_hash(artifact.app_state.components_scroll),
+        "the fixed 1072 by 1192 gallery has one retained two-axis geometry and range truth");
+
+    let session: TalkbackSession = talkback_session_make(
+        talkback_capabilities());
+    let scroll_request: TalkbackRequest = talkback_scroll_request(
+        300, viewport_id, artifact.semantics.revision,
+        TalkbackScrollAxis.both,
+        32 * unit_scale(), 48 * unit_scale());
+    let scroll_response: TalkbackResponse = talkback_dispatch(&session,
+        artifact.semantics, artifact.layout.viewport, scroll_request);
+    expect(state, scroll_response.status == TalkbackStatus.accepted &&
+        scroll_response.emitted_action == 1 &&
+        session.events.len == 1 &&
+        session.events.data[0].scroll_axis == TalkbackScrollAxis.both &&
+        session.events.data[0].scroll_delta_x == 32 * unit_scale() &&
+        session.events.data[0].scroll_delta_y == 48 * unit_scale(),
+        "Talkback publishes an explicit stable-ID two-axis scroll payload");
+
+    let scrolled_state: LinuxPreviewAppState = artifact.app_state;
+    let scroll_transition: ScrollViewportTransition =
+        linux_preview_app_state_scroll_components(&scrolled_state,
+            scroll_request.scroll_delta_x,
+            scroll_request.scroll_delta_y);
+    expect(state, scroll_transition.accepted == 1 &&
+        scroll_transition.mutation.changed == 1 &&
+        scrolled_state.components_scroll.offset_x == 32 * unit_scale() &&
+        scrolled_state.components_scroll.offset_y == 48 * unit_scale(),
+        "the accepted Talkback payload mutates the same retained ScrollState used by composition");
+
+    let offscreen_id: NodeKey = component_state_gallery_segment_id(
+        gallery_id, 0);
+    let offscreen_query: TalkbackResponse = talkback_dispatch(&session,
+        artifact.semantics, artifact.layout.viewport,
+        talkback_request(301, TalkbackCommand.query, offscreen_id,
+            artifact.semantics.revision));
+    let reveal_state: LinuxPreviewAppState = artifact.app_state;
+    let reveal: ScrollViewportTargetReveal =
+        linux_preview_app_state_reveal_component(
+            &reveal_state, &artifact, offscreen_id);
+    expect(state, offscreen_query.status == TalkbackStatus.accepted &&
+        offscreen_query.has_bounds == 1 && reveal.found == 1 &&
+        reveal.focusable == 1 && reveal.transition.accepted == 1 &&
+        reveal.transition.mutation.changed == 1 &&
+        reveal_state.components_scroll.offset_y > 0,
+        "offscreen semantic query succeeds and ID reveal changes ScrollState without a pixel map");
+    let baseline_hash: i64 = artifact.evidence_hash;
+    linux_preview_composition_free(&artifact);
+
+    let revealed: LinuxPreviewCompositionArtifact =
+        linux_preview_composition_build_with_app_state(
+            1120, 720, face, reveal_state);
+    let revealed_query: TalkbackResponse = talkback_dispatch(&session,
+        revealed.semantics, revealed.layout.viewport,
+        talkback_request(302, TalkbackCommand.query, offscreen_id,
+            revealed.semantics.revision));
+    expect(state, linux_preview_composition_valid(revealed) != 0 &&
+        revealed.evidence_hash != baseline_hash &&
+        revealed_query.status == TalkbackStatus.accepted &&
+        revealed_query.bounds.y <
+            revealed.layout.route_content.y +
+                revealed.layout.route_content.height &&
+        revealed_query.bounds.y + revealed_query.bounds.height >
+            revealed.layout.route_content.y,
+        "rebuild resolves the same target ID inside the viewport and changes deterministic evidence");
+
+    let resize_state: LinuxPreviewAppState = scrolled_state;
+    let before_x: i64 = resize_state.components_scroll.offset_x;
+    let before_y: i64 = resize_state.components_scroll.offset_y;
+    let resized: LinuxPreviewCompositionArtifact =
+        linux_preview_composition_build_with_app_state(
+            1360, 900, face, resize_state);
+    expect(state, linux_preview_composition_valid(resized) != 0 &&
+        resized.selected_navigation == 1 &&
+        resized.app_state.components_scroll.viewport.width ==
+            resized.layout.route_content.width &&
+        resized.app_state.components_scroll.viewport.height ==
+            resized.layout.route_content.height &&
+        resized.app_state.components_scroll.offset_x == before_x &&
+        resized.app_state.components_scroll.offset_y == before_y,
+        "resize reconciles viewport geometry while preserving the retained top-left content anchor");
+    linux_preview_composition_free(&resized);
+    linux_preview_composition_free(&revealed);
+    talkback_session_free(&session);
+
+    let bad: LinuxPreviewAppState = linux_preview_app_state();
+    bad.selected_navigation = 1;
+    bad.components_scroll.content.width = 0;
+    let rejected: LinuxPreviewCompositionArtifact =
+        linux_preview_composition_build_with_app_state(
+            1120, 720, face, bad);
+    expect(state,
+        rejected.error == LinuxPreviewCompositionError.invalid_layout &&
+        rejected.evidence_hash == 0 && rejected.display.ops.len == 0 &&
+        rejected.semantics.nodes.len == 0 && rejected.hits.nodes.len == 0,
+        "invalid retained route state fails before any partial destination contribution");
+    linux_preview_composition_free(&rejected);
+}
+
+fn typography_route_contract(state:  *TestState,
+    light:  *OpenTypeFace,
+    regular:  *OpenTypeFace,
+    bold:  *OpenTypeFace) void {
+    let model: SegmentedControlModel =
+        linux_preview_composition_segmented_model_for(0);
+    let overview: LinuxPreviewCompositionArtifact =
+        linux_preview_composition_build_with_fonts_state(
+            1360, 900, light, regular, bold, 0, model, 0);
+    let overview_typography_nav: i32 = semantics_find_index(
+        overview.semantics, linux_preview_composition_nav_id(3));
+    expect(state, linux_preview_composition_valid(overview) != 0 &&
+        overview.selected_navigation == 0 &&
+        overview.typography_available == 1 &&
+        overview.typography_composed == 0 &&
+        overview.chart_composed == 1 && overview_typography_nav >= 0 &&
+        overview.semantics.nodes.data[overview_typography_nav].disabled == 0 &&
+        overview.semantics.nodes.data[overview_typography_nav].action_mask != 0,
+        "expanded Overview exposes the real Typography destination without replacing the chart prematurely");
+    linux_preview_composition_free(&overview);
+
+    let artifact: LinuxPreviewCompositionArtifact =
+        linux_preview_composition_build_with_fonts_state(
+            1360, 900, light, regular, bold, 3, model, 0);
+    let nav_index: i32 = semantics_find_index(artifact.semantics,
+        linux_preview_composition_nav_id(3));
+    let root_index: i32 = semantics_find_index(artifact.semantics,
+        linux_preview_composition_typography_id());
+    let code_index: i32 = semantics_find_index(artifact.semantics,
+        typography_specimen_sample_id(
+            linux_preview_composition_typography_id(), 6));
+    expect(state, linux_preview_composition_valid(artifact) != 0 &&
+        artifact.selected_navigation == 3 &&
+        artifact.typography_available == 1 &&
+        artifact.typography_composed == 1 &&
+        artifact.typography_rows_composed ==
+            typography_specimen_row_count() &&
+        artifact.typography_display_operations ==
+            typography_specimen_row_count() * 10 &&
+        artifact.typography_display_resources ==
+            typography_specimen_row_count() * 2 &&
+        artifact.typography_semantic_nodes ==
+            1 + typography_specimen_row_count() * 3 &&
+        artifact.chart_composed == 0 &&
+        artifact.segmented_control_composed == 0 &&
+        nav_index >= 0 && root_index >= 0 && code_index >= 0 &&
+        artifact.semantics.nodes.data[nav_index].selected == 1 &&
+        artifact.semantics.nodes.data[nav_index].disabled == 0 &&
+        composition_rect_equal(
+            artifact.semantics.nodes.data[root_index].bounds,
+            linux_preview_typography_bounds(artifact.layout)) != 0,
+        "expanded Typography navigation hosts the complete thirteen-row ramp under shared bounds without chart-shaped filler");
+    linux_preview_composition_free(&artifact);
+
+    let medium: LinuxPreviewCompositionArtifact =
+        linux_preview_composition_build_with_fonts_state(
+            1120, 720, light, regular, bold, 3, model, 0);
+    let medium_nav: i32 = semantics_find_index(medium.semantics,
+        linux_preview_composition_nav_id(3));
+    expect(state, linux_preview_composition_valid(medium) != 0 &&
+        medium.selected_navigation == 0 &&
+        medium.typography_available == 0 &&
+        medium.typography_composed == 0 && medium_nav >= 0 &&
+        medium.semantics.nodes.data[medium_nav].disabled == 1 &&
+        medium.semantics.nodes.data[medium_nav].action_mask == 0,
+        "Typography route fails closed at medium size instead of clipping its required type ramp");
+    linux_preview_composition_free(&medium);
+}
+
+fn composition_face(path: []u8) OpenTypeFace {
+    let bytes: []u8 = _zag_read_file(path);
+    if (bytes.len <= 0) {
+        if (bytes.len >= 0) { _zag_free(_zag_slice_ptr(bytes)); }
+        return opentype_face_empty();
+    }
+    let face: OpenTypeFace = opentype_parse(bytes);
+    _zag_free(_zag_slice_ptr(bytes));
+    return face;
+}
+
+fn main() i32 {
+    if (_zag_argc() != 4) {
+        _zag_eprintln("usage: linux-preview-composition-contract <light-font> <regular-font> <bold-font>");
+        _zag_eprintln("  Three DISTINCT font weights are required: ExtraLight/Thin, Regular, Bold.");
+        _zag_eprintln("  The typography specimen validates that light/regular/bold probe hashes");
+        _zag_eprintln("  are non-zero and pairwise distinct.  Passing the same file for all three");
+        _zag_eprintln("  weights causes TypographySpecimenError.weight_not_visible.");
+        _zag_eprintln("  Example: DejaVuSans-ExtraLight.ttf DejaVuSans.ttf DejaVuSans-Bold.ttf");
+        return 2;
+    }
+    let light: OpenTypeFace = composition_face(_zag_arg(1));
+    let face: OpenTypeFace = composition_face(_zag_arg(2));
+    let bold: OpenTypeFace = composition_face(_zag_arg(3));
+    if (light.error != OpenTypeError.none ||
+        face.error != OpenTypeError.none ||
+        bold.error != OpenTypeError.none) {
+        opentype_face_free(&bold);
+        opentype_face_free(&face);
+        opentype_face_free(&light);
+        _zag_eprintln("Linux preview composition: OpenType parse failed");
+        return 4;
+    }
+
+    let state: TestState = TestState{ .passed = 0, .failed = 0 };
+    let medium_hash: i64 = composition_size_contract(&state, face,
+        1120, 720, LinuxPreviewLayoutMode.medium, 1, 0);
+    let expanded_hash: i64 = composition_size_contract(&state, face,
+        1360, 900, LinuxPreviewLayoutMode.expanded, 1, 1);
+    let compact_hash: i64 = composition_size_contract(&state, face,
+        800, 600, LinuxPreviewLayoutMode.compact, 0, 0);
+    let repeated_hash: i64 = composition_size_contract(&state, face,
+        1120, 720, LinuxPreviewLayoutMode.medium, 1, 0);
+    expect(&state, medium_hash != 0 && medium_hash == repeated_hash &&
+        medium_hash != expanded_hash && medium_hash != compact_hash &&
+        expanded_hash != compact_hash,
+        "identical composition is deterministic while responsive geometry changes evidence");
+    token_inspector_contract(&state, face, medium_hash);
+    selected_segment_contract(&state, face, medium_hash);
+    segment_interaction_truth_contract(&state, face);
+    general_interaction_truth_contract(&state, face);
+    components_route_contract(&state, face);
+    typography_route_contract(&state, &light, &face, &bold);
+    unsupported_viewport_contract(&state, face);
+
+    opentype_face_free(&bold);
+    opentype_face_free(&face);
+    opentype_face_free(&light);
+    _zag_print("Linux preview composition: pass=");
+    _zag_print_i64(state.passed as i64);
+    _zag_print(" fail="); _zag_print_i64(state.failed as i64);
+    _zag_println("");
+    if (state.failed == 0) { return 0; }
+    return 1;
+}

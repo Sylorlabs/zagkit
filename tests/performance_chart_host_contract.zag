@@ -1,0 +1,352 @@
+@import("../src/components/performance_chart.zag")
+
+struct TestState { passed: i32, failed: i32 }
+
+struct HostedDestination {
+    display: DisplayList,
+    semantics: SemanticsTree,
+    hits: HitTree,
+}
+
+fn expect(state: *TestState, condition: i32, name: []u8) void {
+    if (condition != 0) {
+        state.*.passed = state.*.passed + 1;
+        _zag_print("ok  "); _zag_println(name);
+    } else {
+        state.*.failed = state.*.failed + 1;
+        _zag_print("FAIL "); _zag_println(name);
+    }
+}
+
+fn host_chart_points(y0: i64, y1: i64, y2: i64, y3: i64,
+    t0: []u8, t1: []u8, t2: []u8, t3: []u8)
+    ArrayList[PerformanceChartPoint] {
+    let points: ArrayList[PerformanceChartPoint] =
+        make[PerformanceChartPoint](4);
+    push[PerformanceChartPoint](&points,
+        performance_chart_point(0, y0, "0 s", t0));
+    push[PerformanceChartPoint](&points,
+        performance_chart_point(10, y1, "10 s", t1));
+    push[PerformanceChartPoint](&points,
+        performance_chart_point(20, y2, "20 s", t2));
+    push[PerformanceChartPoint](&points,
+        performance_chart_point(30, y3, "30 s", t3));
+    return points;
+}
+
+fn hosted_destination_init(destination: *HostedDestination,
+    existing_focus_order: i64) void {
+    let host_resource: RenderResourceSpec = render_resource_spec(910000,
+        RenderResourceKind.svg_source, "<svg/>", 1);
+    _ = display_list_add_resource(&destination.*.display, host_resource);
+    let background: DisplayOp = display_op(
+        DisplayOpKind.fill_rect, node_key(8000));
+    background.bounds = rect(0, 0, 960 * unit_scale(), 560 * unit_scale());
+    background.paint = semantic_color_paint(SemanticColorToken.canvas);
+    _ = display_list_push(&destination.display, background);
+    let semantic_parent: SemanticsSpec = semantics_spec(node_key(8000),
+        semantic_root_key(), SemanticRole.group, "Hosted chart region");
+    semantic_parent.has_bounds = 1; semantic_parent.bounds = background.bounds;
+    _ = semantics_add(&destination.semantics, semantic_parent);
+    let hit_parent: HitNode = hit_node(node_key(9000), hit_root_key(),
+        background.bounds);
+    _ = hit_tree_add(&destination.hits, hit_parent);
+    if (existing_focus_order > 0) {
+        let focused: SemanticsSpec = semantics_spec(node_key(8001),
+            node_key(8000), SemanticRole.button, "Existing focus target");
+        focused.focus_order = existing_focus_order;
+        focused.action_mask = semantic_actions(SemanticAction.focus);
+        focused.has_bounds = 1;
+        focused.bounds = rect(8 * unit_scale(), 8 * unit_scale(),
+            80 * unit_scale(), 40 * unit_scale());
+        _ = semantics_add(&destination.semantics, focused);
+    }
+}
+
+fn hosted_destination_free(destination: *HostedDestination) void {
+    hit_tree_free(&destination.*.hits);
+    semantics_tree_free(&destination.*.semantics);
+    display_list_free(&destination.*.display);
+}
+
+fn hosted_semantic_collision_init(destination: *HostedDestination,
+    collision_id: NodeKey) void {
+    hosted_destination_init(destination, 0);
+    let colliding: SemanticsSpec = semantics_spec(collision_id,
+        node_key(8000), SemanticRole.group, "Collision");
+    _ = semantics_add(&destination.*.semantics, colliding);
+}
+
+fn hosted_hit_collision_init(destination: *HostedDestination,
+    collision_id: NodeKey) void {
+    hosted_destination_init(destination, 0);
+    _ = hit_tree_add(&destination.*.hits,
+        hit_node(collision_id, node_key(9000),
+            rect(0, 0, 40 * unit_scale(), 40 * unit_scale())));
+}
+
+fn stable_slot_present(artifact: *PerformanceChartArtifact, id: NodeKey,
+    kind: PerformanceChartTextSlotKind) i32 {
+    let i: i32 = 0;
+    while (i < artifact.*.text_slots.len) {
+        if (node_key_equal(artifact.*.text_slots.data[i].id, id) != 0 &&
+            artifact.*.text_slots.data[i].kind == kind) { return 1; }
+        i = i + 1;
+    }
+    return 0;
+}
+
+fn hosted_success_contract(state: *TestState,
+    artifact: *PerformanceChartArtifact) void {
+    let destination: HostedDestination = HostedDestination{
+        .display = display_list_make(), .semantics = semantics_tree_make(),
+        .hits = hit_tree_make(),
+    };
+    hosted_destination_init(&destination, 0);
+    let semantic_before: i32 = destination.semantics.nodes.len;
+    let hit_before: i32 = destination.hits.nodes.len;
+    let ops_before: i32 = destination.display.ops.len;
+    let resources_before: i32 =
+        destination.display.resources.resources.len;
+    let result: PerformanceChartHostResult = performance_chart_contribute_hosted(
+        artifact, performance_chart_host_spec(node_key(8000), node_key(9000), 20),
+        &destination.display, &destination.semantics, &destination.hits);
+    expect(state, result.error == PerformanceChartHostError.none &&
+        result.semantic_nodes_added == artifact.*.semantics.nodes.len &&
+        result.hit_nodes_added == artifact.*.hits.nodes.len &&
+        destination.semantics.nodes.len == semantic_before +
+            artifact.*.semantics.nodes.len &&
+        destination.hits.nodes.len == hit_before + artifact.*.hits.nodes.len &&
+        destination.display.ops.len == ops_before +
+            artifact.*.canvas.display.ops.len + 4 &&
+        result.display_resources_added ==
+            artifact.*.canvas.display.resources.resources.len &&
+        destination.display.resources.resources.len == resources_before +
+            artifact.*.canvas.display.resources.resources.len &&
+        render_resource_find_index(destination.display.resources, 910000) >= 0,
+        "host contribution adds exact display semantic and hit counts");
+
+    let chart_semantic: i32 = semantics_find_index(destination.semantics,
+        artifact.*.canvas.key);
+    let chart_hit: i32 = hit_tree_find_index(destination.hits,
+        artifact.*.canvas.key);
+    let series_hit: i32 = hit_tree_find_index(destination.hits, node_key(7100));
+    let legend: i32 = semantics_find_index(destination.semantics,
+        performance_chart_legend_id(artifact.*.canvas.key));
+    let series: i32 = semantics_find_index(destination.semantics, node_key(7100));
+    let table: i32 = semantics_find_index(destination.semantics,
+        performance_chart_table_id(artifact.*.canvas.key));
+    let title: i32 = semantics_find_index(destination.semantics,
+        performance_chart_title_id(artifact.*.canvas.key));
+    expect(state, chart_semantic >= 0 && chart_hit >= 0 && series_hit >= 0 &&
+        legend >= 0 && series >= 0 && table >= 0 && title >= 0 &&
+        node_key_equal(destination.semantics.nodes.data[chart_semantic].parent,
+            node_key(8000)) != 0 &&
+        node_key_equal(destination.hits.nodes.data[chart_hit].parent,
+            node_key(9000)) != 0 &&
+        node_key_equal(destination.hits.nodes.data[series_hit].parent,
+            artifact.*.canvas.key) != 0 &&
+        node_key_equal(destination.semantics.nodes.data[legend].parent,
+            artifact.*.canvas.key) != 0 &&
+        node_key_equal(destination.semantics.nodes.data[series].parent,
+            performance_chart_legend_id(artifact.*.canvas.key)) != 0 &&
+        node_key_equal(destination.semantics.nodes.data[table].parent,
+            artifact.*.canvas.key) != 0 &&
+        node_key_equal(destination.semantics.nodes.data[title].parent,
+            artifact.*.canvas.key) != 0,
+        "only the chart roots are reparented beneath explicit host parents");
+    expect(state, destination.semantics.nodes.data[series].focus_order == 21 &&
+        destination.semantics.nodes.data[
+            semantics_find_index(destination.semantics, node_key(7101))
+        ].focus_order == 22,
+        "host focus offset deterministically shifts non-zero chart orders");
+    expect(state, stable_slot_present(artifact,
+            performance_chart_title_id(artifact.*.canvas.key),
+            PerformanceChartTextSlotKind.title) != 0 &&
+        stable_slot_present(artifact, node_key(7100),
+            PerformanceChartTextSlotKind.legend_name) != 0 &&
+        semantics_find_index(destination.semantics,
+            performance_chart_table_cell_id(artifact.*.canvas.key, 2, 2)) >= 0,
+        "host contribution preserves chart table legend and text-slot identities");
+
+    let repeated: HostedDestination = HostedDestination{
+        .display = display_list_make(), .semantics = semantics_tree_make(),
+        .hits = hit_tree_make(),
+    };
+    hosted_destination_init(&repeated, 0);
+    let repeated_result: PerformanceChartHostResult =
+        performance_chart_contribute_hosted(artifact,
+            performance_chart_host_spec(node_key(8000), node_key(9000), 20),
+            &repeated.display, &repeated.semantics, &repeated.hits);
+    expect(state, repeated_result.error == PerformanceChartHostError.none &&
+        repeated.display.content_hash == destination.display.content_hash &&
+        repeated.display.ops.len == destination.display.ops.len &&
+        repeated.display.resources.content_hash ==
+            destination.display.resources.content_hash,
+        "identical hosted input produces deterministic caller-owned display content");
+    hosted_destination_free(&repeated);
+    hosted_destination_free(&destination);
+}
+
+fn hosted_failure_contract(state: *TestState,
+    artifact: *PerformanceChartArtifact) void {
+    let duplicate_semantic: HostedDestination = HostedDestination{
+        .display = display_list_make(), .semantics = semantics_tree_make(),
+        .hits = hit_tree_make(),
+    };
+    hosted_semantic_collision_init(&duplicate_semantic,
+        performance_chart_table_id(artifact.*.canvas.key));
+    let semantic_length: i32 = duplicate_semantic.semantics.nodes.len;
+    let semantic_revision: i64 = duplicate_semantic.semantics.revision;
+    let hit_length: i32 = duplicate_semantic.hits.nodes.len;
+    let display_hash: i64 = duplicate_semantic.display.content_hash;
+    let duplicate_result: PerformanceChartHostResult =
+        performance_chart_contribute_hosted(artifact,
+            performance_chart_host_spec(node_key(8000), node_key(9000), 0),
+            &duplicate_semantic.display, &duplicate_semantic.semantics,
+            &duplicate_semantic.hits);
+    expect(state,
+        duplicate_result.error == PerformanceChartHostError.duplicate_semantic_id &&
+        duplicate_semantic.semantics.nodes.len == semantic_length &&
+        duplicate_semantic.semantics.revision == semantic_revision &&
+        duplicate_semantic.hits.nodes.len == hit_length &&
+        duplicate_semantic.display.content_hash == display_hash,
+        "duplicate semantic identity fails atomically before host mutation");
+    hosted_destination_free(&duplicate_semantic);
+
+    let duplicate_hit: HostedDestination = HostedDestination{
+        .display = display_list_make(), .semantics = semantics_tree_make(),
+        .hits = hit_tree_make(),
+    };
+    hosted_hit_collision_init(&duplicate_hit, node_key(7100));
+    let duplicate_hit_length: i32 = duplicate_hit.hits.nodes.len;
+    let duplicate_hit_revision: i64 = duplicate_hit.hits.revision;
+    let duplicate_hit_semantics: i32 = duplicate_hit.semantics.nodes.len;
+    let duplicate_hit_hash: i64 = duplicate_hit.display.content_hash;
+    let hit_result: PerformanceChartHostResult =
+        performance_chart_contribute_hosted(artifact,
+            performance_chart_host_spec(node_key(8000), node_key(9000), 0),
+            &duplicate_hit.display, &duplicate_hit.semantics, &duplicate_hit.hits);
+    expect(state, hit_result.error == PerformanceChartHostError.duplicate_hit_id &&
+        duplicate_hit.hits.nodes.len == duplicate_hit_length &&
+        duplicate_hit.hits.revision == duplicate_hit_revision &&
+        duplicate_hit.semantics.nodes.len == duplicate_hit_semantics &&
+        duplicate_hit.display.content_hash == duplicate_hit_hash,
+        "duplicate hit identity also leaves every destination atomic");
+    hosted_destination_free(&duplicate_hit);
+
+    let missing: HostedDestination = HostedDestination{
+        .display = display_list_make(), .semantics = semantics_tree_make(),
+        .hits = hit_tree_make(),
+    };
+    hosted_destination_init(&missing, 0);
+    let missing_semantic: PerformanceChartHostResult =
+        performance_chart_contribute_hosted(artifact,
+            performance_chart_host_spec(node_key(9998), node_key(9000), 0),
+            &missing.display, &missing.semantics, &missing.hits);
+    let missing_hit: PerformanceChartHostResult = performance_chart_contribute_hosted(
+        artifact, performance_chart_host_spec(node_key(8000), node_key(9999), 0),
+        &missing.display, &missing.semantics, &missing.hits);
+    expect(state,
+        missing_semantic.error ==
+            PerformanceChartHostError.missing_semantic_parent &&
+        missing_hit.error == PerformanceChartHostError.missing_hit_parent &&
+        missing.semantics.nodes.len == 1 && missing.hits.nodes.len == 1 &&
+        missing.display.ops.len == 1,
+        "missing semantic and hit parents fail closed without mutation");
+    hosted_destination_free(&missing);
+
+    let focus_collision: HostedDestination = HostedDestination{
+        .display = display_list_make(), .semantics = semantics_tree_make(),
+        .hits = hit_tree_make(),
+    };
+    hosted_destination_init(&focus_collision, 21);
+    let focus_length: i32 = focus_collision.semantics.nodes.len;
+    let rejected: PerformanceChartHostResult = performance_chart_contribute_hosted(
+        artifact, performance_chart_host_spec(node_key(8000), node_key(9000), 20),
+        &focus_collision.display, &focus_collision.semantics,
+        &focus_collision.hits);
+    let accepted: PerformanceChartHostResult = performance_chart_contribute_hosted(
+        artifact, performance_chart_host_spec(node_key(8000), node_key(9000), 30),
+        &focus_collision.display, &focus_collision.semantics,
+        &focus_collision.hits);
+    let shifted: i32 = semantics_find_index(focus_collision.semantics,
+        node_key(7100));
+    expect(state,
+        rejected.error == PerformanceChartHostError.focus_order_collision &&
+        accepted.error == PerformanceChartHostError.none &&
+        focus_collision.semantics.nodes.len == focus_length +
+            artifact.*.semantics.nodes.len && shifted >= 0 &&
+        focus_collision.semantics.nodes.data[shifted].focus_order == 31,
+        "explicit focus offset rejects collisions and accepts a disjoint range");
+    hosted_destination_free(&focus_collision);
+}
+
+fn main() i32 {
+    let state: TestState = TestState{ .passed = 0, .failed = 0 };
+    let cpu: ArrayList[PerformanceChartPoint] = host_chart_points(
+        10, 11, 12, 10, "10 ms", "11 ms", "12 ms", "10 ms");
+    let gpu: ArrayList[PerformanceChartPoint] = host_chart_points(
+        8, 7, 9, 8, "8 ms", "7 ms", "9 ms", "8 ms");
+    let fallback: ArrayList[PerformanceChartPoint] = host_chart_points(
+        20, 19, 21, 20, "20 ms", "19 ms", "21 ms", "20 ms");
+    let series: ArrayList[PerformanceChartSeries] =
+        make[PerformanceChartSeries](3);
+    let x_ticks: ArrayList[[]u8] = make[[]u8](7);
+    push[[]u8](&x_ticks, "0 s"); push[[]u8](&x_ticks, "5 s");
+    push[[]u8](&x_ticks, "10 s"); push[[]u8](&x_ticks, "15 s");
+    push[[]u8](&x_ticks, "20 s"); push[[]u8](&x_ticks, "25 s");
+    push[[]u8](&x_ticks, "30 s");
+    let y_ticks: ArrayList[[]u8] = make[[]u8](7);
+    push[[]u8](&y_ticks, "24 ms"); push[[]u8](&y_ticks, "20 ms");
+    push[[]u8](&y_ticks, "16 ms"); push[[]u8](&y_ticks, "12 ms");
+    push[[]u8](&y_ticks, "8 ms"); push[[]u8](&y_ticks, "4 ms");
+    push[[]u8](&y_ticks, "0 ms");
+
+    let cpu_series: PerformanceChartSeries = performance_chart_series(
+        node_key(7100), "CPU oracle", cpu,
+        SemanticColorToken.chart_series_primary);
+    cpu_series.description = "Deterministic reference renderer";
+    cpu_series.selected = 1; cpu_series.focused = 1;
+    push[PerformanceChartSeries](&series, cpu_series);
+    let gpu_series: PerformanceChartSeries = performance_chart_series(
+        node_key(7101), "GPU transport", gpu,
+        SemanticColorToken.chart_series_secondary);
+    gpu_series.description = "Experimental accelerated transport";
+    push[PerformanceChartSeries](&series, gpu_series);
+    let fallback_series: PerformanceChartSeries = performance_chart_series(
+        node_key(7102), "Unavailable fallback", fallback,
+        SemanticColorToken.chart_series_tertiary);
+    fallback_series.description = "Disabled backend comparison";
+    fallback_series.disabled = 1;
+    push[PerformanceChartSeries](&series, fallback_series);
+
+    let spec: PerformanceChartSpec = performance_chart_spec(node_key(7000),
+        rect(0, 0, 960 * unit_scale(), 560 * unit_scale()),
+        series, x_ticks, y_ticks);
+    spec.title = "Frame pacing performance";
+    spec.description = "CPU and GPU frame times across a thirty-second run";
+    spec.x_axis_name = "Elapsed time"; spec.x_axis_unit = "seconds";
+    spec.y_axis_name = "Frame time"; spec.y_axis_unit = "milliseconds";
+    spec.x_min = 0; spec.x_max = 30; spec.y_min = 0; spec.y_max = 24;
+    spec.x_tick_count = 7; spec.y_tick_count = 7;
+    spec.baseline_value = 8; spec.baseline_name = "Eight millisecond baseline";
+    spec.deadline_value = 16;
+    spec.deadline_name = "Sixteen millisecond deadline";
+    let artifact: PerformanceChartArtifact = performance_chart_build(spec);
+
+    hosted_success_contract(&state, &artifact);
+    hosted_failure_contract(&state, &artifact);
+
+    performance_chart_free(&artifact);
+    free[PerformanceChartSeries](&series);
+    free[PerformanceChartPoint](&fallback);
+    free[PerformanceChartPoint](&gpu);
+    free[PerformanceChartPoint](&cpu);
+    free[[]u8](&y_ticks); free[[]u8](&x_ticks);
+    _zag_print("Performance chart host contract: pass=");
+    _zag_print_i64(state.passed as i64);
+    _zag_print(" fail="); _zag_print_i64(state.failed as i64); _zag_println("");
+    if (state.failed == 0) { return 0; }
+    return 1;
+}

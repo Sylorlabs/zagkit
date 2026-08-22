@@ -1,0 +1,118 @@
+@import("../src/text/glyph_run.zag")
+@import("../src/render/png_encode.zag")
+
+fn typography_fill(list: *DisplayList, id: i64, bounds: Rect, paint: Paint) i32 {
+    let op: DisplayOp = display_op(DisplayOpKind.fill_rect, node_key(id));
+    op.bounds = bounds; op.paint = paint;
+    return (display_list_push(list, op) == DisplayError.none) as i32;
+}
+
+fn typography_round(list: *DisplayList, id: i64, bounds: Rect,
+    radius: i64, paint: Paint) i32 {
+    let op: DisplayOp = display_op(DisplayOpKind.fill_rounded_rect, node_key(id));
+    op.bounds = bounds; op.parameter = radius; op.paint = paint;
+    return (display_list_push(list, op) == DisplayError.none) as i32;
+}
+
+fn typography_text(list: *DisplayList, face: OpenTypeFace, id: i64,
+    text: []u8, size: i64, x: i64, baseline: i64, paint: Paint) i32 {
+    let run: NominalGlyphRun = nominal_glyph_run_ltr(face, text, size, x, baseline);
+    if (run.error != GlyphRunError.none) { nominal_glyph_run_free(&run); return 0; }
+    let glyph_index: i32 = 0;
+    while (glyph_index < run.glyphs.len) {
+        let glyph: PositionedGlyph = run.glyphs.data[glyph_index];
+        let outline: GlyphOutline = opentype_glyph_outline(face, glyph.glyph_id);
+        if (outline.error != OpenTypeError.none) {
+            opentype_glyph_outline_free(&outline); nominal_glyph_run_free(&run); return 0;
+        }
+        if (outline.points.len > 0) {
+            let glyph_path: GlyphPathResult = glyph_outline_to_path(outline,
+                face.units_per_em, run.font_size, glyph.origin_x, glyph.origin_y);
+            opentype_glyph_outline_free(&outline);
+            if (glyph_path.error != GlyphPathError.none) {
+                glyph_path_result_free(&glyph_path); nominal_glyph_run_free(&run); return 0;
+            }
+            let encoded: PathEncodeResult = path_encode(glyph_path.path);
+            glyph_path_result_free(&glyph_path);
+            if (encoded.error != PathError.none) {
+                path_encode_free(&encoded); nominal_glyph_run_free(&run); return 0;
+            }
+            let glyph_resource_id: i64 = id + glyph_index;
+            let resource_error: RenderResourceError = display_list_add_resource(list,
+                render_resource_spec(glyph_resource_id, RenderResourceKind.path,
+                    encoded.bytes.data[0..encoded.bytes.len], path_resource_format_tag()));
+            path_encode_free(&encoded);
+            if (resource_error != RenderResourceError.none) {
+                nominal_glyph_run_free(&run); return 0;
+            }
+            let draw: DisplayOp = display_op(DisplayOpKind.draw_path,
+                node_key(glyph_resource_id));
+            draw.resource_id = glyph_resource_id; draw.paint = paint;
+            if (display_list_push(list, draw) != DisplayError.none) {
+                nominal_glyph_run_free(&run); return 0;
+            }
+        } else {
+            opentype_glyph_outline_free(&outline);
+        }
+        glyph_index = glyph_index + 1;
+    }
+    nominal_glyph_run_free(&run);
+    return 1;
+}
+
+fn main() i32 {
+    if (_zag_argc() != 3) {
+        _zag_eprintln("usage: render-system-font-reference <font.ttf> <output.png>");
+        return 2;
+    }
+    let font_bytes: []u8 = _zag_read_file(_zag_arg(1));
+    if (font_bytes.len <= 0) { return 3; }
+    let face: OpenTypeFace = opentype_parse(font_bytes);
+    _zag_free(_zag_slice_ptr(font_bytes));
+    if (face.error != OpenTypeError.none) { opentype_face_free(&face); return 4; }
+    let list: DisplayList = display_list_make();
+    let scale: i64 = unit_scale();
+    let ok: i32 = 1;
+    ok = ok & typography_fill(&list, 1, rect(0, 0, 960 * scale, 320 * scale),
+        paint_rgba16(900, 1300, 2600, 65535));
+    ok = ok & typography_round(&list, 2,
+        rect(36 * scale, 32 * scale, 888 * scale, 256 * scale), 30 * scale,
+        paint_rgba16(3500, 5200, 9800, 62000));
+    ok = ok & typography_round(&list, 3,
+        rect(72 * scale, 58 * scale, 78 * scale, 8 * scale), 4 * scale,
+        paint_rgba16(12000, 50000, 65535, 65535));
+    ok = ok & typography_text(&list, face, 1000, "Zagkit", 84 * scale,
+        72 * scale, 158 * scale, paint_rgba16(61000, 63500, 65535, 65535));
+    ok = ok & typography_text(&list, face, 2000, "Fluid. precise. native.", 31 * scale,
+        76 * scale, 221 * scale, paint_rgba16(34000, 40500, 52000, 65535));
+    ok = ok & typography_round(&list, 4,
+        rect(760 * scale, 74 * scale, 118 * scale, 42 * scale), 21 * scale,
+        paint_rgba16(8500, 33000, 56000, 56000));
+    ok = ok & typography_text(&list, face, 3000, "CPU oracle", 16 * scale,
+        776 * scale, 101 * scale, paint_rgba16(44000, 56000, 65535, 65535));
+    if (ok == 0 || display_list_seal(&list) != DisplayError.none) {
+        display_list_free(&list); opentype_face_free(&face); return 5;
+    }
+    let raster: CpuRasterResult = cpu_rasterize(list, 960, 320);
+    if (raster.error != CpuRasterError.none) {
+        let raster_error: []u8 = _zag_i64_to_str(raster.error as i64);
+        let raster_op: []u8 = _zag_i64_to_str(raster.error_op as i64);
+        _zag_eprintln("typography reference: CPU raster error follows");
+        _zag_eprintln(raster_error); _zag_str_free(raster_error);
+        _zag_eprintln("typography reference: failing operation follows");
+        _zag_eprintln(raster_op); _zag_str_free(raster_op);
+        cpu_raster_free(&raster); display_list_free(&list);
+        opentype_face_free(&face); return 6;
+    }
+    let png: PngEncodeResult = png_encode_surface(raster.surface);
+    if (png.error != PngEncodeError.none) {
+        png_encode_free(&png); cpu_raster_free(&raster);
+        display_list_free(&list); opentype_face_free(&face); return 7;
+    }
+    let write_error: i32 = _zag_write_file(_zag_arg(2),
+        png.bytes.data[0..png.bytes.len]);
+    png_encode_free(&png); cpu_raster_free(&raster);
+    display_list_free(&list); opentype_face_free(&face);
+    if (write_error != 0) { return 8; }
+    return 0;
+}

@@ -1,0 +1,329 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+ZAG_BIN=${ZAG_BIN:-${ZNC:-/home/micah/Desktop/Sylorlabs/zag/zag-poc/znc}}
+LAUNCH_DIR="$ROOT_DIR/artifacts/launch"
+BUILD_DIR="$ROOT_DIR/.zagkit"
+HEADLESS_REFERENCE="$ROOT_DIR/tools/render-headless-reference.zag"
+REF_BINARY="$BUILD_DIR/headless-reference"
+REF_IMAGE="$LAUNCH_DIR/headless-reference.png"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  ./zagkit init [path]
+  ./zagkit build [--path <path>] [--output <binary>]
+  ./zagkit run [--linux-preview] [--project <path>] [--binary <binary>] [--output <png>] [--headless-only] [--show-ascii] [--open]
+  ./zagkit test
+
+Current status: this command exposes the deterministic headless reference and
+an experimental native Linux X11 fallback preview. Wayland, accessibility,
+GPU presentation, macOS, Windows, iOS, and Android remain unavailable.
+
+Automation naming note: native automation is called "Zagkit Talkback"
+and is distinct from Android TalkBack. This distinction is documented in
+docs/automation/talkback.md.
+EOF
+}
+
+require_pillow() {
+  if ! python3 - <<'PY' >/dev/null 2>&1
+import importlib.util
+import sys
+sys.exit(0 if importlib.util.find_spec("PIL") else 1)
+PY
+  then
+    return 1
+  fi
+}
+
+require_toolchain() {
+  if ! [ -x "$ZAG_BIN" ]; then
+    printf 'zagkit: missing compiler executable: %s\n' "$ZAG_BIN" >&2
+    printf 'Set ZAG_BIN to a valid executable and retry.\n' >&2
+    exit 2
+  fi
+}
+
+run_headless_reference() {
+  local binary output source_file do_compile
+  binary="${1}"
+  output="${2}"
+  source_file="${3:-$HEADLESS_REFERENCE}"
+  do_compile="${4:-0}"
+  printf 'zagkit: running headless reference from %s\n' "$source_file"
+  mkdir -p "$BUILD_DIR" "$LAUNCH_DIR"
+  if [ "$do_compile" -eq 1 ] && [ "$source_file" != "" ]; then
+    "$ZAG_BIN" "$source_file" --no-zagd --analyze-strict --no-foreground-cache -o "$binary"
+  fi
+  "$binary" "$output"
+}
+
+resolve_project_dir() {
+  local input="${1:-.}"
+  if ! cd "$input" 2>/dev/null; then
+    printf 'zagkit: invalid project path: %s\n' "$input" >&2
+    exit 2
+  fi
+  printf '%s\n' "$PWD"
+}
+
+ensure_project_dir() {
+  local input="${1:-.}"
+  mkdir -p "$input"
+  if ! cd "$input" 2>/dev/null; then
+    printf 'zagkit: invalid project path: %s\n' "$input" >&2
+    exit 2
+  fi
+  printf '%s\n' "$PWD"
+}
+
+build_headless_reference() {
+  local source_file="$1"
+  local output="$2"
+  require_toolchain
+  mkdir -p "$BUILD_DIR"
+  printf 'zagkit: building %s to %s\n' "$source_file" "$output"
+  "$ZAG_BIN" "$source_file" --no-zagd --analyze-strict --no-foreground-cache -o "$output"
+  printf '%s\n' "$output"
+}
+
+cmd_init() {
+  local target="${1:-.}"
+  target=$(ensure_project_dir "$target")
+  mkdir -p "$target/src" "$target/.zagkit"
+  if [ ! -f "$target/zag.mod" ]; then
+    cat > "$target/zag.mod" <<'EOF'
+name = "zagkit-app"
+version = "0.1.0-experimental.0"
+edition = "1.0"
+main = "src/main.zag"
+EOF
+  fi
+  if [ ! -f "$target/src/main.zag" ]; then
+    cat > "$target/src/main.zag" <<'EOF'
+// Placeholder Zag app entrypoint.
+// This repository currently supports headless reference rendering only.
+// Replace this with your app scene once your project bootstrap is in place.
+
+fn main() i32 {
+    _zag_eprintln("zagkit: add your app entrypoint scene here");
+    return 0;
+}
+EOF
+  fi
+  if [ ! -f "$target/.gitignore" ]; then
+    cat > "$target/.gitignore" <<'EOF'
+.zagkit/
+artifacts/
+*.zwg
+EOF
+  fi
+  if [ ! -f "$target/README.md" ]; then
+    cat > "$target/README.md" <<'EOF'
+# Zagkit app
+
+This project was scaffolded with `./zagkit init`.
+
+- `./zagkit build --output <binary>` builds a headless binary.
+- `./zagkit run --headless-only --binary <binary> --output <png>` renders a deterministic PNG.
+- `./zagkit test` runs headless contracts.
+EOF
+  fi
+  printf 'zagkit: initialized project scaffold at %s\n' "$target"
+  printf 'zagkit: use `./zagkit build` from that project root for current headless reference tooling\n'
+}
+
+cmd_build() {
+  local output="$REF_BINARY"
+  local source_file="$HEADLESS_REFERENCE"
+  local arg
+  if [ $# -eq 0 ]; then
+    build_headless_reference "$source_file" "$output"
+    return
+  fi
+  while [ $# -gt 0 ]; do
+    arg="$1"; shift
+    case "$arg" in
+      --path)
+        [ $# -ge 1 ] || { printf "zagkit build: --path needs a path\n" >&2; exit 2; }
+        source_file="$(resolve_project_dir "$1")/src/main.zag"
+        shift ;;
+      --output)
+        [ $# -ge 1 ] || { printf "zagkit build: --output needs a path\n" >&2; exit 2; }
+        output="$1"; shift;;
+      help|-h|--help)
+        usage
+        return 0
+        ;;
+      *)
+        printf 'zagkit build: unknown flag: %s\n' "$arg" >&2
+        usage
+        exit 2
+        ;;
+    esac
+  done
+  if [ ! -f "$source_file" ]; then
+    printf 'zagkit build: source missing for project root build: %s\n' "$source_file" >&2
+    exit 2
+  fi
+  build_headless_reference "$source_file" "$output"
+}
+
+cmd_test() {
+  "$ROOT_DIR/tools/test-headless.sh"
+}
+
+cmd_run() {
+  local binary="$REF_BINARY"
+  local output="$REF_IMAGE"
+  local project_root=""
+  local explicit_binary=0
+  local headless_only=1
+  local linux_preview=0
+  local show_ascii=0
+  local open_output=0
+  local explicit_output=0
+  local source_file=""
+  local run_source_file="$HEADLESS_REFERENCE"
+  local compile_reference=1
+  local arg
+  while [ $# -gt 0 ]; do
+    arg="$1"; shift
+    case "$arg" in
+      --project)
+        [ $# -ge 1 ] || { printf "zagkit run: --project needs a path\n" >&2; exit 2; }
+        project_root="$(resolve_project_dir "$1")"
+        shift ;;
+      --binary)
+        [ $# -ge 1 ] || { printf "zagkit run: --binary needs a path\n" >&2; exit 2; }
+        explicit_binary=1
+        binary="$1"; shift;;
+      --output)
+        [ $# -ge 1 ] || { printf "zagkit run: --output needs a path\n" >&2; exit 2; }
+        output="$1"; explicit_output=1; shift;;
+      --headless-only)
+        headless_only=1;;
+      --linux-preview)
+        linux_preview=1
+        headless_only=0;;
+      --show-ascii)
+        show_ascii=1;;
+      --open)
+        open_output=1;;
+      *)
+        printf 'zagkit run: unknown flag: %s\n' "$arg" >&2
+        usage
+        exit 2;;
+    esac
+  done
+
+  if [ "$linux_preview" -eq 1 ]; then
+    if [ -n "$project_root" ] || [ "$explicit_binary" -eq 1 ] || [ "$show_ascii" -eq 1 ] || [ "$open_output" -eq 1 ]; then
+      printf 'zagkit run: --linux-preview cannot be combined with project, binary, ascii, or opener flags\n' >&2
+      exit 2
+    fi
+    if [ "$explicit_output" -eq 1 ]; then
+      exec "$ROOT_DIR/tools/run-linux-preview.sh" --capture-once "$output"
+    fi
+    exec "$ROOT_DIR/tools/run-linux-preview.sh"
+  fi
+
+  if [ "$headless_only" -eq 1 ]; then
+    if [ -n "$project_root" ]; then
+      source_file="$project_root/src/main.zag"
+      if [ ! -f "$source_file" ]; then
+        printf 'zagkit run: project source missing: %s\n' "$source_file" >&2
+        exit 2
+      fi
+      if [ "$explicit_binary" -eq 1 ]; then
+        printf 'zagkit run: --binary is ignored when --project is provided\n'
+      fi
+      binary="$BUILD_DIR/headless-project-reference"
+      build_headless_reference "$source_file" "$binary" >/dev/null
+      run_source_file="$source_file"
+      compile_reference=0
+    elif [ "$explicit_binary" -eq 1 ]; then
+      if [ ! -x "$binary" ]; then
+        printf 'zagkit run: binary missing: %s\n' "$binary" >&2
+        exit 2
+      fi
+      compile_reference=0
+    fi
+    printf 'zagkit: running headless-only reference path\n'
+    run_headless_reference "$binary" "$output" "$run_source_file" "$compile_reference"
+    printf 'zagkit: wrote %s\n' "$output"
+    if [ "$show_ascii" -eq 1 ]; then
+      if ! require_pillow; then
+        printf 'zagkit run: --show-ascii requires Pillow in python (import PIL)\n' >&2
+        exit 2
+      fi
+python3 - <<'PY' "$output"
+from PIL import Image
+import sys
+
+path = sys.argv[1]
+img = Image.open(path).convert("RGB")
+w, h = img.size
+new_w = 120
+new_h = max(1, int(h * new_w / w * 0.5))
+img = img.resize((new_w, new_h))
+chars = ' .:-=+*#%@'
+for y in range(new_h):
+    row = []
+    for x in range(new_w):
+        r, g, b = img.getpixel((x, y))
+        lum = 0.2126 * r + 0.7152 * g + 0.0722 * b
+        idx = int((lum / 255) * (len(chars) - 1))
+        row.append(chars[idx])
+    print(''.join(row))
+PY
+    fi
+    if [ "$open_output" -eq 1 ]; then
+      if command -v xdg-open >/dev/null 2>&1; then
+        setsid xdg-open "$output" >/dev/null 2>&1 < /dev/null || true
+      elif command -v open >/dev/null 2>&1; then
+        setsid open "$output" >/dev/null 2>&1 < /dev/null || true
+      else
+        printf 'zagkit run: no supported output opener found (xdg-open or open)\n' >&2
+        exit 2
+      fi
+    fi
+    exit 0
+  fi
+
+  printf 'zagkit: select --headless-only or --linux-preview\n' >&2
+  exit 2
+}
+
+if [ $# -eq 0 ]; then
+  usage
+  exit 1
+fi
+
+subcommand=$1
+shift
+case "$subcommand" in
+  init)
+    cmd_init "$@"
+    ;;
+  build)
+    cmd_build "$@"
+    ;;
+  run)
+    cmd_run "$@"
+    ;;
+  test)
+    cmd_test
+    ;;
+  help|-h|--help)
+    usage
+    ;;
+  *)
+    printf 'zagkit: unknown command: %s\n' "$subcommand" >&2
+    usage
+    exit 2
+    ;;
+esac

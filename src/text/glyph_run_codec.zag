@@ -1,0 +1,532 @@
+@import("glyph_run.zag")
+
+// ZKGR is an experimental transport for already-positioned glyphs. It is not
+// a shaping engine: a producer remains responsible for bidi resolution,
+// script/language shaping, font fallback, variation selection, and color glyph
+// expansion before producing this resource.
+
+enum GlyphRunDirection {
+    left_to_right,
+    right_to_left,
+    top_to_bottom,
+    bottom_to_top,
+}
+
+enum GlyphRunCodecError {
+    none,
+    source_run_invalid,
+    bad_magic,
+    unsupported_version,
+    invalid_direction,
+    invalid_metadata,
+    invalid_language,
+    invalid_utf8,
+    invalid_count,
+    invalid_glyph,
+    invalid_cluster,
+    invalid_coordinate,
+    truncated,
+    trailing_data,
+    hash_mismatch,
+}
+
+struct GlyphRunCodecLimitations {
+    experimental: i32,
+    already_positioned_only: i32,
+    embeds_font_bytes: i32,
+    supports_multiple_fonts: i32,
+    resolves_color_layers: i32,
+    normalizes_language_tags: i32,
+}
+
+struct ResourceGlyph {
+    glyph_id: i32,
+    cluster_byte_offset: i32,
+    cluster_byte_length: i32,
+    origin_x: i64,
+    origin_y: i64,
+    offset_x: i64,
+    offset_y: i64,
+    advance_x: i64,
+    advance_y: i64,
+}
+
+struct GlyphRunResource {
+    glyphs: ArrayList[ResourceGlyph],
+    utf8: ArrayList[u8],
+    language: ArrayList[u8],
+    direction: GlyphRunDirection,
+    script_tag: i64,
+    font_resource_id: i64,
+    font_size: i64,
+    total_advance_x: i64,
+    total_advance_y: i64,
+}
+
+struct GlyphRunValidationResult {
+    error: GlyphRunCodecError,
+    error_index: i32,
+}
+
+struct GlyphRunBuildResult {
+    run: GlyphRunResource,
+    error: GlyphRunCodecError,
+    error_index: i32,
+}
+
+struct GlyphRunEncodeResult {
+    bytes: ArrayList[u8],
+    error: GlyphRunCodecError,
+    error_index: i32,
+}
+
+struct GlyphRunDecodeResult {
+    run: GlyphRunResource,
+    error: GlyphRunCodecError,
+    error_offset: i64,
+}
+
+fn glyph_run_resource_format_tag() i64 { return 1; }
+fn glyph_run_codec_version() i64 { return 1; }
+fn glyph_run_codec_header_size() i64 { return 92; }
+fn glyph_run_codec_record_size() i64 { return 72; }
+fn glyph_run_codec_glyph_limit() i32 { return 65536; }
+fn glyph_run_codec_text_limit() i32 { return 1048576; }
+fn glyph_run_codec_language_limit() i32 { return 63; }
+
+fn glyph_run_codec_limitations() GlyphRunCodecLimitations {
+    return GlyphRunCodecLimitations{
+        .experimental = 1,
+        .already_positioned_only = 1,
+        .embeds_font_bytes = 0,
+        .supports_multiple_fonts = 0,
+        .resolves_color_layers = 0,
+        .normalizes_language_tags = 0,
+    };
+}
+
+fn glyph_run_resource_make(direction: GlyphRunDirection, script_tag: i64,
+    font_resource_id: i64, font_size: i64) GlyphRunResource {
+    return GlyphRunResource{
+        .glyphs = make[ResourceGlyph](8),
+        .utf8 = make[u8](16),
+        .language = make[u8](8),
+        .direction = direction,
+        .script_tag = script_tag,
+        .font_resource_id = font_resource_id,
+        .font_size = font_size,
+        .total_advance_x = 0,
+        .total_advance_y = 0,
+    };
+}
+
+fn glyph_run_resource_free(run: *GlyphRunResource) void {
+    free[ResourceGlyph](&run.*.glyphs);
+    free[u8](&run.*.utf8);
+    free[u8](&run.*.language);
+}
+
+fn glyph_run_build_free(result: *GlyphRunBuildResult) void {
+    glyph_run_resource_free(&result.*.run);
+}
+
+fn glyph_run_resource_set_text(run: *GlyphRunResource, text: []u8) void {
+    free[u8](&run.*.utf8);
+    run.*.utf8 = make[u8](text.len);
+    let index: i32 = 0;
+    while (index < text.len) {
+        push[u8](&run.*.utf8, text[index]);
+        index = index + 1;
+    }
+}
+
+fn glyph_run_resource_set_language(run: *GlyphRunResource, language: []u8) void {
+    free[u8](&run.*.language);
+    run.*.language = make[u8](language.len);
+    let index: i32 = 0;
+    while (index < language.len) {
+        push[u8](&run.*.language, language[index]);
+        index = index + 1;
+    }
+}
+
+fn glyph_run_script_tag(tag: []u8) i64 {
+    if (tag.len != 4) { return 0 - 1; }
+    return ((tag[0] as i64) << 24) | ((tag[1] as i64) << 16) |
+        ((tag[2] as i64) << 8) | (tag[3] as i64);
+}
+
+fn glyph_run_language_valid(language: ArrayList[u8]) i32 {
+    if (language.len == 0) { return 1; }
+    if (language.len > glyph_run_codec_language_limit() ||
+        language.data[0] == 45 || language.data[language.len - 1] == 45) { return 0; }
+    let previous_hyphen: i32 = 0;
+    let index: i32 = 0;
+    while (index < language.len) {
+        let byte: i32 = language.data[index] as i32;
+        let alpha: i32 = ((byte >= 65 && byte <= 90) ||
+            (byte >= 97 && byte <= 122)) as i32;
+        let digit: i32 = (byte >= 48 && byte <= 57) as i32;
+        if (alpha == 0 && digit == 0 && byte != 45) { return 0; }
+        if (byte == 45 && previous_hyphen != 0) { return 0; }
+        previous_hyphen = (byte == 45) as i32;
+        index = index + 1;
+    }
+    return 1;
+}
+
+fn glyph_run_cluster_boundary(decoded: Utf8DecodeResult, offset: i32,
+    text_length: i32) i32 {
+    if (offset == 0 || offset == text_length) { return 1; }
+    let index: i32 = 0;
+    while (index < decoded.scalars.len) {
+        if (decoded.scalars.data[index].byte_start == offset as i64) { return 1; }
+        index = index + 1;
+    }
+    return 0;
+}
+
+fn glyph_run_validation(error: GlyphRunCodecError,
+    index: i32) GlyphRunValidationResult {
+    return GlyphRunValidationResult{ .error = error, .error_index = index };
+}
+
+fn glyph_run_checked_add(total: i64, value: i64) i64 {
+    let bound: i64 = unbounded_extent();
+    if (value > 0 && total > bound - value) { return bound + 1; }
+    if (value < 0 && total < (0 - bound) - value) { return 0 - bound - 1; }
+    return total + value;
+}
+
+fn glyph_run_resource_validate(run: GlyphRunResource) GlyphRunValidationResult {
+    let direction_code: i64 = run.direction as i64;
+    if (direction_code < 0 || direction_code > 3) {
+        return glyph_run_validation(GlyphRunCodecError.invalid_direction, 0 - 1);
+    }
+    if (run.script_tag < 0 || run.script_tag > 4294967295 ||
+        run.font_resource_id <= 0 || run.font_size <= 0 ||
+        path_fixed_valid(run.font_size) == 0) {
+        return glyph_run_validation(GlyphRunCodecError.invalid_metadata, 0 - 1);
+    }
+    if (glyph_run_language_valid(run.language) == 0) {
+        return glyph_run_validation(GlyphRunCodecError.invalid_language, 0 - 1);
+    }
+    if (run.glyphs.len < 0 || run.glyphs.len > glyph_run_codec_glyph_limit() ||
+        run.utf8.len < 0 || run.utf8.len > glyph_run_codec_text_limit()) {
+        return glyph_run_validation(GlyphRunCodecError.invalid_count, 0 - 1);
+    }
+    let decoded: Utf8DecodeResult = utf8_decode(run.utf8.data[0..run.utf8.len]);
+    if (decoded.error != Utf8Error.none) {
+        utf8_decode_free(&decoded);
+        return glyph_run_validation(GlyphRunCodecError.invalid_utf8, 0 - 1);
+    }
+    let advance_x: i64 = 0;
+    let advance_y: i64 = 0;
+    let index: i32 = 0;
+    while (index < run.glyphs.len) {
+        let glyph: ResourceGlyph = run.glyphs.data[index];
+        if (glyph.glyph_id < 0) {
+            utf8_decode_free(&decoded);
+            return glyph_run_validation(GlyphRunCodecError.invalid_glyph, index);
+        }
+        if (glyph.cluster_byte_offset < 0 || glyph.cluster_byte_length < 0 ||
+            glyph.cluster_byte_offset > run.utf8.len ||
+            glyph.cluster_byte_length > run.utf8.len - glyph.cluster_byte_offset ||
+            glyph_run_cluster_boundary(decoded, glyph.cluster_byte_offset,
+                run.utf8.len) == 0 ||
+            glyph_run_cluster_boundary(decoded,
+                glyph.cluster_byte_offset + glyph.cluster_byte_length,
+                run.utf8.len) == 0) {
+            utf8_decode_free(&decoded);
+            return glyph_run_validation(GlyphRunCodecError.invalid_cluster, index);
+        }
+        if (path_fixed_valid(glyph.origin_x) == 0 ||
+            path_fixed_valid(glyph.origin_y) == 0 ||
+            path_fixed_valid(glyph.offset_x) == 0 ||
+            path_fixed_valid(glyph.offset_y) == 0 ||
+            path_fixed_valid(glyph.advance_x) == 0 ||
+            path_fixed_valid(glyph.advance_y) == 0) {
+            utf8_decode_free(&decoded);
+            return glyph_run_validation(GlyphRunCodecError.invalid_coordinate, index);
+        }
+        advance_x = glyph_run_checked_add(advance_x, glyph.advance_x);
+        advance_y = glyph_run_checked_add(advance_y, glyph.advance_y);
+        if (path_fixed_valid(advance_x) == 0 || path_fixed_valid(advance_y) == 0) {
+            utf8_decode_free(&decoded);
+            return glyph_run_validation(GlyphRunCodecError.invalid_coordinate, index);
+        }
+        index = index + 1;
+    }
+    utf8_decode_free(&decoded);
+    if (path_fixed_valid(run.total_advance_x) == 0 ||
+        path_fixed_valid(run.total_advance_y) == 0 ||
+        advance_x != run.total_advance_x || advance_y != run.total_advance_y) {
+        return glyph_run_validation(GlyphRunCodecError.invalid_coordinate, 0 - 1);
+    }
+    return glyph_run_validation(GlyphRunCodecError.none, 0 - 1);
+}
+
+fn glyph_run_resource_from_nominal(source: NominalGlyphRun,
+    font_resource_id: i64, script_tag: i64, language: []u8) GlyphRunBuildResult {
+    let run: GlyphRunResource = glyph_run_resource_make(
+        GlyphRunDirection.left_to_right, script_tag, font_resource_id, source.font_size);
+    if (source.error != GlyphRunError.none) {
+        return GlyphRunBuildResult{
+            .run = run, .error = GlyphRunCodecError.source_run_invalid,
+            .error_index = source.error_index,
+        };
+    }
+    glyph_run_resource_set_text(&run, source.utf8.data[0..source.utf8.len]);
+    glyph_run_resource_set_language(&run, language);
+    let index: i32 = 0;
+    while (index < source.glyphs.len) {
+        let glyph: PositionedGlyph = source.glyphs.data[index];
+        push[ResourceGlyph](&run.glyphs, ResourceGlyph{
+            .glyph_id = glyph.glyph_id,
+            .cluster_byte_offset = glyph.cluster_byte_offset,
+            .cluster_byte_length = glyph.cluster_byte_length,
+            .origin_x = glyph.origin_x,
+            .origin_y = glyph.origin_y,
+            .offset_x = 0,
+            .offset_y = 0,
+            .advance_x = glyph.advance_x,
+            .advance_y = 0,
+        });
+        index = index + 1;
+    }
+    run.total_advance_x = source.total_advance;
+    let validation: GlyphRunValidationResult = glyph_run_resource_validate(run);
+    return GlyphRunBuildResult{
+        .run = run, .error = validation.error, .error_index = validation.error_index,
+    };
+}
+
+fn glyph_run_mix(hash: i64, value: i64) i64 {
+    let modulus: i64 = 2147483647;
+    let component: i64 = value % modulus;
+    if (component < 0) { component = component + modulus; }
+    return (hash * 131 + component) % modulus;
+}
+
+fn glyph_run_hash_bytes(hash: i64, bytes: ArrayList[u8]) i64 {
+    let result: i64 = glyph_run_mix(hash, bytes.len as i64);
+    let index: i32 = 0;
+    while (index < bytes.len) {
+        result = glyph_run_mix(result, bytes.data[index] as i64);
+        index = index + 1;
+    }
+    return result;
+}
+
+fn glyph_run_resource_hash(run: GlyphRunResource) i64 {
+    let hash: i64 = glyph_run_mix(17, run.direction as i64);
+    hash = glyph_run_mix(hash, run.script_tag);
+    hash = glyph_run_mix(hash, run.font_resource_id);
+    hash = glyph_run_mix(hash, run.font_size);
+    hash = glyph_run_mix(hash, run.total_advance_x);
+    hash = glyph_run_mix(hash, run.total_advance_y);
+    hash = glyph_run_mix(hash, run.glyphs.len as i64);
+    let index: i32 = 0;
+    while (index < run.glyphs.len) {
+        let glyph: ResourceGlyph = run.glyphs.data[index];
+        hash = glyph_run_mix(hash, glyph.glyph_id as i64);
+        hash = glyph_run_mix(hash, glyph.cluster_byte_offset as i64);
+        hash = glyph_run_mix(hash, glyph.cluster_byte_length as i64);
+        hash = glyph_run_mix(hash, glyph.origin_x);
+        hash = glyph_run_mix(hash, glyph.origin_y);
+        hash = glyph_run_mix(hash, glyph.offset_x);
+        hash = glyph_run_mix(hash, glyph.offset_y);
+        hash = glyph_run_mix(hash, glyph.advance_x);
+        hash = glyph_run_mix(hash, glyph.advance_y);
+        index = index + 1;
+    }
+    hash = glyph_run_hash_bytes(hash, run.utf8);
+    return glyph_run_hash_bytes(hash, run.language);
+}
+
+fn glyph_run_write_i64(bytes: *ArrayList[u8], value: i64) void {
+    let index: i32 = 0;
+    while (index < 8) {
+        push[u8](bytes, ((value >> (index * 8)) & 255) as u8);
+        index = index + 1;
+    }
+}
+
+fn glyph_run_read_i64(bytes: ArrayList[u8], offset: i64) i64 {
+    let value: i64 = 0;
+    let index: i32 = 0;
+    while (index < 8) {
+        value = value | ((bytes.data[(offset as i32) + index] as i64) << (index * 8));
+        index = index + 1;
+    }
+    return value;
+}
+
+fn glyph_run_encode_fail(error: GlyphRunCodecError,
+    error_index: i32) GlyphRunEncodeResult {
+    return GlyphRunEncodeResult{
+        .bytes = make[u8](1), .error = error, .error_index = error_index,
+    };
+}
+
+fn glyph_run_resource_encode(run: GlyphRunResource) GlyphRunEncodeResult {
+    let validation: GlyphRunValidationResult = glyph_run_resource_validate(run);
+    if (validation.error != GlyphRunCodecError.none) {
+        return glyph_run_encode_fail(validation.error, validation.error_index);
+    }
+    let encoded_size: i64 = glyph_run_codec_header_size() +
+        (run.glyphs.len as i64) * glyph_run_codec_record_size() +
+        run.utf8.len as i64 + run.language.len as i64;
+    let bytes: ArrayList[u8] = make[u8](encoded_size as i32);
+    push[u8](&bytes, 90); push[u8](&bytes, 75);
+    push[u8](&bytes, 71); push[u8](&bytes, 82);
+    glyph_run_write_i64(&bytes, glyph_run_codec_version());
+    glyph_run_write_i64(&bytes, run.direction as i64);
+    glyph_run_write_i64(&bytes, run.script_tag);
+    glyph_run_write_i64(&bytes, run.font_resource_id);
+    glyph_run_write_i64(&bytes, run.font_size);
+    glyph_run_write_i64(&bytes, run.total_advance_x);
+    glyph_run_write_i64(&bytes, run.total_advance_y);
+    glyph_run_write_i64(&bytes, run.glyphs.len as i64);
+    glyph_run_write_i64(&bytes, run.utf8.len as i64);
+    glyph_run_write_i64(&bytes, run.language.len as i64);
+    glyph_run_write_i64(&bytes, glyph_run_resource_hash(run));
+    let index: i32 = 0;
+    while (index < run.glyphs.len) {
+        let glyph: ResourceGlyph = run.glyphs.data[index];
+        glyph_run_write_i64(&bytes, glyph.glyph_id as i64);
+        glyph_run_write_i64(&bytes, glyph.cluster_byte_offset as i64);
+        glyph_run_write_i64(&bytes, glyph.cluster_byte_length as i64);
+        glyph_run_write_i64(&bytes, glyph.origin_x);
+        glyph_run_write_i64(&bytes, glyph.origin_y);
+        glyph_run_write_i64(&bytes, glyph.offset_x);
+        glyph_run_write_i64(&bytes, glyph.offset_y);
+        glyph_run_write_i64(&bytes, glyph.advance_x);
+        glyph_run_write_i64(&bytes, glyph.advance_y);
+        index = index + 1;
+    }
+    index = 0;
+    while (index < run.utf8.len) {
+        push[u8](&bytes, run.utf8.data[index]); index = index + 1;
+    }
+    index = 0;
+    while (index < run.language.len) {
+        push[u8](&bytes, run.language.data[index]); index = index + 1;
+    }
+    return GlyphRunEncodeResult{
+        .bytes = bytes, .error = GlyphRunCodecError.none, .error_index = 0 - 1,
+    };
+}
+
+fn glyph_run_encode_free(result: *GlyphRunEncodeResult) void {
+    free[u8](&result.*.bytes);
+}
+
+fn glyph_run_decode_fail(run: GlyphRunResource, error: GlyphRunCodecError,
+    offset: i64) GlyphRunDecodeResult {
+    return GlyphRunDecodeResult{ .run = run, .error = error, .error_offset = offset };
+}
+
+fn glyph_run_resource_decode(bytes: ArrayList[u8]) GlyphRunDecodeResult {
+    let run: GlyphRunResource = glyph_run_resource_make(
+        GlyphRunDirection.left_to_right, 0, 1, 1);
+    if ((bytes.len as i64) < glyph_run_codec_header_size()) {
+        return glyph_run_decode_fail(run, GlyphRunCodecError.truncated, bytes.len as i64);
+    }
+    if (bytes.data[0] != 90 || bytes.data[1] != 75 ||
+        bytes.data[2] != 71 || bytes.data[3] != 82) {
+        return glyph_run_decode_fail(run, GlyphRunCodecError.bad_magic, 0);
+    }
+    if (glyph_run_read_i64(bytes, 4) != glyph_run_codec_version()) {
+        return glyph_run_decode_fail(run, GlyphRunCodecError.unsupported_version, 4);
+    }
+    let direction_code: i64 = glyph_run_read_i64(bytes, 12);
+    if (direction_code < 0 || direction_code > 3) {
+        return glyph_run_decode_fail(run, GlyphRunCodecError.invalid_direction, 12);
+    }
+    let glyph_count: i64 = glyph_run_read_i64(bytes, 60);
+    let text_length: i64 = glyph_run_read_i64(bytes, 68);
+    let language_length: i64 = glyph_run_read_i64(bytes, 76);
+    if (glyph_count < 0 || glyph_count > glyph_run_codec_glyph_limit() as i64 ||
+        text_length < 0 || text_length > glyph_run_codec_text_limit() as i64 ||
+        language_length < 0 ||
+        language_length > glyph_run_codec_language_limit() as i64) {
+        return glyph_run_decode_fail(run, GlyphRunCodecError.invalid_count, 60);
+    }
+    let expected_size: i64 = glyph_run_codec_header_size() +
+        glyph_count * glyph_run_codec_record_size() + text_length + language_length;
+    if ((bytes.len as i64) < expected_size) {
+        return glyph_run_decode_fail(run, GlyphRunCodecError.truncated, bytes.len as i64);
+    }
+    if ((bytes.len as i64) > expected_size) {
+        return glyph_run_decode_fail(run, GlyphRunCodecError.trailing_data, expected_size);
+    }
+    run.direction = direction_code as GlyphRunDirection;
+    run.script_tag = glyph_run_read_i64(bytes, 20);
+    run.font_resource_id = glyph_run_read_i64(bytes, 28);
+    run.font_size = glyph_run_read_i64(bytes, 36);
+    run.total_advance_x = glyph_run_read_i64(bytes, 44);
+    run.total_advance_y = glyph_run_read_i64(bytes, 52);
+    let stored_hash: i64 = glyph_run_read_i64(bytes, 84);
+    let offset: i64 = glyph_run_codec_header_size();
+    let index: i64 = 0;
+    while (index < glyph_count) {
+        let glyph_id: i64 = glyph_run_read_i64(bytes, offset);
+        let cluster_offset: i64 = glyph_run_read_i64(bytes, offset + 8);
+        let cluster_length: i64 = glyph_run_read_i64(bytes, offset + 16);
+        if (glyph_id < 0 || glyph_id > 2147483647) {
+            return glyph_run_decode_fail(run, GlyphRunCodecError.invalid_glyph, offset);
+        }
+        if (cluster_offset < 0 || cluster_offset > 2147483647 ||
+            cluster_length < 0 || cluster_length > 2147483647) {
+            return glyph_run_decode_fail(run, GlyphRunCodecError.invalid_cluster, offset + 8);
+        }
+        push[ResourceGlyph](&run.glyphs, ResourceGlyph{
+            .glyph_id = glyph_id as i32,
+            .cluster_byte_offset = cluster_offset as i32,
+            .cluster_byte_length = cluster_length as i32,
+            .origin_x = glyph_run_read_i64(bytes, offset + 24),
+            .origin_y = glyph_run_read_i64(bytes, offset + 32),
+            .offset_x = glyph_run_read_i64(bytes, offset + 40),
+            .offset_y = glyph_run_read_i64(bytes, offset + 48),
+            .advance_x = glyph_run_read_i64(bytes, offset + 56),
+            .advance_y = glyph_run_read_i64(bytes, offset + 64),
+        });
+        offset = offset + glyph_run_codec_record_size();
+        index = index + 1;
+    }
+    index = 0;
+    while (index < text_length) {
+        push[u8](&run.utf8, bytes.data[(offset + index) as i32]); index = index + 1;
+    }
+    offset = offset + text_length;
+    index = 0;
+    while (index < language_length) {
+        push[u8](&run.language, bytes.data[(offset + index) as i32]); index = index + 1;
+    }
+    let validation: GlyphRunValidationResult = glyph_run_resource_validate(run);
+    if (validation.error != GlyphRunCodecError.none) {
+        let validation_offset: i64 = 20;
+        if (validation.error_index >= 0) {
+            validation_offset = glyph_run_codec_header_size() +
+                (validation.error_index as i64) * glyph_run_codec_record_size();
+        } else if (validation.error == GlyphRunCodecError.invalid_utf8) {
+            validation_offset = glyph_run_codec_header_size() +
+                glyph_count * glyph_run_codec_record_size();
+        } else if (validation.error == GlyphRunCodecError.invalid_language) {
+            validation_offset = glyph_run_codec_header_size() +
+                glyph_count * glyph_run_codec_record_size() + text_length;
+        }
+        return glyph_run_decode_fail(run, validation.error, validation_offset);
+    }
+    if (stored_hash != glyph_run_resource_hash(run)) {
+        return glyph_run_decode_fail(run, GlyphRunCodecError.hash_mismatch, 84);
+    }
+    return GlyphRunDecodeResult{
+        .run = run, .error = GlyphRunCodecError.none, .error_offset = 0 - 1,
+    };
+}
+
+fn glyph_run_decode_free(result: *GlyphRunDecodeResult) void {
+    glyph_run_resource_free(&result.*.run);
+}

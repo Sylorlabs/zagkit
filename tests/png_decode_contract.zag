@@ -1,0 +1,1540 @@
+@import("../src/render/png_decode.zag")
+@import("../src/render/png_encode.zag")
+
+struct TestState { passed: i32, failed: i32 }
+
+fn expect(state: *TestState, condition: i32, name: []u8) void {
+    if (condition != 0) {
+        state.*.passed = state.*.passed + 1;
+        _zag_print("ok  "); _zag_println(name);
+    } else {
+        state.*.failed = state.*.failed + 1;
+        _zag_print("FAIL "); _zag_println(name);
+    }
+}
+
+fn pixels_equal(decoded: PngDecodeResult, surface: CpuSurface) i32 {
+    if (decoded.pixels.len != surface.pixels.len) { return 0; }
+    let i: i32 = 0;
+    while (i < decoded.pixels.len) {
+        if (decoded.pixels.data[i] != surface.pixels.data[i]) { return 0; }
+        i = i + 1;
+    }
+    return 1;
+}
+
+fn decoded_image_scene(decoded: PngDecodeResult, size: i32) DisplayList {
+    let list: DisplayList = display_list_make();
+    let spec: RenderResourceSpec = png_decode_resource_spec(decoded, 701);
+    _ = display_list_add_resource(&list, spec);
+    let draw: DisplayOp = display_op(DisplayOpKind.draw_image, node_key(701));
+    draw.resource_id = 701;
+    draw.bounds = rect(0, 0,
+        (size as i64) * unit_scale(), (size as i64) * unit_scale());
+    draw.paint.alpha = 65535;
+    _ = display_list_push(&list, draw);
+    _ = display_list_seal(&list);
+    return list;
+}
+
+fn fixture_png(width: i32, height: i32, bit_depth: i32, color_type: i32,
+    scanlines: []u8, palette: []u8, transparency: []u8) PngEncodeResult {
+    let compressed: ZlibStoreEncodeResult = zlib_store_encode(scanlines);
+    let output: ArrayList[u8] = make[u8](compressed.bytes.len + 128 +
+        palette.len + transparency.len);
+    push[u8](&output, 137); push[u8](&output, 80);
+    push[u8](&output, 78); push[u8](&output, 71);
+    push[u8](&output, 13); push[u8](&output, 10);
+    push[u8](&output, 26); push[u8](&output, 10);
+    let header: ArrayList[u8] = make[u8](13);
+    png_write_u32_be(&header, width as i64);
+    png_write_u32_be(&header, height as i64);
+    push[u8](&header, bit_depth as u8); push[u8](&header, color_type as u8);
+    push[u8](&header, 0); push[u8](&header, 0); push[u8](&header, 0);
+    png_write_chunk(&output, "IHDR", header.data[0..header.len]);
+    free[u8](&header);
+    if (palette.len > 0) { png_write_chunk(&output, "PLTE", palette); }
+    if (transparency.len > 0) { png_write_chunk(&output, "tRNS", transparency); }
+    png_write_chunk(&output, "IDAT", compressed.bytes.data[0..compressed.bytes.len]);
+    png_write_chunk(&output, "IEND", "");
+    zlib_store_encode_free(&compressed);
+    return PngEncodeResult{ .bytes = output, .error = PngEncodeError.none };
+}
+
+fn fixture_png_compressed(width: i32, height: i32, compressed: []u8) PngEncodeResult {
+    let output: ArrayList[u8] = make[u8](compressed.len + 64);
+    push[u8](&output, 137); push[u8](&output, 80);
+    push[u8](&output, 78); push[u8](&output, 71);
+    push[u8](&output, 13); push[u8](&output, 10);
+    push[u8](&output, 26); push[u8](&output, 10);
+    let header: ArrayList[u8] = make[u8](13);
+    png_write_u32_be(&header, width as i64); png_write_u32_be(&header, height as i64);
+    push[u8](&header, 8); push[u8](&header, 6);
+    push[u8](&header, 0); push[u8](&header, 0); push[u8](&header, 0);
+    png_write_chunk(&output, "IHDR", header.data[0..header.len]);
+    free[u8](&header);
+    png_write_chunk(&output, "IDAT", compressed);
+    png_write_chunk(&output, "IEND", "");
+    return PngEncodeResult{ .bytes = output, .error = PngEncodeError.none };
+}
+
+fn fixture_filtered_rows(raw: ArrayList[u8], width: i32, height: i32,
+    bytes_per_pixel: i32) ArrayList[u8] {
+    let row_bytes: i32 = width * bytes_per_pixel;
+    let filtered: ArrayList[u8] = make[u8](raw.len + height);
+    let y: i32 = 0;
+    while (y < height) {
+        let filter: i32 = y % 5;
+        push[u8](&filtered, filter as u8);
+        let x: i32 = 0;
+        while (x < row_bytes) {
+            let value: i32 = raw.data[y * row_bytes + x] as i32;
+            let left: i32 = 0;
+            let above: i32 = 0;
+            let upper_left: i32 = 0;
+            if (x >= bytes_per_pixel) {
+                left = raw.data[y * row_bytes + x - bytes_per_pixel] as i32;
+            }
+            if (y > 0) { above = raw.data[(y - 1) * row_bytes + x] as i32; }
+            if (y > 0 && x >= bytes_per_pixel) {
+                upper_left = raw.data[(y - 1) * row_bytes +
+                    x - bytes_per_pixel] as i32;
+            }
+            let predictor: i32 = 0;
+            if (filter == 1) { predictor = left; }
+            else if (filter == 2) { predictor = above; }
+            else if (filter == 3) { predictor = (left + above) / 2; }
+            else if (filter == 4) { predictor = png_paeth(left, above, upper_left); }
+            push[u8](&filtered, ((value - predictor) & 255) as u8);
+            x = x + 1;
+        }
+        y = y + 1;
+    }
+    return filtered;
+}
+
+fn fixture_png_interlaced(width: i32, height: i32, bit_depth: i32,
+    color_type: i32, scanlines: []u8, palette: []u8,
+    transparency: []u8) PngEncodeResult {
+    let compressed: ZlibStoreEncodeResult = zlib_store_encode(scanlines);
+    let output: ArrayList[u8] = make[u8](compressed.bytes.len + 128 +
+        palette.len + transparency.len);
+    push[u8](&output, 137); push[u8](&output, 80);
+    push[u8](&output, 78); push[u8](&output, 71);
+    push[u8](&output, 13); push[u8](&output, 10);
+    push[u8](&output, 26); push[u8](&output, 10);
+    let header: ArrayList[u8] = make[u8](13);
+    png_write_u32_be(&header, width as i64);
+    png_write_u32_be(&header, height as i64);
+    push[u8](&header, bit_depth as u8); push[u8](&header, color_type as u8);
+    push[u8](&header, 0); push[u8](&header, 0); push[u8](&header, 1);
+    png_write_chunk(&output, "IHDR", header.data[0..header.len]);
+    free[u8](&header);
+    if (palette.len > 0) { png_write_chunk(&output, "PLTE", palette); }
+    if (transparency.len > 0) { png_write_chunk(&output, "tRNS", transparency); }
+    png_write_chunk(&output, "IDAT", compressed.bytes.data[0..compressed.bytes.len]);
+    png_write_chunk(&output, "IEND", "");
+    zlib_store_encode_free(&compressed);
+    return PngEncodeResult{ .bytes = output, .error = PngEncodeError.none };
+}
+
+fn fixture_adam7_rgba8(width: i32, height: i32,
+    pixels: []u8) PngEncodeResult {
+    let filtered: ArrayList[u8] = make[u8](pixels.len + height * 7);
+    let pass: i32 = 0;
+    while (pass < 7) {
+        let start_x: i32 = png_adam7_start_x(pass);
+        let start_y: i32 = png_adam7_start_y(pass);
+        let step_x: i32 = png_adam7_step_x(pass);
+        let step_y: i32 = png_adam7_step_y(pass);
+        let pass_width: i32 = png_adam7_extent(width, start_x, step_x);
+        let pass_height: i32 = png_adam7_extent(height, start_y, step_y);
+        if (pass_width > 0 && pass_height > 0) {
+            let pass_pixels: ArrayList[u8] = make[u8](pass_width * pass_height * 4);
+            let pass_y: i32 = 0;
+            while (pass_y < pass_height) {
+                let pass_x: i32 = 0;
+                while (pass_x < pass_width) {
+                    let source_x: i32 = start_x + pass_x * step_x;
+                    let source_y: i32 = start_y + pass_y * step_y;
+                    let source: i32 = (source_y * width + source_x) * 4;
+                    let channel: i32 = 0;
+                    while (channel < 4) {
+                        push[u8](&pass_pixels, pixels[source + channel]);
+                        channel = channel + 1;
+                    }
+                    pass_x = pass_x + 1;
+                }
+                pass_y = pass_y + 1;
+            }
+            let pass_filtered: ArrayList[u8] = fixture_filtered_rows(
+                pass_pixels, pass_width, pass_height, 4
+            );
+            png_copy_append(&filtered,
+                pass_filtered.data[0..pass_filtered.len]);
+            free[u8](&pass_filtered); free[u8](&pass_pixels);
+        }
+        pass = pass + 1;
+    }
+    let result: PngEncodeResult = fixture_png_interlaced(
+        width, height, 8, 6, filtered.data[0..filtered.len], "", ""
+    );
+    free[u8](&filtered);
+    return result;
+}
+
+fn fixture_write_u32_be(bytes: *ArrayList[u8], offset: i32, value: i64) void {
+    bytes.*.data[offset] = ((value >> 24) & 255) as u8;
+    bytes.*.data[offset + 1] = ((value >> 16) & 255) as u8;
+    bytes.*.data[offset + 2] = ((value >> 8) & 255) as u8;
+    bytes.*.data[offset + 3] = (value & 255) as u8;
+}
+
+fn fixture_rewrite_crc(bytes: *ArrayList[u8], chunk_offset: i32) void {
+    let length: i32 = png_read_u32_be(
+        bytes.*.data[0..bytes.*.len], chunk_offset
+    ) as i32;
+    let crc_offset: i32 = chunk_offset + 8 + length;
+    let crc: i64 = checksum_crc32(
+        bytes.*.data[chunk_offset + 4..crc_offset]
+    );
+    fixture_write_u32_be(bytes, crc_offset, crc);
+}
+
+fn fixture_write_signature(bytes: *ArrayList[u8], offset: i32,
+    signature: []u8) void {
+    let i: i32 = 0;
+    while (i < 4) { bytes.*.data[offset + i] = signature[i]; i = i + 1; }
+}
+
+fn fixture_write_u16_be(bytes: *ArrayList[u8], offset: i32,
+    value: i32) void {
+    bytes.*.data[offset] = ((value >> 8) & 255) as u8;
+    bytes.*.data[offset + 1] = (value & 255) as u8;
+}
+
+fn fixture_icc_tag(bytes: *ArrayList[u8], entry: i32, signature: []u8,
+    data_offset: i32, data_size: i32) void {
+    fixture_write_signature(bytes, entry, signature);
+    fixture_write_u32_be(bytes, entry + 4, data_offset);
+    fixture_write_u32_be(bytes, entry + 8, data_size);
+}
+
+fn fixture_icc_xyz(bytes: *ArrayList[u8], offset: i32,
+    x: i64, y: i64, z: i64) void {
+    fixture_write_signature(bytes, offset, "XYZ ");
+    fixture_write_u32_be(bytes, offset + 8, x);
+    fixture_write_u32_be(bytes, offset + 12, y);
+    fixture_write_u32_be(bytes, offset + 16, z);
+}
+
+fn fixture_matrix_icc(kind: i32) ArrayList[u8] {
+    let bytes: ArrayList[u8] = make[u8](320);
+    let i: i32 = 0;
+    while (i < 320) { push[u8](&bytes, 0); i = i + 1; }
+    fixture_write_u32_be(&bytes, 0, 320);
+    bytes.data[8] = 4;
+    fixture_write_signature(&bytes, 12, "mntr");
+    fixture_write_signature(&bytes, 16, "RGB ");
+    fixture_write_signature(&bytes, 20, "XYZ ");
+    fixture_write_signature(&bytes, 36, "acsp");
+    fixture_write_u32_be(&bytes, 68, 63190);
+    fixture_write_u32_be(&bytes, 72, 65536);
+    fixture_write_u32_be(&bytes, 76, 54061);
+    fixture_write_u32_be(&bytes, 128, 6);
+    fixture_icc_tag(&bytes, 132, "rXYZ", 204, 20);
+    fixture_icc_tag(&bytes, 144, "gXYZ", 224, 20);
+    fixture_icc_tag(&bytes, 156, "bXYZ", 244, 20);
+    fixture_icc_tag(&bytes, 168, "rTRC", 264, 12);
+    fixture_icc_tag(&bytes, 180, "gTRC", 264, 12);
+    fixture_icc_tag(&bytes, 192, "bTRC", 264, 12);
+    if (kind == 2) {
+        fixture_icc_xyz(&bytes, 204, 33759, 15807, 0 - 69);
+        fixture_icc_xyz(&bytes, 224, 19135, 45367, 2745);
+        fixture_icc_xyz(&bytes, 244, 10296, 4363, 51385);
+    } else {
+        fixture_icc_xyz(&bytes, 204, 28579, 14582, 913);
+        fixture_icc_xyz(&bytes, 224, 25236, 46981, 6364);
+        fixture_icc_xyz(&bytes, 244, 9377, 3973, 46804);
+    }
+    fixture_write_signature(&bytes, 264, "curv");
+    if (kind == 3) { fixture_write_u32_be(&bytes, 136, 4000000); }
+    if (kind == 4) {
+        fixture_write_u32_be(&bytes, 176, 16);
+        fixture_write_u32_be(&bytes, 188, 16);
+        fixture_write_u32_be(&bytes, 200, 16);
+        fixture_write_u32_be(&bytes, 272, 2);
+        bytes.data[278] = 255; bytes.data[279] = 255;
+    }
+    if (kind == 8) {
+        fixture_write_u32_be(&bytes, 176, 16);
+        fixture_write_u32_be(&bytes, 188, 16);
+        fixture_write_u32_be(&bytes, 200, 16);
+        fixture_write_signature(&bytes, 264, "para");
+        fixture_write_u32_be(&bytes, 276, 65536);
+    }
+    if (kind == 10) { fixture_write_signature(&bytes, 144, "rXYZ"); }
+    if (kind == 11) { fixture_write_u32_be(&bytes, 0, 319); }
+    if (kind == 13) {
+        fixture_write_u32_be(&bytes, 176, 32);
+        fixture_write_u32_be(&bytes, 188, 32);
+        fixture_write_u32_be(&bytes, 200, 32);
+        fixture_write_signature(&bytes, 264, "para");
+        bytes.data[273] = 3;
+        fixture_write_u32_be(&bytes, 276, 157286);
+        fixture_write_u32_be(&bytes, 280, 62119);
+        fixture_write_u32_be(&bytes, 284, 3417);
+        fixture_write_u32_be(&bytes, 288, 5072);
+        fixture_write_u32_be(&bytes, 292, 2651);
+    }
+    if (kind == 14 || kind == 15 || kind == 16) {
+        let curve_size: i32 = 24;
+        let function_type: i32 = 1;
+        if (kind == 15) { curve_size = 28; function_type = 2; }
+        if (kind == 16) { curve_size = 40; function_type = 4; }
+        fixture_write_u32_be(&bytes, 176, curve_size);
+        fixture_write_u32_be(&bytes, 188, curve_size);
+        fixture_write_u32_be(&bytes, 200, curve_size);
+        fixture_write_signature(&bytes, 264, "para");
+        bytes.data[273] = function_type as u8;
+        fixture_write_u32_be(&bytes, 276, 65536);
+        fixture_write_u32_be(&bytes, 280, 65536);
+        fixture_write_u32_be(&bytes, 284, 0);
+        if (kind == 15) { fixture_write_u32_be(&bytes, 288, 0); }
+        if (kind == 16) {
+            fixture_write_u32_be(&bytes, 288, 65536);
+            fixture_write_u32_be(&bytes, 292, 32768);
+            fixture_write_u32_be(&bytes, 296, 0);
+            fixture_write_u32_be(&bytes, 300, 0);
+        }
+    }
+    if (kind == 17) {
+        fixture_icc_tag(&bytes, 168, "rTRC", 264, 16);
+        fixture_icc_tag(&bytes, 180, "gTRC", 280, 16);
+        fixture_icc_tag(&bytes, 192, "bTRC", 296, 16);
+        fixture_write_signature(&bytes, 264, "para");
+        fixture_write_u32_be(&bytes, 276, 65536);
+        fixture_write_signature(&bytes, 280, "para");
+        fixture_write_u32_be(&bytes, 292, 131072);
+        fixture_write_signature(&bytes, 296, "para");
+        fixture_write_u32_be(&bytes, 308, 32768);
+    }
+    if (kind == 18) {
+        fixture_write_u32_be(&bytes, 176, 20);
+        fixture_write_u32_be(&bytes, 188, 20);
+        fixture_write_u32_be(&bytes, 200, 20);
+        fixture_write_signature(&bytes, 264, "curv");
+        fixture_write_u32_be(&bytes, 272, 4);
+        bytes.data[278] = 64;
+        bytes.data[280] = 192;
+        bytes.data[282] = 255; bytes.data[283] = 255;
+    }
+    if (kind == 19) {
+        fixture_write_signature(&bytes, 264, "curv");
+        fixture_write_u32_be(&bytes, 272, 4097);
+    }
+    if (kind == 20) {
+        fixture_write_u32_be(&bytes, 176, 18);
+        fixture_write_u32_be(&bytes, 188, 18);
+        fixture_write_u32_be(&bytes, 200, 18);
+        fixture_write_signature(&bytes, 264, "curv");
+        fixture_write_u32_be(&bytes, 272, 4);
+    }
+    return bytes;
+}
+
+fn fixture_lut16_icc(kind: i32) ArrayList[u8] {
+    let bytes: ArrayList[u8] = make[u8](268);
+    let i: i32 = 0;
+    while (i < 268) { push[u8](&bytes, 0); i = i + 1; }
+    fixture_write_u32_be(&bytes, 0, 268);
+    bytes.data[8] = 4;
+    fixture_write_signature(&bytes, 12, "mntr");
+    fixture_write_signature(&bytes, 16, "RGB ");
+    fixture_write_signature(&bytes, 20, "XYZ ");
+    fixture_write_signature(&bytes, 36, "acsp");
+    fixture_write_u32_be(&bytes, 68, 63190);
+    fixture_write_u32_be(&bytes, 72, 65536);
+    fixture_write_u32_be(&bytes, 76, 54061);
+    fixture_write_u32_be(&bytes, 128, 1);
+    fixture_icc_tag(&bytes, 132, "A2B0", 144, 124);
+    fixture_write_signature(&bytes, 144, "mft2");
+    bytes.data[152] = 3; bytes.data[153] = 3; bytes.data[154] = 2;
+    fixture_write_u32_be(&bytes, 156, 65536);
+    fixture_write_u32_be(&bytes, 172, 65536);
+    fixture_write_u32_be(&bytes, 188, 65536);
+    fixture_write_u16_be(&bytes, 192, 2);
+    fixture_write_u16_be(&bytes, 194, 2);
+    let input_offset: i32 = 196;
+    let channel: i32 = 0;
+    while (channel < 3) {
+        fixture_write_u16_be(&bytes, input_offset + channel * 4, 0);
+        fixture_write_u16_be(&bytes, input_offset + channel * 4 + 2, 65535);
+        channel = channel + 1;
+    }
+    let clut_offset: i32 = 208;
+    let red: i32 = 0;
+    let clut_index: i32 = 0;
+    while (red < 2) {
+        let green: i32 = 0;
+        while (green < 2) {
+            let blue: i32 = 0;
+            while (blue < 2) {
+                fixture_write_u16_be(&bytes, clut_offset + clut_index * 2,
+                    red * 14289 + green * 12618 + blue * 4688);
+                fixture_write_u16_be(&bytes, clut_offset + clut_index * 2 + 2,
+                    red * 7291 + green * 23491 + blue * 1986);
+                fixture_write_u16_be(&bytes, clut_offset + clut_index * 2 + 4,
+                    red * 457 + green * 3182 + blue * 23402);
+                clut_index = clut_index + 3;
+                blue = blue + 1;
+            }
+            green = green + 1;
+        }
+        red = red + 1;
+    }
+    let output_offset: i32 = 256;
+    channel = 0;
+    while (channel < 3) {
+        fixture_write_u16_be(&bytes, output_offset + channel * 4, 0);
+        fixture_write_u16_be(&bytes, output_offset + channel * 4 + 2, 65535);
+        channel = channel + 1;
+    }
+    if (kind == 22) { bytes.data[154] = 34; }
+    if (kind == 23) { fixture_write_u32_be(&bytes, 160, 1); }
+    if (kind == 24) { fixture_write_signature(&bytes, 144, "mft1"); }
+    if (kind == 25) { fixture_write_u32_be(&bytes, 140, 122); }
+    if (kind == 26) { fixture_write_u16_be(&bytes, 192, 1); }
+    if (kind == 27) { fixture_write_u32_be(&bytes, 64, 1); }
+    return bytes;
+}
+
+fn fixture_mab_icc(kind: i32) ArrayList[u8] {
+    let bytes: ArrayList[u8] = make[u8](340);
+    let i: i32 = 0;
+    while (i < 340) { push[u8](&bytes, 0); i = i + 1; }
+    fixture_write_u32_be(&bytes, 0, 340);
+    bytes.data[8] = 4;
+    fixture_write_signature(&bytes, 12, "mntr");
+    fixture_write_signature(&bytes, 16, "RGB ");
+    fixture_write_signature(&bytes, 20, "XYZ ");
+    fixture_write_signature(&bytes, 36, "acsp");
+    fixture_write_u32_be(&bytes, 68, 63190);
+    fixture_write_u32_be(&bytes, 72, 65536);
+    fixture_write_u32_be(&bytes, 76, 54061);
+    fixture_write_u32_be(&bytes, 128, 1);
+    fixture_icc_tag(&bytes, 132, "A2B0", 144, 196);
+    fixture_write_signature(&bytes, 144, "mAB ");
+    bytes.data[152] = 3; bytes.data[153] = 3;
+    fixture_write_u32_be(&bytes, 156, 160);
+    fixture_write_u32_be(&bytes, 168, 68);
+    fixture_write_u32_be(&bytes, 172, 32);
+    let curve: i32 = 0;
+    while (curve < 3) {
+        fixture_write_signature(&bytes, 176 + curve * 12, "curv");
+        curve = curve + 1;
+    }
+    let clut: i32 = 212;
+    bytes.data[clut] = 2; bytes.data[clut + 1] = 3;
+    bytes.data[clut + 2] = 2; bytes.data[clut + 16] = 2;
+    let red: i32 = 0;
+    let clut_index: i32 = 0;
+    while (red < 2) {
+        let green: i32 = 0;
+        while (green < 3) {
+            let blue: i32 = 0;
+            while (blue < 2) {
+                fixture_write_u16_be(&bytes, clut + 20 + clut_index * 2,
+                    red * 14289 + (green * 12618 + 1) / 2 + blue * 4688);
+                fixture_write_u16_be(&bytes, clut + 22 + clut_index * 2,
+                    red * 7291 + (green * 23491 + 1) / 2 + blue * 1986);
+                fixture_write_u16_be(&bytes, clut + 24 + clut_index * 2,
+                    red * 457 + (green * 3182 + 1) / 2 + blue * 23402);
+                clut_index = clut_index + 3; blue = blue + 1;
+            }
+            green = green + 1;
+        }
+        red = red + 1;
+    }
+    curve = 0;
+    while (curve < 3) {
+        fixture_write_signature(&bytes, 304 + curve * 12, "curv");
+        curve = curve + 1;
+    }
+    if (kind == 29) { bytes.data[clut + 3] = 1; }
+    if (kind == 30) { fixture_write_u32_be(&bytes, 156, 0); }
+    if (kind == 31) { fixture_write_signature(&bytes, 176, "bad!"); }
+    if (kind == 32) { bytes.data[clut + 16] = 3; }
+    if (kind == 33) { fixture_write_u32_be(&bytes, 168, 32); }
+    return bytes;
+}
+
+fn fixture_profile_png(gamma_count: i32, chromaticity_kind: i32,
+    gamma_value: i64, include_srgb: i32, icc_kind: i32) PngEncodeResult {
+    let compressed: ZlibStoreEncodeResult = zlib_store_encode("\x00\x11\x22\x33\xff");
+    let output: ArrayList[u8] = make[u8](compressed.bytes.len + 160);
+    push[u8](&output, 137); push[u8](&output, 80);
+    push[u8](&output, 78); push[u8](&output, 71);
+    push[u8](&output, 13); push[u8](&output, 10);
+    push[u8](&output, 26); push[u8](&output, 10);
+    let header: ArrayList[u8] = make[u8](13);
+    png_write_u32_be(&header, 1); png_write_u32_be(&header, 1);
+    push[u8](&header, 8); push[u8](&header, 6);
+    push[u8](&header, 0); push[u8](&header, 0); push[u8](&header, 0);
+    png_write_chunk(&output, "IHDR", header.data[0..header.len]);
+    free[u8](&header);
+    if (include_srgb != 0) { png_write_chunk(&output, "sRGB", "\x00"); }
+    let gamma: ArrayList[u8] = make[u8](4);
+    png_write_u32_be(&gamma, gamma_value);
+    let gamma_index: i32 = 0;
+    while (gamma_index < gamma_count) {
+        png_write_chunk(&output, "gAMA", gamma.data[0..gamma.len]);
+        gamma_index = gamma_index + 1;
+    }
+    free[u8](&gamma);
+    if (icc_kind == 9) {
+        png_write_chunk(&output, "cICP", "\x01\x0d\x00\x01");
+    } else if (icc_kind != 0) {
+        let profile: ArrayList[u8] = fixture_matrix_icc(icc_kind);
+        if (icc_kind >= 21) {
+            free[u8](&profile); profile = fixture_lut16_icc(icc_kind);
+        }
+        if (icc_kind >= 28) {
+            free[u8](&profile); profile = fixture_mab_icc(icc_kind);
+        }
+        let compressed_profile: ZlibStoreEncodeResult = zlib_store_encode(
+            profile.data[0..profile.len]
+        );
+        if (icc_kind == 12 && compressed_profile.bytes.len > 3) {
+            compressed_profile.bytes.data[2] =
+                compressed_profile.bytes.data[2] ^ 1;
+        }
+        let iccp: ArrayList[u8] = make[u8](compressed_profile.bytes.len + 16);
+        let name: []u8 = "Zagkit matrix";
+        if (icc_kind == 5) { push[u8](&iccp, 32); }
+        let name_index: i32 = 0;
+        while (name_index < name.len) {
+            push[u8](&iccp, name[name_index]); name_index = name_index + 1;
+        }
+        push[u8](&iccp, 0);
+        if (icc_kind == 6) { push[u8](&iccp, 1); }
+        else { push[u8](&iccp, 0); }
+        png_copy_append(&iccp,
+            compressed_profile.bytes.data[0..compressed_profile.bytes.len]);
+        png_write_chunk(&output, "iCCP", iccp.data[0..iccp.len]);
+        if (icc_kind == 7) {
+            png_write_chunk(&output, "iCCP", iccp.data[0..iccp.len]);
+        }
+        free[u8](&iccp); zlib_store_encode_free(&compressed_profile);
+        free[u8](&profile);
+    }
+    if (chromaticity_kind != 0) {
+        let chromaticity: ArrayList[u8] = make[u8](32);
+        let white_x: i64 = 31270; let white_y: i64 = 32900;
+        let red_x: i64 = 64000; let red_y: i64 = 33000;
+        let green_x: i64 = 30000; let green_y: i64 = 60000;
+        let blue_x: i64 = 15000; let blue_y: i64 = 6000;
+        if (chromaticity_kind == 2) {
+            red_x = 68000; red_y = 32000;
+            green_x = 26500; green_y = 69000;
+        } else if (chromaticity_kind == 3) {
+            white_x = 34567; white_y = 35850;
+        } else if (chromaticity_kind == 4) {
+            green_x = red_x; green_y = red_y;
+        }
+        png_write_u32_be(&chromaticity, white_x);
+        png_write_u32_be(&chromaticity, white_y);
+        png_write_u32_be(&chromaticity, red_x);
+        png_write_u32_be(&chromaticity, red_y);
+        png_write_u32_be(&chromaticity, green_x);
+        png_write_u32_be(&chromaticity, green_y);
+        png_write_u32_be(&chromaticity, blue_x);
+        png_write_u32_be(&chromaticity, blue_y);
+        png_write_chunk(&output, "cHRM", chromaticity.data[0..chromaticity.len]);
+        free[u8](&chromaticity);
+    }
+    png_write_chunk(&output, "IDAT", compressed.bytes.data[0..compressed.bytes.len]);
+    png_write_chunk(&output, "IEND", "");
+    zlib_store_encode_free(&compressed);
+    return PngEncodeResult{ .bytes = output, .error = PngEncodeError.none };
+}
+
+fn round_trip_contract(state: *TestState) void {
+    let surface: CpuSurface = cpu_surface_make(3, 2);
+    let i: i32 = 0;
+    while (i < surface.pixels.len) {
+        surface.pixels.data[i] = ((i * 43 + 19) % 256) as u8;
+        i = i + 1;
+    }
+    let encoded: PngEncodeResult = png_encode_surface(surface);
+    let decoded: PngDecodeResult = png_decode(
+        encoded.bytes.data[0..encoded.bytes.len]
+    );
+    expect(state, decoded.error == PngDecodeError.none &&
+        decoded.width == 3 && decoded.height == 2 &&
+        decoded.color_space == RenderColorSpace.srgb &&
+        decoded.profile_assumed == 0 &&
+        pixels_equal(decoded, surface) != 0,
+        "canonical screenshot PNG decodes to exact owned RGBA8 pixels");
+
+    let store: RenderResourceStore = render_resource_store_default();
+    let spec: RenderResourceSpec = png_decode_resource_spec(decoded, 91);
+    expect(state, render_resource_add(&store, spec) == RenderResourceError.none &&
+        store.resources.data[0].width == 3 && store.resources.data[0].height == 2 &&
+        image_resource_validate(store.resources.data[0]) == ImagePayloadError.none,
+        "decoded PNG becomes a canonical owned image resource");
+    render_resource_store_free(&store);
+    png_decode_free(&decoded);
+    png_encode_free(&encoded);
+    cpu_surface_free(&surface);
+}
+
+fn filter_contract(state: *TestState) void {
+    let raw: ArrayList[u8] = make[u8](40);
+    let i: i32 = 0;
+    while (i < 40) { push[u8](&raw, ((i * 31 + 7) % 256) as u8); i = i + 1; }
+    let scanlines: ArrayList[u8] = fixture_filtered_rows(raw, 2, 5, 4);
+    let fixture: PngEncodeResult = fixture_png(
+        2, 5, 8, 6, scanlines.data[0..scanlines.len], "", ""
+    );
+    let decoded: PngDecodeResult = png_decode(
+        fixture.bytes.data[0..fixture.bytes.len]
+    );
+    let exact: i32 = 1;
+    if (decoded.pixels.len != raw.len) { exact = 0; }
+    i = 0;
+    while (i < decoded.pixels.len && i < raw.len) {
+        if (decoded.pixels.data[i] != raw.data[i]) { exact = 0; }
+        i = i + 1;
+    }
+    expect(state, decoded.error == PngDecodeError.none && exact != 0,
+        "None, Sub, Up, Average, and Paeth filters reconstruct exact bytes");
+    png_decode_free(&decoded); png_encode_free(&fixture);
+    free[u8](&scanlines); free[u8](&raw);
+}
+
+fn scale_render_contract(state: *TestState) void {
+    let surface: CpuSurface = cpu_surface_make(4, 4);
+    let y: i32 = 0;
+    while (y < 4) {
+        let x: i32 = 0;
+        while (x < 4) {
+            let at: i32 = (y * 4 + x) * 4;
+            surface.pixels.data[at] = (x * 71 + y * 13) as u8;
+            surface.pixels.data[at + 1] = (x * 19 + y * 53) as u8;
+            surface.pixels.data[at + 2] = (x * 37 + y * 29) as u8;
+            surface.pixels.data[at + 3] = (64 + x * 31 + y * 17) as u8;
+            x = x + 1;
+        }
+        y = y + 1;
+    }
+    let encoded: PngEncodeResult = png_encode_surface(surface);
+    let decoded: PngDecodeResult = png_decode(
+        encoded.bytes.data[0..encoded.bytes.len]
+    );
+    let exact: i32 = decoded.error == PngDecodeError.none;
+    let scale_index: i32 = 0;
+    while (scale_index < 5 && exact != 0) {
+        let size: i32 = 4;
+        if (scale_index == 1) { size = 5; }
+        else if (scale_index == 2) { size = 6; }
+        else if (scale_index == 3) { size = 8; }
+        else if (scale_index == 4) { size = 12; }
+        let expected_hash: i64 = 1974955247;
+        if (scale_index == 1) { expected_hash = 1140701745; }
+        else if (scale_index == 2) { expected_hash = 24860848; }
+        else if (scale_index == 3) { expected_hash = 989379801; }
+        else if (scale_index == 4) { expected_hash = 692663035; }
+        let list: DisplayList = decoded_image_scene(decoded, size);
+        let first: CpuRasterResult = cpu_rasterize(list, size, size);
+        let second: CpuRasterResult = cpu_rasterize(list, size, size);
+        let first_hash: i64 = cpu_surface_hash(first.surface);
+        let second_hash: i64 = cpu_surface_hash(second.surface);
+        if (first.error != CpuRasterError.none ||
+            second.error != CpuRasterError.none || first_hash == 0 ||
+            first_hash != second_hash || first_hash != expected_hash) { exact = 0; }
+        cpu_raster_free(&second); cpu_raster_free(&first);
+        display_list_free(&list); scale_index = scale_index + 1;
+    }
+    expect(state, exact,
+        "decoded PNG resources match CPU goldens at 1x 1.25x 1.5x 2x and 3x");
+    png_decode_free(&decoded); png_encode_free(&encoded); cpu_surface_free(&surface);
+}
+
+fn color_contract(state: *TestState) void {
+    let gray_fixture: PngEncodeResult = fixture_png(
+        8, 1, 1, 0, "\x00\xaa", "", "\x00\x00"
+    );
+    let gray: PngDecodeResult = png_decode(
+        gray_fixture.bytes.data[0..gray_fixture.bytes.len]
+    );
+    expect(state, gray.error == PngDecodeError.none && gray.pixels.len == 32 &&
+        gray.profile_assumed != 0 &&
+        gray.pixels.data[0] == 255 && gray.pixels.data[3] == 255 &&
+        gray.pixels.data[4] == 0 && gray.pixels.data[7] == 0,
+        "packed one-bit grayscale expands and applies transparent gray");
+    png_decode_free(&gray); png_encode_free(&gray_fixture);
+
+    let indexed_fixture: PngEncodeResult = fixture_png(
+        4, 1, 2, 3, "\x00\x1b",
+        "\xff\x00\x00\x00\xff\x00\x00\x00\xff\xff\xff\xff",
+        "\xff\x80\x40\x00"
+    );
+    let indexed: PngDecodeResult = png_decode(
+        indexed_fixture.bytes.data[0..indexed_fixture.bytes.len]
+    );
+    expect(state, indexed.error == PngDecodeError.none && indexed.pixels.len == 16 &&
+        indexed.pixels.data[0] == 255 && indexed.pixels.data[3] == 255 &&
+        indexed.pixels.data[5] == 255 && indexed.pixels.data[7] == 128 &&
+        indexed.pixels.data[10] == 255 && indexed.pixels.data[11] == 64 &&
+        indexed.pixels.data[12] == 255 && indexed.pixels.data[15] == 0,
+        "packed indexed color expands palette entries and per-index alpha");
+    png_decode_free(&indexed); png_encode_free(&indexed_fixture);
+
+    let rgb16_fixture: PngEncodeResult = fixture_png(
+        1, 1, 16, 2, "\x00\x12\x34\x56\x78\x9a\xbc", "",
+        "\x12\x34\x56\x78\x9a\xbc"
+    );
+    let rgb16: PngDecodeResult = png_decode(
+        rgb16_fixture.bytes.data[0..rgb16_fixture.bytes.len]
+    );
+    expect(state, rgb16.error == PngDecodeError.none && rgb16.pixels.len == 4 &&
+        rgb16.pixels.data[0] == 18 && rgb16.pixels.data[1] == 86 &&
+        rgb16.pixels.data[2] == 154 && rgb16.pixels.data[3] == 0,
+        "RGB16 uses deterministic high-byte conversion and exact tRNS matching");
+    png_decode_free(&rgb16); png_encode_free(&rgb16_fixture);
+
+    let gray_alpha_fixture: PngEncodeResult = fixture_png(
+        1, 1, 16, 4, "\x00\xab\xcd\x40\x80", "", ""
+    );
+    let gray_alpha: PngDecodeResult = png_decode(
+        gray_alpha_fixture.bytes.data[0..gray_alpha_fixture.bytes.len]
+    );
+    expect(state, gray_alpha.error == PngDecodeError.none &&
+        gray_alpha.pixels.data[0] == 171 && gray_alpha.pixels.data[1] == 171 &&
+        gray_alpha.pixels.data[2] == 171 && gray_alpha.pixels.data[3] == 64,
+        "grayscale-alpha16 expands to canonical RGBA8");
+    png_decode_free(&gray_alpha); png_encode_free(&gray_alpha_fixture);
+
+    let rgba16_fixture: PngEncodeResult = fixture_png(
+        1, 1, 16, 6, "\x00\x10\x20\x30\x40\x50\x60\x70\x80", "", ""
+    );
+    let rgba16: PngDecodeResult = png_decode(
+        rgba16_fixture.bytes.data[0..rgba16_fixture.bytes.len]
+    );
+    expect(state, rgba16.error == PngDecodeError.none &&
+        rgba16.pixels.data[0] == 16 && rgba16.pixels.data[1] == 48 &&
+        rgba16.pixels.data[2] == 80 && rgba16.pixels.data[3] == 112,
+        "RGBA16 expands each channel with one documented conversion policy");
+    png_decode_free(&rgba16); png_encode_free(&rgba16_fixture);
+}
+
+fn color_profile_contract(state: *TestState) void {
+    let declared_fixture: PngEncodeResult = fixture_profile_png(1, 1, 45455, 0, 0);
+    let declared: PngDecodeResult = png_decode(
+        declared_fixture.bytes.data[0..declared_fixture.bytes.len]
+    );
+    expect(state, declared.error == PngDecodeError.none &&
+        declared.profile_assumed == 0 && declared.pixels.data[0] == 9 &&
+        declared.pixels.data[1] == 28 && declared.pixels.data[2] == 48,
+        "declared gamma and standard primaries convert without assumed profile truth");
+    png_decode_free(&declared); png_encode_free(&declared_fixture);
+
+    let gamma_only_fixture: PngEncodeResult = fixture_profile_png(1, 0, 45455, 0, 0);
+    let gamma_only: PngDecodeResult = png_decode(
+        gamma_only_fixture.bytes.data[0..gamma_only_fixture.bytes.len]
+    );
+    expect(state, gamma_only.error == PngDecodeError.none &&
+        gamma_only.profile_assumed != 0,
+        "gamma without declared primaries keeps the fallback-profile truth visible");
+    png_decode_free(&gamma_only); png_encode_free(&gamma_only_fixture);
+
+    let linear_fixture: PngEncodeResult = fixture_profile_png(1, 0, 100000, 0, 0);
+    let linear: PngDecodeResult = png_decode(
+        linear_fixture.bytes.data[0..linear_fixture.bytes.len]
+    );
+    expect(state, linear.error == PngDecodeError.none &&
+        linear.profile_assumed != 0 && linear.pixels.data[0] == 73 &&
+        linear.pixels.data[1] == 102 && linear.pixels.data[2] == 124 &&
+        linear.pixels.data[3] == 255,
+        "linear-gamma samples convert deterministically into canonical sRGB");
+    png_decode_free(&linear); png_encode_free(&linear_fixture);
+
+    let zero_fixture: PngEncodeResult = fixture_profile_png(1, 0, 0, 0, 0);
+    let zero: PngDecodeResult = png_decode(
+        zero_fixture.bytes.data[0..zero_fixture.bytes.len]
+    );
+    expect(state, zero.error == PngDecodeError.none &&
+        zero.profile_assumed != 0 && zero.pixels.data[0] == 17 &&
+        zero.pixels.data[1] == 34 && zero.pixels.data[2] == 51,
+        "meaningless zero gamma is ignored while fallback truth stays visible");
+    png_decode_free(&zero); png_encode_free(&zero_fixture);
+
+    let p3_fixture: PngEncodeResult = fixture_profile_png(1, 2, 100000, 0, 0);
+    let p3: PngDecodeResult = png_decode(
+        p3_fixture.bytes.data[0..p3_fixture.bytes.len]
+    );
+    expect(state, p3.error == PngDecodeError.none &&
+        p3.profile_assumed == 0 && p3.pixels.data[0] == 64 &&
+        p3.pixels.data[1] == 103 && p3.pixels.data[2] == 126,
+        "Display P3 primaries convert through the bounded linear matrix path");
+    png_decode_free(&p3); png_encode_free(&p3_fixture);
+
+    let adapted_fixture: PngEncodeResult = fixture_profile_png(1, 3, 100000, 0, 0);
+    let adapted: PngDecodeResult = png_decode(
+        adapted_fixture.bytes.data[0..adapted_fixture.bytes.len]
+    );
+    expect(state, adapted.error == PngDecodeError.none &&
+        adapted.profile_assumed == 0 && adapted.pixels.data[0] == 69 &&
+        adapted.pixels.data[1] == 102 && adapted.pixels.data[2] == 123,
+        "non-D65 white points use deterministic Bradford adaptation");
+    png_decode_free(&adapted); png_encode_free(&adapted_fixture);
+
+    let assumed_fixture: PngEncodeResult = fixture_profile_png(0, 2, 0, 0, 0);
+    let assumed: PngDecodeResult = png_decode(
+        assumed_fixture.bytes.data[0..assumed_fixture.bytes.len]
+    );
+    expect(state, assumed.error == PngDecodeError.none &&
+        assumed.profile_assumed != 0 && assumed.pixels.data[0] == 11 &&
+        assumed.pixels.data[1] == 35 && assumed.pixels.data[2] == 53,
+        "chromaticities without a transfer curve preserve fallback-profile truth");
+    png_decode_free(&assumed); png_encode_free(&assumed_fixture);
+
+    let precedence_fixture: PngEncodeResult = fixture_profile_png(1, 2, 100000, 1, 0);
+    let precedence: PngDecodeResult = png_decode(
+        precedence_fixture.bytes.data[0..precedence_fixture.bytes.len]
+    );
+    expect(state, precedence.error == PngDecodeError.none &&
+        precedence.profile_assumed == 0 && precedence.pixels.data[0] == 17 &&
+        precedence.pixels.data[1] == 34 && precedence.pixels.data[2] == 51,
+        "explicit sRGB takes precedence over accompanying gamma and chromaticities");
+    png_decode_free(&precedence); png_encode_free(&precedence_fixture);
+
+    let duplicate_fixture: PngEncodeResult = fixture_profile_png(2, 0, 45455, 0, 0);
+    let duplicate: PngDecodeResult = png_decode(
+        duplicate_fixture.bytes.data[0..duplicate_fixture.bytes.len]
+    );
+    expect(state, duplicate.error == PngDecodeError.duplicate_chunk,
+        "duplicate color metadata fails before image decompression");
+    png_decode_free(&duplicate); png_encode_free(&duplicate_fixture);
+
+    let singular_fixture: PngEncodeResult = fixture_profile_png(1, 4, 45455, 0, 0);
+    let singular: PngDecodeResult = png_decode(
+        singular_fixture.bytes.data[0..singular_fixture.bytes.len]
+    );
+    expect(state, singular.error == PngDecodeError.unsupported_color_profile,
+        "singular chromaticities fail before decompression or conversion");
+    png_decode_free(&singular); png_encode_free(&singular_fixture);
+
+    let icc_fixture: PngEncodeResult = fixture_profile_png(0, 0, 0, 0, 1);
+    let icc: PngDecodeResult = png_decode(
+        icc_fixture.bytes.data[0..icc_fixture.bytes.len]
+    );
+    expect(state, icc.error == PngDecodeError.none && icc.profile_assumed == 0 &&
+        icc.pixels.data[0] == 73 && icc.pixels.data[1] == 102 &&
+        icc.pixels.data[2] == 124,
+        "bounded ICC matrix and identity TRCs execute as declared profile truth");
+    png_decode_free(&icc); png_encode_free(&icc_fixture);
+
+    let icc_p3_fixture: PngEncodeResult = fixture_profile_png(0, 0, 0, 0, 2);
+    let icc_p3: PngDecodeResult = png_decode(
+        icc_p3_fixture.bytes.data[0..icc_p3_fixture.bytes.len]
+    );
+    expect(state, icc_p3.error == PngDecodeError.none &&
+        icc_p3.profile_assumed == 0 && icc_p3.pixels.data[0] == 64 &&
+        icc_p3.pixels.data[1] == 103 && icc_p3.pixels.data[2] == 126,
+        "Display P3 ICC matrix columns convert through the D50 PCS");
+    png_decode_free(&icc_p3); png_encode_free(&icc_p3_fixture);
+
+    let icc_precedence_fixture: PngEncodeResult = fixture_profile_png(
+        1, 1, 45455, 1, 2
+    );
+    let icc_precedence: PngDecodeResult = png_decode(
+        icc_precedence_fixture.bytes.data[0..icc_precedence_fixture.bytes.len]
+    );
+    expect(state, icc_precedence.error == PngDecodeError.none &&
+        icc_precedence.pixels.data[0] == 64 &&
+        icc_precedence.pixels.data[1] == 103 &&
+        icc_precedence.pixels.data[2] == 126,
+        "understood iCCP takes precedence over compatibility color chunks");
+    png_decode_free(&icc_precedence);
+    png_encode_free(&icc_precedence_fixture);
+
+    let bad_icc_fixture: PngEncodeResult = fixture_profile_png(0, 0, 0, 0, 3);
+    let bad_icc: PngDecodeResult = png_decode(
+        bad_icc_fixture.bytes.data[0..bad_icc_fixture.bytes.len]
+    );
+    expect(state, bad_icc.error == PngDecodeError.unsupported_color_profile,
+        "ICC tag offsets cannot escape the bounded decompressed profile");
+    png_decode_free(&bad_icc); png_encode_free(&bad_icc_fixture);
+
+    let lut_icc_fixture: PngEncodeResult = fixture_profile_png(0, 0, 0, 0, 4);
+    let lut_icc: PngDecodeResult = png_decode(
+        lut_icc_fixture.bytes.data[0..lut_icc_fixture.bytes.len]
+    );
+    expect(state, lut_icc.error == PngDecodeError.none &&
+        lut_icc.profile_assumed == 0 && lut_icc.pixels.data[0] == 73 &&
+        lut_icc.pixels.data[1] == 102 && lut_icc.pixels.data[2] == 124,
+        "two-entry sampled ICC curves interpolate the complete input domain");
+    png_decode_free(&lut_icc); png_encode_free(&lut_icc_fixture);
+
+    let sampled_fixture: PngEncodeResult = fixture_profile_png(0, 0, 0, 0, 18);
+    let sampled: PngDecodeResult = png_decode(
+        sampled_fixture.bytes.data[0..sampled_fixture.bytes.len]
+    );
+    expect(state, sampled.error == PngDecodeError.none &&
+        sampled.profile_assumed == 0 && sampled.pixels.data[0] == 63 &&
+        sampled.pixels.data[1] == 89 && sampled.pixels.data[2] == 108,
+        "multi-entry sampled ICC curves use deterministic linear interpolation");
+    png_decode_free(&sampled);
+    let sampled_repeat_valid: i32 = 1;
+    let sampled_repeat: i32 = 0;
+    while (sampled_repeat < 4096 && sampled_repeat_valid != 0) {
+        let repeated_sampled: PngDecodeResult = png_decode(
+            sampled_fixture.bytes.data[0..sampled_fixture.bytes.len]
+        );
+        if (repeated_sampled.error != PngDecodeError.none ||
+            repeated_sampled.pixels.data[0] != 63 ||
+            repeated_sampled.pixels.data[1] != 89 ||
+            repeated_sampled.pixels.data[2] != 108) {
+            sampled_repeat_valid = 0;
+        }
+        png_decode_free(&repeated_sampled);
+        sampled_repeat = sampled_repeat + 1;
+    }
+    expect(state, sampled_repeat_valid != 0 && sampled_repeat == 4096,
+        "4096 sampled ICC parse decode and cleanup cycles preserve exact output");
+    png_encode_free(&sampled_fixture);
+
+    let lut16_fixture: PngEncodeResult = fixture_profile_png(0, 0, 0, 0, 21);
+    let lut16: PngDecodeResult = png_decode(
+        lut16_fixture.bytes.data[0..lut16_fixture.bytes.len]
+    );
+    expect(state, lut16.error == PngDecodeError.none &&
+        lut16.profile_assumed == 0 && lut16.pixels.data[0] == 73 &&
+        lut16.pixels.data[1] == 102 && lut16.pixels.data[2] == 124,
+        "ICC lut16 input tables CLUT and output tables execute in declared order");
+    png_decode_free(&lut16);
+    let lut16_repeat_valid: i32 = 1;
+    let lut16_repeat: i32 = 0;
+    while (lut16_repeat < 4096 && lut16_repeat_valid != 0) {
+        let repeated_lut16: PngDecodeResult = png_decode(
+            lut16_fixture.bytes.data[0..lut16_fixture.bytes.len]
+        );
+        if (repeated_lut16.error != PngDecodeError.none ||
+            repeated_lut16.pixels.data[0] != 73 ||
+            repeated_lut16.pixels.data[1] != 102 ||
+            repeated_lut16.pixels.data[2] != 124) {
+            lut16_repeat_valid = 0;
+        }
+        png_decode_free(&repeated_lut16);
+        lut16_repeat = lut16_repeat + 1;
+    }
+    expect(state, lut16_repeat_valid != 0 && lut16_repeat == 4096,
+        "4096 ICC lut16 parse decode and cleanup cycles preserve exact output");
+    png_encode_free(&lut16_fixture);
+
+    let bad_lut_grid_fixture: PngEncodeResult = fixture_profile_png(
+        0, 0, 0, 0, 22
+    );
+    let bad_lut_grid: PngDecodeResult = png_decode(
+        bad_lut_grid_fixture.bytes.data[0..bad_lut_grid_fixture.bytes.len]
+    );
+    expect(state, bad_lut_grid.error == PngDecodeError.unsupported_color_profile,
+        "ICC lut16 grids above the bounded three dimensional ceiling fail closed");
+    png_decode_free(&bad_lut_grid); png_encode_free(&bad_lut_grid_fixture);
+
+    let bad_lut_matrix_fixture: PngEncodeResult = fixture_profile_png(
+        0, 0, 0, 0, 23
+    );
+    let bad_lut_matrix: PngDecodeResult = png_decode(
+        bad_lut_matrix_fixture.bytes.data[0..bad_lut_matrix_fixture.bytes.len]
+    );
+    expect(state, bad_lut_matrix.error == PngDecodeError.unsupported_color_profile,
+        "RGB to PCS lut16 profiles require the ICC mandated identity matrix");
+    png_decode_free(&bad_lut_matrix); png_encode_free(&bad_lut_matrix_fixture);
+
+    let ambiguous_lut8_fixture: PngEncodeResult = fixture_profile_png(
+        0, 0, 0, 0, 24
+    );
+    let ambiguous_lut8: PngDecodeResult = png_decode(
+        ambiguous_lut8_fixture.bytes.data[0..ambiguous_lut8_fixture.bytes.len]
+    );
+    expect(state, ambiguous_lut8.error == PngDecodeError.unsupported_color_profile,
+        "ambiguous lut8 PCSXYZ profiles remain an explicit unsupported path");
+    png_decode_free(&ambiguous_lut8); png_encode_free(&ambiguous_lut8_fixture);
+
+    let truncated_lut_fixture: PngEncodeResult = fixture_profile_png(
+        0, 0, 0, 0, 25
+    );
+    let truncated_lut: PngDecodeResult = png_decode(
+        truncated_lut_fixture.bytes.data[0..truncated_lut_fixture.bytes.len]
+    );
+    expect(state, truncated_lut.error == PngDecodeError.unsupported_color_profile,
+        "ICC lut16 tables must consume exactly their declared bounded tag");
+    png_decode_free(&truncated_lut); png_encode_free(&truncated_lut_fixture);
+
+    let short_lut_table_fixture: PngEncodeResult = fixture_profile_png(
+        0, 0, 0, 0, 26
+    );
+    let short_lut_table: PngDecodeResult = png_decode(
+        short_lut_table_fixture.bytes.data[0..short_lut_table_fixture.bytes.len]
+    );
+    expect(state, short_lut_table.error == PngDecodeError.unsupported_color_profile,
+        "ICC lut16 one dimensional tables require at least two entries");
+    png_decode_free(&short_lut_table); png_encode_free(&short_lut_table_fixture);
+
+    let wrong_lut_intent_fixture: PngEncodeResult = fixture_profile_png(
+        0, 0, 0, 0, 27
+    );
+    let wrong_lut_intent: PngDecodeResult = png_decode(
+        wrong_lut_intent_fixture.bytes.data[0..wrong_lut_intent_fixture.bytes.len]
+    );
+    expect(state,
+        wrong_lut_intent.error == PngDecodeError.unsupported_color_profile,
+        "A2B0 LUT execution cannot impersonate a non-perceptual rendering intent");
+    png_decode_free(&wrong_lut_intent);
+    png_encode_free(&wrong_lut_intent_fixture);
+
+    let mab_fixture: PngEncodeResult = fixture_profile_png(0, 0, 0, 0, 28);
+    let mab: PngDecodeResult = png_decode(
+        mab_fixture.bytes.data[0..mab_fixture.bytes.len]
+    );
+    expect(state, mab.error == PngDecodeError.none && mab.profile_assumed == 0 &&
+        mab.pixels.data[0] == 73 && mab.pixels.data[1] == 102 &&
+        mab.pixels.data[2] == 124,
+        "ICC mAB A curves nonuniform CLUT and B curves execute in declared order");
+    png_decode_free(&mab);
+    let mab_repeat_valid: i32 = 1;
+    let mab_repeat: i32 = 0;
+    while (mab_repeat < 4096 && mab_repeat_valid != 0) {
+        let repeated_mab: PngDecodeResult = png_decode(
+            mab_fixture.bytes.data[0..mab_fixture.bytes.len]
+        );
+        if (repeated_mab.error != PngDecodeError.none ||
+            repeated_mab.pixels.data[0] != 73 ||
+            repeated_mab.pixels.data[1] != 102 ||
+            repeated_mab.pixels.data[2] != 124) { mab_repeat_valid = 0; }
+        png_decode_free(&repeated_mab); mab_repeat = mab_repeat + 1;
+    }
+    expect(state, mab_repeat_valid != 0 && mab_repeat == 4096,
+        "4096 ICC mAB curve CLUT and cleanup cycles preserve exact output");
+    png_encode_free(&mab_fixture);
+
+    let mab_bad_unused_fixture: PngEncodeResult = fixture_profile_png(
+        0, 0, 0, 0, 29
+    );
+    let mab_bad_unused: PngDecodeResult = png_decode(
+        mab_bad_unused_fixture.bytes.data[0..mab_bad_unused_fixture.bytes.len]
+    );
+    expect(state, mab_bad_unused.error == PngDecodeError.unsupported_color_profile,
+        "ICC mAB unused CLUT dimensions must remain canonical zeroes");
+    png_decode_free(&mab_bad_unused); png_encode_free(&mab_bad_unused_fixture);
+
+    let mab_missing_b_fixture: PngEncodeResult = fixture_profile_png(
+        0, 0, 0, 0, 30
+    );
+    let mab_missing_b: PngDecodeResult = png_decode(
+        mab_missing_b_fixture.bytes.data[0..mab_missing_b_fixture.bytes.len]
+    );
+    expect(state, mab_missing_b.error == PngDecodeError.unsupported_color_profile,
+        "ICC mAB A CLUT B execution requires the complete permitted combination");
+    png_decode_free(&mab_missing_b); png_encode_free(&mab_missing_b_fixture);
+
+    let mab_bad_curve_fixture: PngEncodeResult = fixture_profile_png(
+        0, 0, 0, 0, 31
+    );
+    let mab_bad_curve: PngDecodeResult = png_decode(
+        mab_bad_curve_fixture.bytes.data[0..mab_bad_curve_fixture.bytes.len]
+    );
+    expect(state, mab_bad_curve.error == PngDecodeError.unsupported_color_profile,
+        "ICC mAB embedded curve types fail before CLUT ownership escapes");
+    png_decode_free(&mab_bad_curve); png_encode_free(&mab_bad_curve_fixture);
+
+    let mab_bad_precision_fixture: PngEncodeResult = fixture_profile_png(
+        0, 0, 0, 0, 32
+    );
+    let mab_bad_precision: PngDecodeResult = png_decode(
+        mab_bad_precision_fixture.bytes.data[0..mab_bad_precision_fixture.bytes.len]
+    );
+    expect(state,
+        mab_bad_precision.error == PngDecodeError.unsupported_color_profile,
+        "ICC mAB CLUT precision is restricted to declared 8 or 16 bit data");
+    png_decode_free(&mab_bad_precision);
+    png_encode_free(&mab_bad_precision_fixture);
+
+    let mab_overlap_fixture: PngEncodeResult = fixture_profile_png(
+        0, 0, 0, 0, 33
+    );
+    let mab_overlap: PngDecodeResult = png_decode(
+        mab_overlap_fixture.bytes.data[0..mab_overlap_fixture.bytes.len]
+    );
+    expect(state, mab_overlap.error == PngDecodeError.unsupported_color_profile,
+        "ICC mAB CLUT bytes cannot overlap an embedded curve sequence");
+    png_decode_free(&mab_overlap); png_encode_free(&mab_overlap_fixture);
+
+    let oversized_curve_fixture: PngEncodeResult = fixture_profile_png(
+        0, 0, 0, 0, 19
+    );
+    let oversized_curve: PngDecodeResult = png_decode(
+        oversized_curve_fixture.bytes.data[0..oversized_curve_fixture.bytes.len]
+    );
+    expect(state, oversized_curve.error == PngDecodeError.unsupported_color_profile,
+        "sampled ICC curve counts above the execution ceiling fail before allocation");
+    png_decode_free(&oversized_curve); png_encode_free(&oversized_curve_fixture);
+
+    let truncated_curve_fixture: PngEncodeResult = fixture_profile_png(
+        0, 0, 0, 0, 20
+    );
+    let truncated_curve: PngDecodeResult = png_decode(
+        truncated_curve_fixture.bytes.data[0..truncated_curve_fixture.bytes.len]
+    );
+    expect(state, truncated_curve.error == PngDecodeError.unsupported_color_profile,
+        "sampled ICC curve tables cannot cross their declared tag bounds");
+    png_decode_free(&truncated_curve); png_encode_free(&truncated_curve_fixture);
+
+    let bad_name_fixture: PngEncodeResult = fixture_profile_png(0, 0, 0, 0, 5);
+    let bad_name: PngDecodeResult = png_decode(
+        bad_name_fixture.bytes.data[0..bad_name_fixture.bytes.len]
+    );
+    expect(state, bad_name.error == PngDecodeError.unsupported_color_profile,
+        "iCCP profile names reject leading and consecutive spaces");
+    png_decode_free(&bad_name); png_encode_free(&bad_name_fixture);
+
+    let bad_method_fixture: PngEncodeResult = fixture_profile_png(0, 0, 0, 0, 6);
+    let bad_method: PngDecodeResult = png_decode(
+        bad_method_fixture.bytes.data[0..bad_method_fixture.bytes.len]
+    );
+    expect(state, bad_method.error == PngDecodeError.unsupported_color_profile,
+        "unknown iCCP compression methods fail before profile inflate");
+    png_decode_free(&bad_method); png_encode_free(&bad_method_fixture);
+
+    let duplicate_icc_fixture: PngEncodeResult = fixture_profile_png(0, 0, 0, 0, 7);
+    let duplicate_icc: PngDecodeResult = png_decode(
+        duplicate_icc_fixture.bytes.data[0..duplicate_icc_fixture.bytes.len]
+    );
+    expect(state, duplicate_icc.error == PngDecodeError.duplicate_chunk,
+        "duplicate iCCP chunks fail before image decompression");
+    png_decode_free(&duplicate_icc); png_encode_free(&duplicate_icc_fixture);
+
+    let parametric_icc_fixture: PngEncodeResult = fixture_profile_png(
+        0, 0, 0, 0, 8
+    );
+    let parametric_icc: PngDecodeResult = png_decode(
+        parametric_icc_fixture.bytes.data[0..parametric_icc_fixture.bytes.len]
+    );
+    expect(state, parametric_icc.error == PngDecodeError.none &&
+        parametric_icc.profile_assumed == 0 &&
+        parametric_icc.pixels.data[0] == 73 &&
+        parametric_icc.pixels.data[1] == 102 &&
+        parametric_icc.pixels.data[2] == 124,
+        "ICC parametric gamma curves execute through the same linear pipeline");
+    png_decode_free(&parametric_icc);
+    png_encode_free(&parametric_icc_fixture);
+
+    let srgb_curve_fixture: PngEncodeResult = fixture_profile_png(
+        0, 0, 0, 0, 13
+    );
+    let srgb_curve: PngDecodeResult = png_decode(
+        srgb_curve_fixture.bytes.data[0..srgb_curve_fixture.bytes.len]
+    );
+    expect(state, srgb_curve.error == PngDecodeError.none &&
+        srgb_curve.profile_assumed == 0 && srgb_curve.pixels.data[0] == 17 &&
+        srgb_curve.pixels.data[1] == 34 && srgb_curve.pixels.data[2] == 51,
+        "ICC type-3 sRGB parametric curves execute both piecewise branches");
+    png_decode_free(&srgb_curve); png_encode_free(&srgb_curve_fixture);
+
+    let type1_fixture: PngEncodeResult = fixture_profile_png(0, 0, 0, 0, 14);
+    let type1_curve: PngDecodeResult = png_decode(
+        type1_fixture.bytes.data[0..type1_fixture.bytes.len]
+    );
+    let type2_fixture: PngEncodeResult = fixture_profile_png(0, 0, 0, 0, 15);
+    let type2_curve: PngDecodeResult = png_decode(
+        type2_fixture.bytes.data[0..type2_fixture.bytes.len]
+    );
+    let type4_fixture: PngEncodeResult = fixture_profile_png(0, 0, 0, 0, 16);
+    let type4_curve: PngDecodeResult = png_decode(
+        type4_fixture.bytes.data[0..type4_fixture.bytes.len]
+    );
+    expect(state, type1_curve.error == PngDecodeError.none &&
+        type2_curve.error == PngDecodeError.none &&
+        type4_curve.error == PngDecodeError.none &&
+        type1_curve.pixels.data[0] == 73 && type1_curve.pixels.data[1] == 102 &&
+        type1_curve.pixels.data[2] == 124 &&
+        type2_curve.pixels.data[0] == 73 && type2_curve.pixels.data[1] == 102 &&
+        type2_curve.pixels.data[2] == 124 &&
+        type4_curve.pixels.data[0] == 73 && type4_curve.pixels.data[1] == 102 &&
+        type4_curve.pixels.data[2] == 124,
+        "ICC parametric curve types 1 2 and 4 execute their declared equations");
+    png_decode_free(&type1_curve); png_encode_free(&type1_fixture);
+    png_decode_free(&type2_curve); png_encode_free(&type2_fixture);
+    png_decode_free(&type4_curve); png_encode_free(&type4_fixture);
+
+    let channel_curve_fixture: PngEncodeResult = fixture_profile_png(
+        0, 0, 0, 0, 17
+    );
+    let channel_curve: PngDecodeResult = png_decode(
+        channel_curve_fixture.bytes.data[0..channel_curve_fixture.bytes.len]
+    );
+    expect(state, channel_curve.error == PngDecodeError.none &&
+        channel_curve.profile_assumed == 0 &&
+        channel_curve.pixels.data[0] == 73 &&
+        channel_curve.pixels.data[1] == 36 &&
+        channel_curve.pixels.data[2] == 178,
+        "differing ICC channel TRCs execute independently before matrix conversion");
+    png_decode_free(&channel_curve); png_encode_free(&channel_curve_fixture);
+
+    let cicp_fixture: PngEncodeResult = fixture_profile_png(0, 0, 0, 0, 9);
+    let cicp: PngDecodeResult = png_decode(
+        cicp_fixture.bytes.data[0..cicp_fixture.bytes.len]
+    );
+    expect(state, cicp.error == PngDecodeError.unsupported_color_profile,
+        "unimplemented higher-precedence cICP metadata fails explicitly");
+    png_decode_free(&cicp); png_encode_free(&cicp_fixture);
+
+    let duplicate_tag_fixture: PngEncodeResult = fixture_profile_png(
+        0, 0, 0, 0, 10
+    );
+    let duplicate_tag: PngDecodeResult = png_decode(
+        duplicate_tag_fixture.bytes.data[0..duplicate_tag_fixture.bytes.len]
+    );
+    expect(state, duplicate_tag.error == PngDecodeError.unsupported_color_profile,
+        "duplicate required ICC tags fail without ambiguous profile execution");
+    png_decode_free(&duplicate_tag); png_encode_free(&duplicate_tag_fixture);
+
+    let size_mismatch_fixture: PngEncodeResult = fixture_profile_png(
+        0, 0, 0, 0, 11
+    );
+    let size_mismatch: PngDecodeResult = png_decode(
+        size_mismatch_fixture.bytes.data[0..size_mismatch_fixture.bytes.len]
+    );
+    expect(state, size_mismatch.error == PngDecodeError.unsupported_color_profile,
+        "ICC declared size must equal the bounded decompressed profile");
+    png_decode_free(&size_mismatch); png_encode_free(&size_mismatch_fixture);
+
+    let broken_iccp_fixture: PngEncodeResult = fixture_profile_png(
+        0, 0, 0, 0, 12
+    );
+    let broken_iccp: PngDecodeResult = png_decode(
+        broken_iccp_fixture.bytes.data[0..broken_iccp_fixture.bytes.len]
+    );
+    expect(state, broken_iccp.error == PngDecodeError.unsupported_color_profile,
+        "corrupt iCCP zlib streams fail before ICC tag parsing");
+    png_decode_free(&broken_iccp); png_encode_free(&broken_iccp_fixture);
+
+    let ramp: ArrayList[u8] = make[u8](256);
+    let sample: i32 = 0;
+    while (sample < 256) {
+        push[u8](&ramp, png_gamma_sample_to_srgb(sample as u8, 100000));
+        sample = sample + 1;
+    }
+    let ramps_exact: i32 = checksum_crc32(ramp.data[0..ramp.len]) == 1696635244;
+    free[u8](&ramp);
+    let gamma_values: ArrayList[i64] = make[i64](7);
+    push[i64](&gamma_values, 45455); push[i64](&gamma_values, 70000);
+    push[i64](&gamma_values, 55000);
+    push[i64](&gamma_values, 35000); push[i64](&gamma_values, 220000);
+    push[i64](&gamma_values, 25000); push[i64](&gamma_values, 500000);
+    let expected_crcs: ArrayList[i64] = make[i64](7);
+    push[i64](&expected_crcs, 247783021); push[i64](&expected_crcs, 3885669558);
+    push[i64](&expected_crcs, 4144236837);
+    push[i64](&expected_crcs, 2933270737); push[i64](&expected_crcs, 2066708568);
+    push[i64](&expected_crcs, 726426539); push[i64](&expected_crcs, 3244028137);
+    let gamma_index: i32 = 0;
+    while (gamma_index < gamma_values.len && ramps_exact != 0) {
+        let values: ArrayList[u8] = make[u8](256);
+        sample = 0;
+        while (sample < 256) {
+            push[u8](&values, png_gamma_sample_to_srgb(
+                sample as u8, gamma_values.data[gamma_index]
+            ));
+            sample = sample + 1;
+        }
+        if (checksum_crc32(values.data[0..values.len]) !=
+            expected_crcs.data[gamma_index]) { ramps_exact = 0; }
+        free[u8](&values); gamma_index = gamma_index + 1;
+    }
+    expect(state, ramps_exact,
+        "eight full gamma ramps match independent sRGB transfer references");
+    free[i64](&expected_crcs); free[i64](&gamma_values);
+}
+
+fn interlace_contract(state: *TestState) void {
+    let pixels: ArrayList[u8] = make[u8](17 * 17 * 4);
+    let y: i32 = 0;
+    while (y < 17) {
+        let x: i32 = 0;
+        while (x < 17) {
+            push[u8](&pixels, ((x * 17 + y * 3) & 255) as u8);
+            push[u8](&pixels, ((x * 5 + y * 29) & 255) as u8);
+            push[u8](&pixels, ((x * 41 + y * 7) & 255) as u8);
+            push[u8](&pixels, ((x * 11 + y * 13) & 255) as u8);
+            x = x + 1;
+        }
+        y = y + 1;
+    }
+    let fixture: PngEncodeResult = fixture_adam7_rgba8(
+        17, 17, pixels.data[0..pixels.len]
+    );
+    let decoded: PngDecodeResult = png_decode(
+        fixture.bytes.data[0..fixture.bytes.len]
+    );
+    let exact: i32 = decoded.error == PngDecodeError.none &&
+        decoded.pixels.len == pixels.len;
+    let i: i32 = 0;
+    while (i < decoded.pixels.len && i < pixels.len) {
+        if (decoded.pixels.data[i] != pixels.data[i]) { exact = 0; }
+        i = i + 1;
+    }
+    expect(state, exact,
+        "all seven Adam7 passes reconstruct exact RGBA8 pixels through every filter");
+    png_decode_free(&decoded); png_encode_free(&fixture); free[u8](&pixels);
+
+    let sweep_exact: i32 = 1;
+    let sweep_height: i32 = 1;
+    while (sweep_height <= 12 && sweep_exact != 0) {
+        let sweep_width: i32 = 1;
+        while (sweep_width <= 12 && sweep_exact != 0) {
+            let sweep_pixels: ArrayList[u8] = make[u8](
+                sweep_width * sweep_height * 4
+            );
+            let sweep_index: i32 = 0;
+            while (sweep_index < sweep_width * sweep_height * 4) {
+                push[u8](&sweep_pixels,
+                    ((sweep_index * 37 + sweep_width * 11 + sweep_height) & 255) as u8);
+                sweep_index = sweep_index + 1;
+            }
+            let sweep_fixture: PngEncodeResult = fixture_adam7_rgba8(
+                sweep_width, sweep_height,
+                sweep_pixels.data[0..sweep_pixels.len]
+            );
+            let sweep_decoded: PngDecodeResult = png_decode(
+                sweep_fixture.bytes.data[0..sweep_fixture.bytes.len]
+            );
+            if (sweep_decoded.error != PngDecodeError.none ||
+                sweep_decoded.pixels.len != sweep_pixels.len) { sweep_exact = 0; }
+            sweep_index = 0;
+            while (sweep_index < sweep_decoded.pixels.len &&
+                sweep_index < sweep_pixels.len && sweep_exact != 0) {
+                if (sweep_decoded.pixels.data[sweep_index] !=
+                    sweep_pixels.data[sweep_index]) { sweep_exact = 0; }
+                sweep_index = sweep_index + 1;
+            }
+            png_decode_free(&sweep_decoded); png_encode_free(&sweep_fixture);
+            free[u8](&sweep_pixels); sweep_width = sweep_width + 1;
+        }
+        sweep_height = sweep_height + 1;
+    }
+    expect(state, sweep_exact,
+        "144 Adam7 dimension combinations preserve empty-pass and edge geometry");
+
+    let packed: ArrayList[u8] = make[u8](128);
+    let pass: i32 = 0;
+    while (pass < 7) {
+        let start_x: i32 = png_adam7_start_x(pass);
+        let start_y: i32 = png_adam7_start_y(pass);
+        let step_x: i32 = png_adam7_step_x(pass);
+        let step_y: i32 = png_adam7_step_y(pass);
+        let pass_width: i32 = png_adam7_extent(9, start_x, step_x);
+        let pass_height: i32 = png_adam7_extent(9, start_y, step_y);
+        if (pass_width > 0 && pass_height > 0) {
+            let row_bytes: i32 = (pass_width + 7) / 8;
+            let pass_y: i32 = 0;
+            while (pass_y < pass_height) {
+                push[u8](&packed, 0);
+                let row: ArrayList[u8] = make[u8](row_bytes);
+                let fill: i32 = 0;
+                while (fill < row_bytes) { push[u8](&row, 0); fill = fill + 1; }
+                let pass_x: i32 = 0;
+                while (pass_x < pass_width) {
+                    let source_x: i32 = start_x + pass_x * step_x;
+                    let source_y: i32 = start_y + pass_y * step_y;
+                    png_write_packed_sample(row.data[0..row.len], pass_x, 1,
+                        (source_x + source_y) & 1);
+                    pass_x = pass_x + 1;
+                }
+                png_copy_append(&packed, row.data[0..row.len]);
+                free[u8](&row); pass_y = pass_y + 1;
+            }
+        }
+        pass = pass + 1;
+    }
+    let packed_fixture: PngEncodeResult = fixture_png_interlaced(
+        9, 9, 1, 0, packed.data[0..packed.len], "", ""
+    );
+    let packed_decoded: PngDecodeResult = png_decode(
+        packed_fixture.bytes.data[0..packed_fixture.bytes.len]
+    );
+    let packed_exact: i32 = packed_decoded.error == PngDecodeError.none &&
+        packed_decoded.pixels.len == 9 * 9 * 4;
+    y = 0;
+    while (y < 9 && packed_exact != 0) {
+        let x: i32 = 0;
+        while (x < 9) {
+            let expected: u8 = (((x + y) & 1) * 255) as u8;
+            let at: i32 = (y * 9 + x) * 4;
+            if (packed_decoded.pixels.data[at] != expected ||
+                packed_decoded.pixels.data[at + 1] != expected ||
+                packed_decoded.pixels.data[at + 2] != expected ||
+                packed_decoded.pixels.data[at + 3] != 255) { packed_exact = 0; }
+            x = x + 1;
+        }
+        y = y + 1;
+    }
+    expect(state, packed_exact,
+        "Adam7 deinterlaces packed sub-byte samples without losing bit identity");
+    png_decode_free(&packed_decoded); png_encode_free(&packed_fixture);
+    free[u8](&packed);
+}
+
+fn dynamic_inflate_contract(state: *TestState) void {
+    let compressed: []u8 =
+        "\x78\xda\xed\xd0\x4d\x2b\xc3\x71\x00\xc0\xf1\x7f\xcd\x43\x5b\xda\xf2\xb0\x9a\x30\x31\x99\x96\x95\xa1\xa1\xad\x96\x95\x45\x8b\x28\x5a\x91\x87\x3c\xd5\x6a\x21\x4b\x16\x59\x4d\x34\x69\x42\xab\x95\xa7\x3c\x64\x25\x2b\x8b\x16\x4d\x71\xe1\xa0\xe4\xb2\x8b\x94\x03\x17\x0e\x4a\x2e\x2e\x52\x5f\x2f\xc4\xef\xf3\x12\x3e\x92\x24\x49\xc8\xd2\x33\xc9\x50\x28\x91\xab\xd4\x64\xe5\x15\xa2\xca\xd7\x91\xa3\x35\xa0\xd6\x99\xd0\x54\xd4\x53\x60\xb4\xa1\xad\x76\x50\x52\xd7\x4a\x99\xb5\x13\x7d\x63\x0f\x06\xc7\x20\x46\xa7\x9b\xaa\xf6\x09\x6a\xba\xa6\x31\x77\xfb\x69\xe8\x5f\xc4\x3a\x1c\xc2\xe6\x0e\x63\x1f\xdb\xa4\xc9\xbb\x4f\xb3\xef\x08\xe7\x5c\x9c\xb6\xf9\x73\x3a\x82\x57\x74\x86\x6e\x71\xad\xdf\xd3\x1d\x49\xd1\xbb\xf5\xc4\xc0\xde\x0b\x43\xd1\x77\x46\x8f\x3f\x71\xc7\xbf\xf1\x24\x7e\x19\x4f\xca\x98\xbc\x56\x30\x75\x93\x8d\xef\x4e\xc3\xec\x43\x31\xfe\x54\x39\x81\x47\x23\x0b\xcf\xb5\x04\x5f\x2d\x2c\xbf\xd9\x59\xf9\x68\x61\xed\xab\x9d\xf0\xb7\x8b\xc8\x4f\x1f\x1b\x8c\xb0\x9d\xe6\x61\x57\xee\xe5\x40\x39\x43\x34\x37\xc0\x91\x66\x89\x58\xd1\x2a\x27\xa5\x11\x4e\xf5\x3b\x24\x2a\x0f\xb9\x30\xc5\xb8\x34\x9f\x71\x65\x49\x22\x89\x00\x11\x20\x02\x44\x80\x08\x10\x01\x22\x40\x04\x88\x00\x11\x20\x02\x44\x80\x08\x10\x01\xff\x2f\xe0\x0f\xd7\xee\xee\x79";
+    let fixture: PngEncodeResult = fixture_png_compressed(64, 16, compressed);
+    let decoded: PngDecodeResult = png_decode(fixture.bytes.data[0..fixture.bytes.len]);
+    let exact: i32 = decoded.error == PngDecodeError.none && decoded.pixels.len == 4096;
+    let y: i32 = 0;
+    while (y < 16 && exact != 0) {
+        let x: i32 = 0;
+        while (x < 64) {
+            let at: i32 = (y * 64 + x) * 4;
+            if (decoded.pixels.data[at] != ((x * 3) % 256) as u8 ||
+                decoded.pixels.data[at + 1] != ((x * 5) % 256) as u8 ||
+                decoded.pixels.data[at + 2] != ((x * 7) % 256) as u8 ||
+                decoded.pixels.data[at + 3] != 255) { exact = 0; }
+            x = x + 1;
+        }
+        y = y + 1;
+    }
+    expect(state, exact,
+        "PNG IDAT accepts independently generated dynamic-Huffman zlib streams");
+    png_decode_free(&decoded); png_encode_free(&fixture);
+}
+
+fn rejection_contract(state: *TestState) void {
+    let signature: PngDecodeResult = png_decode("not a png");
+    expect(state, signature.error == PngDecodeError.invalid_signature,
+        "invalid signatures fail before chunk parsing");
+    png_decode_free(&signature);
+
+    let surface: CpuSurface = cpu_surface_make(1, 1);
+    let encoded: PngEncodeResult = png_encode_surface(surface);
+    encoded.bytes.data[29] = encoded.bytes.data[29] ^ 1;
+    let crc: PngDecodeResult = png_decode(encoded.bytes.data[0..encoded.bytes.len]);
+    expect(state, crc.error == PngDecodeError.invalid_chunk_crc,
+        "chunk corruption fails CRC validation before decompression");
+    png_decode_free(&crc);
+    encoded.bytes.data[29] = encoded.bytes.data[29] ^ 1;
+
+    push[u8](&encoded.bytes, 0);
+    let trailing: PngDecodeResult = png_decode(encoded.bytes.data[0..encoded.bytes.len]);
+    expect(state, trailing.error == PngDecodeError.trailing_data,
+        "bytes after IEND fail canonical full-file decoding");
+    png_decode_free(&trailing);
+    encoded.bytes.len = encoded.bytes.len - 1;
+
+    let every_prefix_rejected: i32 = 1;
+    let length: i32 = 0;
+    while (length < encoded.bytes.len) {
+        let prefix: PngDecodeResult = png_decode(encoded.bytes.data[0..length]);
+        if (prefix.error == PngDecodeError.none) { every_prefix_rejected = 0; }
+        png_decode_free(&prefix);
+        length = length + 1;
+    }
+    expect(state, every_prefix_rejected,
+        "every strict PNG prefix fails without reading beyond available bytes");
+
+    encoded.bytes.data[28] = 2;
+    fixture_rewrite_crc(&encoded.bytes, 8);
+    let interlace: PngDecodeResult = png_decode(encoded.bytes.data[0..encoded.bytes.len]);
+    expect(state, interlace.error == PngDecodeError.unsupported_interlace,
+        "unknown PNG interlace methods fail before decompression");
+    png_decode_free(&interlace);
+    encoded.bytes.data[28] = 0;
+    fixture_rewrite_crc(&encoded.bytes, 8);
+
+    let iend_offset: i32 = encoded.bytes.len - 12;
+    encoded.bytes.data[iend_offset + 6] = 'n';
+    fixture_rewrite_crc(&encoded.bytes, iend_offset);
+    let reserved_type: PngDecodeResult = png_decode(
+        encoded.bytes.data[0..encoded.bytes.len]
+    );
+    expect(state, reserved_type.error == PngDecodeError.invalid_chunk_type,
+        "chunk type reserved bits fail even when the attacker repairs the CRC");
+    png_decode_free(&reserved_type);
+    encoded.bytes.data[iend_offset + 6] = 'N';
+    fixture_rewrite_crc(&encoded.bytes, iend_offset);
+
+    fixture_write_u32_be(&encoded.bytes, 16, 9000);
+    fixture_rewrite_crc(&encoded.bytes, 8);
+    let oversized: PngDecodeResult = png_decode(encoded.bytes.data[0..encoded.bytes.len]);
+    expect(state, oversized.error == PngDecodeError.pixel_limit,
+        "oversized dimensions fail before allocation or decompression");
+    png_decode_free(&oversized);
+    png_encode_free(&encoded);
+    cpu_surface_free(&surface);
+
+    let bad_filter_fixture: PngEncodeResult = fixture_png(
+        1, 1, 8, 6, "\x05\x00\x00\x00\xff", "", ""
+    );
+    let bad_filter: PngDecodeResult = png_decode(
+        bad_filter_fixture.bytes.data[0..bad_filter_fixture.bytes.len]
+    );
+    expect(state, bad_filter.error == PngDecodeError.invalid_filter,
+        "unknown scanline filters fail explicitly");
+    png_decode_free(&bad_filter); png_encode_free(&bad_filter_fixture);
+
+    let expanding: ZlibStoreEncodeResult = zlib_store_encode(
+        "\x00\x00\x00\x00\xff\x7f"
+    );
+    let expansion_fixture: PngEncodeResult = fixture_png_compressed(
+        1, 1, expanding.bytes.data[0..expanding.bytes.len]
+    );
+    let expansion: PngDecodeResult = png_decode(
+        expansion_fixture.bytes.data[0..expansion_fixture.bytes.len]
+    );
+    expect(state, expansion.error == PngDecodeError.compression_error,
+        "compressed expansion beyond exact scanline size hits the inflate ceiling");
+    png_decode_free(&expansion); png_encode_free(&expansion_fixture);
+    zlib_store_encode_free(&expanding);
+
+    let missing_palette_fixture: PngEncodeResult = fixture_png(
+        1, 1, 1, 3, "\x00\x00", "", ""
+    );
+    let missing_palette: PngDecodeResult = png_decode(
+        missing_palette_fixture.bytes.data[0..missing_palette_fixture.bytes.len]
+    );
+    expect(state, missing_palette.error == PngDecodeError.missing_palette,
+        "indexed images require a palette before inflate");
+    png_decode_free(&missing_palette); png_encode_free(&missing_palette_fixture);
+
+    let bad_index_fixture: PngEncodeResult = fixture_png(
+        1, 1, 1, 3, "\x00\x80", "\xff\x00\x00", ""
+    );
+    let bad_index: PngDecodeResult = png_decode(
+        bad_index_fixture.bytes.data[0..bad_index_fixture.bytes.len]
+    );
+    expect(state, bad_index.error == PngDecodeError.palette_index,
+        "palette indices outside declared entries fail without out-of-bounds access");
+    png_decode_free(&bad_index); png_encode_free(&bad_index_fixture);
+}
+
+fn main() i32 {
+    let state: TestState = TestState{ .passed = 0, .failed = 0 };
+    round_trip_contract(&state);
+    filter_contract(&state);
+    scale_render_contract(&state);
+    color_contract(&state);
+    color_profile_contract(&state);
+    interlace_contract(&state);
+    dynamic_inflate_contract(&state);
+    rejection_contract(&state);
+    _zag_print("PNG decode contract: pass=");
+    let passed: []u8 = _zag_i64_to_str(state.passed as i64);
+    _zag_print(passed); _zag_str_free(passed);
+    _zag_print(" fail=");
+    let failed: []u8 = _zag_i64_to_str(state.failed as i64);
+    _zag_println(failed); _zag_str_free(failed);
+    if (state.failed == 0) { return 0; }
+    return 1;
+}

@@ -1,0 +1,1784 @@
+@import("../core/geometry.zag")
+@import("../core/view_contract.zag")
+@import("../design/tokens.zag")
+@import("../input/hit_test.zag")
+@import("../layout/adaptive.zag")
+@import("../layout/scroll.zag")
+@import("../render/display_list.zag")
+@import("../semantics/semantics.zag")
+
+// ScrollViewport is the retained presentation and interaction contract around
+// layout/scroll.zag. ScrollState remains the only offset authority. The
+// geometry derived here is reused for display clipping and translation, hit
+// clipping, semantic bounds, scrollbar chrome, and ID-based automation.
+
+enum ScrollViewportAxis { vertical, horizontal, both }
+
+enum ScrollViewportInputKind { wheel, key, semantic, focus_reveal }
+
+enum ScrollViewportCommand {
+    arrow_up,
+    arrow_down,
+    arrow_left,
+    arrow_right,
+    page_up,
+    page_down,
+    page_left,
+    page_right,
+    home,
+    end,
+}
+
+enum ScrollViewportBuildError {
+    none,
+    invalid_spec,
+    invalid_state,
+    invalid_content,
+    invalid_destination,
+    capacity_error,
+    resource_collision,
+    display_error,
+    hit_error,
+    semantics_error,
+}
+
+enum ScrollViewportCapacityError {
+    none,
+    display_operations,
+    display_resources,
+    hit_nodes,
+    semantic_nodes,
+}
+
+struct ScrollViewportBuildLimits {
+    display_operations: i32,
+    hit_nodes: i32,
+    semantic_nodes: i32,
+}
+
+struct ScrollViewportSpec {
+    id: NodeKey,
+    semantic_parent: NodeKey,
+    hit_parent: NodeKey,
+    bounds: Rect,
+    name: []u8,
+    description: []u8,
+    value: []u8,
+    axis: ScrollViewportAxis,
+    direction: LayoutDirection,
+    density: FlexDensity,
+    enabled: i32,
+    focused: i32,
+    focus_visible: i32,
+    focus_order: i64,
+    content_focus_order_offset: i64,
+    z_order: i64,
+    limits: ScrollViewportBuildLimits,
+}
+
+struct ScrollViewportGeometry {
+    viewport_bounds: Rect,
+    clip_bounds: Rect,
+    visible_content_bounds: Rect,
+    content_transform: Transform,
+    horizontal_track_bounds: Rect,
+    horizontal_thumb_bounds: Rect,
+    vertical_track_bounds: Rect,
+    vertical_thumb_bounds: Rect,
+    horizontal_track_visible: i32,
+    vertical_track_visible: i32,
+    horizontal_max: i64,
+    vertical_max: i64,
+    horizontal_value: i64,
+    vertical_value: i64,
+    evidence_hash: i64,
+    valid: i32,
+}
+
+struct ScrollViewportArtifact {
+    id: NodeKey,
+    geometry: ScrollViewportGeometry,
+    state_hash: i64,
+    scrollable: i32,
+    enabled: i32,
+    focused: i32,
+    focus_ring_visible: i32,
+    track_token: SemanticColorToken,
+    thumb_token: SemanticColorToken,
+    focus_token: SemanticColorToken,
+    display_op_start: i32,
+    display_op_end: i32,
+    display_operations_added: i32,
+    display_resources_added: i32,
+    hit_node_start: i32,
+    hit_node_end: i32,
+    semantic_node_start: i32,
+    semantic_node_end: i32,
+    evidence_hash: i64,
+}
+
+struct ScrollViewportBuildResult {
+    artifact: ScrollViewportArtifact,
+    error: ScrollViewportBuildError,
+    capacity_error: ScrollViewportCapacityError,
+    display_error: DisplayError,
+    resource_error: RenderResourceError,
+    hit_error: HitTreeError,
+    semantics_error: SemanticsError,
+}
+
+struct ScrollViewportTransition {
+    mutation: ScrollMutation,
+    input_kind: ScrollViewportInputKind,
+    command: ScrollViewportCommand,
+    requested_x: i64,
+    requested_y: i64,
+    accepted: i32,
+    rejected: i32,
+    rejected_disabled: i32,
+    rejected_no_overflow: i32,
+    evidence_hash: i64,
+}
+
+struct ScrollViewportTargetReveal {
+    id: NodeKey,
+    content_bounds: Rect,
+    found: i32,
+    focusable: i32,
+    transition: ScrollViewportTransition,
+    evidence_hash: i64,
+}
+
+struct ScrollViewportHostCheckpoint {
+    semantics: SemanticsCheckpoint,
+    hit_length: i32,
+    hit_revision: i64,
+    hit_last_error: HitTreeError,
+    hit_error_node: NodeKey,
+}
+
+struct ScrollViewportDisplayStage {
+    display: DisplayList,
+    valid: i32,
+}
+
+fn scroll_viewport_name_byte_limit() i32 { return 4096; }
+fn scroll_viewport_description_byte_limit() i32 { return 16384; }
+fn scroll_viewport_focus_order_limit() i64 { return 1000000000; }
+
+fn scroll_viewport_horizontal_range_id(parent: NodeKey) NodeKey {
+    return semantic_generated_key(parent, SemanticRole.slider, 7001);
+}
+
+fn scroll_viewport_vertical_range_id(parent: NodeKey) NodeKey {
+    return semantic_generated_key(parent, SemanticRole.slider, 7002);
+}
+
+fn scroll_viewport_build_limits() ScrollViewportBuildLimits {
+    return ScrollViewportBuildLimits{
+        .display_operations = 16384,
+        .hit_nodes = 4096,
+        .semantic_nodes = 4096,
+    };
+}
+
+fn scroll_viewport_spec(id: NodeKey, semantic_parent: NodeKey,
+    hit_parent: NodeKey, bounds: Rect,
+    name: @retained_by_return []u8) ScrollViewportSpec {
+    return ScrollViewportSpec{
+        .id = id,
+        .semantic_parent = semantic_parent,
+        .hit_parent = hit_parent,
+        .bounds = bounds,
+        .name = name,
+        .description = "Clipped scrollable content",
+        .value = "Scroll position",
+        .axis = ScrollViewportAxis.vertical,
+        .direction = LayoutDirection.ltr,
+        .density = FlexDensity.standard,
+        .enabled = 1,
+        .focused = 0,
+        .focus_visible = 0,
+        .focus_order = 0,
+        .content_focus_order_offset = 0,
+        .z_order = 0,
+        .limits = scroll_viewport_build_limits(),
+    };
+}
+
+fn scroll_viewport_axis_valid(axis: ScrollViewportAxis) i32 {
+    let value: i64 = axis as i64;
+    return (value >= ScrollViewportAxis.vertical as i64 &&
+        value <= ScrollViewportAxis.both as i64) as i32;
+}
+
+fn scroll_viewport_direction_valid(direction: LayoutDirection) i32 {
+    return (direction == LayoutDirection.ltr ||
+        direction == LayoutDirection.rtl) as i32;
+}
+
+fn scroll_viewport_density_valid(density: FlexDensity) i32 {
+    let value: i64 = density as i64;
+    return (value >= FlexDensity.compact as i64 &&
+        value <= FlexDensity.touch as i64) as i32;
+}
+
+fn scroll_viewport_axis_x(axis: ScrollViewportAxis) i32 {
+    return (axis == ScrollViewportAxis.horizontal ||
+        axis == ScrollViewportAxis.both) as i32;
+}
+
+fn scroll_viewport_axis_y(axis: ScrollViewportAxis) i32 {
+    return (axis == ScrollViewportAxis.vertical ||
+        axis == ScrollViewportAxis.both) as i32;
+}
+
+fn scroll_viewport_spec_valid(spec:  ScrollViewportSpec) i32 {
+    if (node_key_equal(spec.id, hit_root_key()) != 0 ||
+        node_key_equal(spec.id, semantic_none_key()) != 0 ||
+        node_key_equal(spec.semantic_parent, semantic_none_key()) != 0 ||
+        node_key_equal(spec.hit_parent, semantic_none_key()) != 0 ||
+        hit_geometry_valid(spec.bounds) == 0 ||
+        spec.name.len <= 0 || spec.name.len > scroll_viewport_name_byte_limit() ||
+        spec.description.len > scroll_viewport_description_byte_limit() ||
+        spec.value.len > scroll_viewport_description_byte_limit() ||
+        semantic_text_input_valid(spec.name) == 0 ||
+        semantic_text_input_valid(spec.description) == 0 ||
+        semantic_text_input_valid(spec.value) == 0 ||
+        scroll_viewport_axis_valid(spec.axis) == 0 ||
+        scroll_viewport_direction_valid(spec.direction) == 0 ||
+        scroll_viewport_density_valid(spec.density) == 0 ||
+        (spec.enabled != 0 && spec.enabled != 1) ||
+        (spec.focused != 0 && spec.focused != 1) ||
+        (spec.focus_visible != 0 && spec.focus_visible != 1) ||
+        spec.focus_order < 0 ||
+        spec.focus_order > scroll_viewport_focus_order_limit() ||
+        spec.content_focus_order_offset < 0 ||
+        spec.content_focus_order_offset > scroll_viewport_focus_order_limit() ||
+        spec.z_order < 0 || spec.z_order >= scroll_viewport_focus_order_limit() ||
+        spec.limits.display_operations < 0 || spec.limits.hit_nodes < 0 ||
+        spec.limits.semantic_nodes < 0) { return 0; }
+    if ((spec.focused != 0 && (spec.enabled == 0 || spec.focus_order <= 0)) ||
+        (spec.focus_visible != 0 && spec.focused == 0)) { return 0; }
+    return 1;
+}
+
+fn scroll_viewport_max(a: i64, b: i64) i64 {
+    if (a > b) { return a; }
+    return b;
+}
+
+fn scroll_viewport_min(a: i64, b: i64) i64 {
+    if (a < b) { return a; }
+    return b;
+}
+
+fn scroll_viewport_intersection(a: Rect, b: Rect) Rect {
+    let x: i64 = scroll_viewport_max(a.x, b.x);
+    let y: i64 = scroll_viewport_max(a.y, b.y);
+    let right: i64 = scroll_viewport_min(a.x + a.width, b.x + b.width);
+    let bottom: i64 = scroll_viewport_min(a.y + a.height, b.y + b.height);
+    if (right <= x || bottom <= y) { return rect(x, y, 0, 0); }
+    return rect(x, y, right - x, bottom - y);
+}
+
+fn scroll_viewport_rect_nonempty(value: Rect) i32 {
+    return (value.width > 0 && value.height > 0) as i32;
+}
+
+fn scroll_viewport_mix(hash: i64, value: i64) i64 {
+    let modulus: i64 = 2147483647;
+    let component: i64 = value % modulus;
+    if (component < 0) { component = component + modulus; }
+    return (hash * 131 + component) % modulus;
+}
+
+fn scroll_viewport_geometry_hash(value: ScrollViewportGeometry) i64 {
+    let hash: i64 = scroll_viewport_mix(17, value.viewport_bounds.x);
+    hash = scroll_viewport_mix(hash, value.viewport_bounds.y);
+    hash = scroll_viewport_mix(hash, value.viewport_bounds.width);
+    hash = scroll_viewport_mix(hash, value.viewport_bounds.height);
+    hash = scroll_viewport_mix(hash, value.visible_content_bounds.x);
+    hash = scroll_viewport_mix(hash, value.visible_content_bounds.y);
+    hash = scroll_viewport_mix(hash, value.visible_content_bounds.width);
+    hash = scroll_viewport_mix(hash, value.visible_content_bounds.height);
+    hash = scroll_viewport_mix(hash, value.content_transform.translate_x);
+    hash = scroll_viewport_mix(hash, value.content_transform.translate_y);
+    hash = scroll_viewport_mix(hash, value.horizontal_track_bounds.x);
+    hash = scroll_viewport_mix(hash, value.horizontal_track_bounds.y);
+    hash = scroll_viewport_mix(hash, value.horizontal_track_bounds.width);
+    hash = scroll_viewport_mix(hash, value.horizontal_thumb_bounds.x);
+    hash = scroll_viewport_mix(hash, value.horizontal_thumb_bounds.width);
+    hash = scroll_viewport_mix(hash, value.vertical_track_bounds.x);
+    hash = scroll_viewport_mix(hash, value.vertical_track_bounds.y);
+    hash = scroll_viewport_mix(hash, value.vertical_track_bounds.height);
+    hash = scroll_viewport_mix(hash, value.vertical_thumb_bounds.y);
+    hash = scroll_viewport_mix(hash, value.vertical_thumb_bounds.height);
+    hash = scroll_viewport_mix(hash, value.horizontal_track_visible as i64);
+    hash = scroll_viewport_mix(hash, value.vertical_track_visible as i64);
+    hash = scroll_viewport_mix(hash, value.horizontal_max);
+    hash = scroll_viewport_mix(hash, value.vertical_max);
+    hash = scroll_viewport_mix(hash, value.horizontal_value);
+    return scroll_viewport_mix(hash, value.vertical_value);
+}
+
+fn scroll_viewport_thumb_extent(track_extent: i64, viewport_extent: i64,
+    content_extent: i64, minimum: i64) i64 {
+    if (track_extent <= 0 || viewport_extent <= 0 || content_extent <= 0) {
+        return 0;
+    }
+    let extent: i64 = (track_extent * viewport_extent) / content_extent;
+    if (extent < minimum) { extent = minimum; }
+    if (extent > track_extent) { extent = track_extent; }
+    return extent;
+}
+
+fn scroll_viewport_geometry(spec:  ScrollViewportSpec,
+    state: ScrollState) ScrollViewportGeometry {
+    let result: ScrollViewportGeometry = ScrollViewportGeometry{
+        .viewport_bounds = spec.bounds,
+        .clip_bounds = spec.bounds,
+        .visible_content_bounds = rect(0, 0, 0, 0),
+        .content_transform = transform_identity(),
+        .horizontal_track_bounds = rect(0, 0, 0, 0),
+        .horizontal_thumb_bounds = rect(0, 0, 0, 0),
+        .vertical_track_bounds = rect(0, 0, 0, 0),
+        .vertical_thumb_bounds = rect(0, 0, 0, 0),
+        .horizontal_track_visible = 0,
+        .vertical_track_visible = 0,
+        .horizontal_max = 0,
+        .vertical_max = 0,
+        .horizontal_value = state.offset_x,
+        .vertical_value = state.offset_y,
+        .evidence_hash = 0,
+        .valid = 0,
+    };
+    if (scroll_viewport_spec_valid(spec) == 0 ||
+        scroll_state_valid(state) != ScrollError.none ||
+        state.viewport.width != spec.bounds.width ||
+        state.viewport.height != spec.bounds.height) { return result; }
+
+    result.visible_content_bounds = scroll_visible_rect(state, spec.direction);
+    result.content_transform.translate_x = spec.bounds.x -
+        result.visible_content_bounds.x;
+    result.content_transform.translate_y = spec.bounds.y -
+        result.visible_content_bounds.y;
+    result.horizontal_max = scroll_max_x(state);
+    result.vertical_max = scroll_max_y(state);
+    result.horizontal_track_visible = (scroll_viewport_axis_x(spec.axis) != 0 &&
+        result.horizontal_max > 0) as i32;
+    result.vertical_track_visible = (scroll_viewport_axis_y(spec.axis) != 0 &&
+        result.vertical_max > 0) as i32;
+
+    let margin: i64 = flex_spacing(FlexSpacingToken.tiny, spec.density);
+    let thickness: i64 = flex_spacing(FlexSpacingToken.tiny, spec.density);
+    let minimum_thumb: i64 = flex_spacing(FlexSpacingToken.xlarge, spec.density);
+    if (result.horizontal_track_visible != 0) {
+        let leading_reserve: i64 = 0;
+        let trailing_reserve: i64 = 0;
+        if (result.vertical_track_visible != 0) {
+            if (spec.direction == LayoutDirection.rtl) {
+                leading_reserve = thickness + margin;
+            } else {
+                trailing_reserve = thickness + margin;
+            }
+        }
+        let track_width: i64 = spec.bounds.width - margin * 2 -
+            leading_reserve - trailing_reserve;
+        if (track_width <= 0) { return result; }
+        result.horizontal_track_bounds = rect(
+            spec.bounds.x + margin + leading_reserve,
+            spec.bounds.y + spec.bounds.height - margin - thickness,
+            track_width, thickness);
+        let thumb_width: i64 = scroll_viewport_thumb_extent(track_width,
+            state.viewport.width, state.content.width, minimum_thumb);
+        let travel: i64 = track_width - thumb_width;
+        let physical_value: i64 = state.offset_x;
+        if (spec.direction == LayoutDirection.rtl) {
+            physical_value = result.horizontal_max - state.offset_x;
+        }
+        let thumb_offset: i64 = 0;
+        if (result.horizontal_max > 0) {
+            thumb_offset = (travel * physical_value) / result.horizontal_max;
+        }
+        result.horizontal_thumb_bounds = rect(
+            result.horizontal_track_bounds.x + thumb_offset,
+            result.horizontal_track_bounds.y, thumb_width, thickness);
+    }
+    if (result.vertical_track_visible != 0) {
+        let trailing_reserve: i64 = 0;
+        if (result.horizontal_track_visible != 0) {
+            trailing_reserve = thickness + margin;
+        }
+        let track_height: i64 = spec.bounds.height - margin * 2 -
+            trailing_reserve;
+        if (track_height <= 0) { return result; }
+        let track_x: i64 = spec.bounds.x + spec.bounds.width -
+            margin - thickness;
+        if (spec.direction == LayoutDirection.rtl) {
+            track_x = spec.bounds.x + margin;
+        }
+        result.vertical_track_bounds = rect(track_x,
+            spec.bounds.y + margin, thickness, track_height);
+        let thumb_height: i64 = scroll_viewport_thumb_extent(track_height,
+            state.viewport.height, state.content.height, minimum_thumb);
+        let travel: i64 = track_height - thumb_height;
+        let thumb_offset: i64 = 0;
+        if (result.vertical_max > 0) {
+            thumb_offset = (travel * state.offset_y) / result.vertical_max;
+        }
+        result.vertical_thumb_bounds = rect(track_x,
+            result.vertical_track_bounds.y + thumb_offset,
+            thickness, thumb_height);
+    }
+    result.valid = 1;
+    result.evidence_hash = scroll_viewport_geometry_hash(result);
+    return result;
+}
+
+fn scroll_viewport_axis_has_overflow(state: ScrollState,
+    axis: ScrollViewportAxis) i32 {
+    return ((scroll_viewport_axis_x(axis) != 0 && scroll_max_x(state) > 0) ||
+        (scroll_viewport_axis_y(axis) != 0 && scroll_max_y(state) > 0)) as i32;
+}
+
+fn scroll_viewport_transition_hash(value: ScrollViewportTransition) i64 {
+    let hash: i64 = scroll_viewport_mix(17, value.mutation.mutation_hash);
+    hash = scroll_viewport_mix(hash, value.input_kind as i64);
+    hash = scroll_viewport_mix(hash, value.command as i64);
+    hash = scroll_viewport_mix(hash, value.requested_x);
+    hash = scroll_viewport_mix(hash, value.requested_y);
+    hash = scroll_viewport_mix(hash, value.accepted as i64);
+    hash = scroll_viewport_mix(hash, value.rejected as i64);
+    hash = scroll_viewport_mix(hash, value.rejected_disabled as i64);
+    return scroll_viewport_mix(hash, value.rejected_no_overflow as i64);
+}
+
+fn scroll_viewport_transition(state: ScrollState,
+    input_kind: ScrollViewportInputKind,
+    command: ScrollViewportCommand) ScrollViewportTransition {
+    let value: ScrollViewportTransition = ScrollViewportTransition{
+        .mutation = scroll_error_mutation(state, ScrollError.none),
+        .input_kind = input_kind,
+        .command = command,
+        .requested_x = 0,
+        .requested_y = 0,
+        .accepted = 0,
+        .rejected = 0,
+        .rejected_disabled = 0,
+        .rejected_no_overflow = 0,
+        .evidence_hash = 0,
+    };
+    value.evidence_hash = scroll_viewport_transition_hash(value);
+    return value;
+}
+
+fn scroll_viewport_reject(state: ScrollState,
+    input_kind: ScrollViewportInputKind,
+    command: ScrollViewportCommand,
+    disabled: i32, no_overflow: i32,
+    error: ScrollError) ScrollViewportTransition {
+    let result: ScrollViewportTransition = scroll_viewport_transition(
+        state, input_kind, command);
+    result.mutation = scroll_error_mutation(state, error);
+    result.rejected = 1;
+    result.rejected_disabled = disabled;
+    result.rejected_no_overflow = no_overflow;
+    result.evidence_hash = scroll_viewport_transition_hash(result);
+    return result;
+}
+
+fn scroll_viewport_apply_delta(state:  *ScrollState,
+    axis: ScrollViewportAxis, direction: LayoutDirection, enabled: i32,
+    input_kind: ScrollViewportInputKind,
+    command: ScrollViewportCommand,
+    raw_x: i64, raw_y: i64) ScrollViewportTransition {
+    if (scroll_viewport_axis_valid(axis) == 0 ||
+        scroll_viewport_direction_valid(direction) == 0 ||
+        (enabled != 0 && enabled != 1) ||
+        scroll_state_valid(state.*) != ScrollError.none) {
+        return scroll_viewport_reject(state.*, input_kind, command,
+            0, 0, scroll_state_valid(state.*));
+    }
+    if (enabled == 0) {
+        return scroll_viewport_reject(state.*, input_kind, command,
+            1, 0, ScrollError.none);
+    }
+    if (scroll_viewport_axis_has_overflow(state.*, axis) == 0) {
+        return scroll_viewport_reject(state.*, input_kind, command,
+            0, 1, ScrollError.none);
+    }
+    let delta_x: i64 = raw_x;
+    let delta_y: i64 = raw_y;
+    if (scroll_viewport_axis_x(axis) == 0) { delta_x = 0; }
+    if (scroll_viewport_axis_y(axis) == 0) { delta_y = 0; }
+    if (direction == LayoutDirection.rtl) { delta_x = 0 - delta_x; }
+    let result: ScrollViewportTransition = scroll_viewport_transition(
+        state.*, input_kind, command);
+    result.requested_x = delta_x;
+    result.requested_y = delta_y;
+    result.mutation = scroll_by(state, delta_x, delta_y);
+    result.accepted = (result.mutation.error == ScrollError.none) as i32;
+    result.rejected = (result.accepted == 0) as i32;
+    result.evidence_hash = scroll_viewport_transition_hash(result);
+    return result;
+}
+
+fn scroll_viewport_wheel(state:  *ScrollState,
+    axis: ScrollViewportAxis, direction: LayoutDirection, enabled: i32,
+    delta_x: i64, delta_y: i64) ScrollViewportTransition {
+    return scroll_viewport_apply_delta(state, axis, direction, enabled,
+        ScrollViewportInputKind.wheel,
+        scroll_viewport_command_for_delta(axis, delta_x, delta_y),
+        delta_x, delta_y);
+}
+
+// Derive the canonical command label from the dominant signed delta so the
+// transition identity honestly reflects the user's intent.  The actual offset
+// is applied from the raw deltas; this only affects the command metadata and
+// evidence hash.
+fn scroll_viewport_command_for_delta(axis: ScrollViewportAxis,
+    delta_x: i64, delta_y: i64) ScrollViewportCommand {
+    if (scroll_viewport_axis_y(axis) != 0) {
+        if (delta_y > 0) { return ScrollViewportCommand.page_down; }
+        if (delta_y < 0) { return ScrollViewportCommand.page_up; }
+    }
+    if (scroll_viewport_axis_x(axis) != 0) {
+        if (delta_x > 0) { return ScrollViewportCommand.page_right; }
+        if (delta_x < 0) { return ScrollViewportCommand.page_left; }
+    }
+    return ScrollViewportCommand.page_down;
+}
+
+fn scroll_viewport_line_step(density: FlexDensity) i64 {
+    return flex_spacing(FlexSpacingToken.xlarge, density) * 2;
+}
+
+fn scroll_viewport_page_step(viewport: i64, density: FlexDensity) i64 {
+    let inset: i64 = flex_spacing(FlexSpacingToken.xlarge, density);
+    let value: i64 = viewport - inset * 2;
+    let minimum: i64 = scroll_viewport_line_step(density);
+    if (value < minimum) { return minimum; }
+    return value;
+}
+
+fn scroll_viewport_apply_command(state:  *ScrollState,
+    axis: ScrollViewportAxis, direction: LayoutDirection, enabled: i32,
+    density: FlexDensity, command: ScrollViewportCommand,
+    input_kind: ScrollViewportInputKind) ScrollViewportTransition {
+    if (scroll_viewport_density_valid(density) == 0) {
+        return scroll_viewport_reject(state.*, input_kind, command,
+            0, 0, ScrollError.invalid_target);
+    }
+    let line: i64 = scroll_viewport_line_step(density);
+    let page_x: i64 = scroll_viewport_page_step(state.*.viewport.width, density);
+    let page_y: i64 = scroll_viewport_page_step(state.*.viewport.height, density);
+    if (command == ScrollViewportCommand.arrow_up) {
+        return scroll_viewport_apply_delta(state, axis, direction, enabled,
+            input_kind, command, 0, 0 - line);
+    }
+    if (command == ScrollViewportCommand.arrow_down) {
+        return scroll_viewport_apply_delta(state, axis, direction, enabled,
+            input_kind, command, 0, line);
+    }
+    if (command == ScrollViewportCommand.arrow_left) {
+        return scroll_viewport_apply_delta(state, axis, direction, enabled,
+            input_kind, command, 0 - line, 0);
+    }
+    if (command == ScrollViewportCommand.arrow_right) {
+        return scroll_viewport_apply_delta(state, axis, direction, enabled,
+            input_kind, command, line, 0);
+    }
+    if (command == ScrollViewportCommand.page_up) {
+        return scroll_viewport_apply_delta(state, axis, direction, enabled,
+            input_kind, command, 0, 0 - page_y);
+    }
+    if (command == ScrollViewportCommand.page_down) {
+        return scroll_viewport_apply_delta(state, axis, direction, enabled,
+            input_kind, command, 0, page_y);
+    }
+    if (command == ScrollViewportCommand.page_left) {
+        return scroll_viewport_apply_delta(state, axis, direction, enabled,
+            input_kind, command, 0 - page_x, 0);
+    }
+    if (command == ScrollViewportCommand.page_right) {
+        return scroll_viewport_apply_delta(state, axis, direction, enabled,
+            input_kind, command, page_x, 0);
+    }
+    if (scroll_viewport_axis_valid(axis) == 0 ||
+        scroll_viewport_direction_valid(direction) == 0 ||
+        (enabled != 0 && enabled != 1) ||
+        scroll_state_valid(state.*) != ScrollError.none) {
+        return scroll_viewport_reject(state.*, input_kind, command,
+            0, 0, scroll_state_valid(state.*));
+    }
+    if (enabled == 0) {
+        return scroll_viewport_reject(state.*, input_kind, command,
+            1, 0, ScrollError.none);
+    }
+    if (scroll_viewport_axis_has_overflow(state.*, axis) == 0) {
+        return scroll_viewport_reject(state.*, input_kind, command,
+            0, 1, ScrollError.none);
+    }
+    let target_x: i64 = state.*.offset_x;
+    let target_y: i64 = state.*.offset_y;
+    if (scroll_viewport_axis_y(axis) != 0 && scroll_max_y(state.*) > 0) {
+        if (command == ScrollViewportCommand.home) { target_y = 0; }
+        if (command == ScrollViewportCommand.end) {
+            target_y = scroll_max_y(state.*);
+        }
+    } else if (scroll_viewport_axis_x(axis) != 0) {
+        if (command == ScrollViewportCommand.home) { target_x = 0; }
+        if (command == ScrollViewportCommand.end) {
+            target_x = scroll_max_x(state.*);
+        }
+    }
+    let result: ScrollViewportTransition = scroll_viewport_transition(
+        state.*, input_kind, command);
+    result.requested_x = target_x - state.*.offset_x;
+    result.requested_y = target_y - state.*.offset_y;
+    result.mutation = scroll_to(state, target_x, target_y);
+    result.accepted = (result.mutation.error == ScrollError.none) as i32;
+    result.rejected = (result.accepted == 0) as i32;
+    result.evidence_hash = scroll_viewport_transition_hash(result);
+    return result;
+}
+
+fn scroll_viewport_key(state:  *ScrollState,
+    axis: ScrollViewportAxis, direction: LayoutDirection, enabled: i32,
+    density: FlexDensity,
+    command: ScrollViewportCommand) ScrollViewportTransition {
+    return scroll_viewport_apply_command(state, axis, direction, enabled,
+        density, command, ScrollViewportInputKind.key);
+}
+
+fn scroll_viewport_semantic_scroll(state:  *ScrollState,
+    axis: ScrollViewportAxis, direction: LayoutDirection, enabled: i32,
+    density: FlexDensity,
+    command: ScrollViewportCommand) ScrollViewportTransition {
+    return scroll_viewport_apply_command(state, axis, direction, enabled,
+        density, command, ScrollViewportInputKind.semantic);
+}
+
+fn scroll_viewport_reveal_focus(state:  *ScrollState,
+    axis: ScrollViewportAxis, direction: LayoutDirection, enabled: i32,
+    target: Rect) ScrollViewportTransition {
+    if (scroll_viewport_axis_valid(axis) == 0 ||
+        scroll_viewport_direction_valid(direction) == 0 ||
+        (enabled != 0 && enabled != 1) ||
+        scroll_state_valid(state.*) != ScrollError.none ||
+        target.x < 0 || target.y < 0 || target.width < 0 || target.height < 0 ||
+        target.x > unbounded_extent() - target.width ||
+        target.y > unbounded_extent() - target.height) {
+        return scroll_viewport_reject(state.*,
+            ScrollViewportInputKind.focus_reveal,
+            ScrollViewportCommand.home, 0, 0, ScrollError.invalid_target);
+    }
+    if (enabled == 0) {
+        return scroll_viewport_reject(state.*,
+            ScrollViewportInputKind.focus_reveal,
+            ScrollViewportCommand.home, 1, 0, ScrollError.none);
+    }
+    let target_x: i64 = state.*.offset_x;
+    let target_y: i64 = state.*.offset_y;
+    if (scroll_viewport_axis_x(axis) != 0) {
+        let current_physical: i64 = scroll_visible_rect(
+            state.*, direction).x;
+        let physical: i64 = scroll_axis_reveal(current_physical,
+            state.*.viewport.width, target.x, target.width,
+            ScrollAlignment.nearest);
+        target_x = physical;
+        if (direction == LayoutDirection.rtl) {
+            target_x = scroll_max_x(state.*) - physical;
+        }
+    }
+    if (scroll_viewport_axis_y(axis) != 0) {
+        target_y = scroll_axis_reveal(state.*.offset_y,
+            state.*.viewport.height, target.y, target.height,
+            ScrollAlignment.nearest);
+    }
+    let result: ScrollViewportTransition = scroll_viewport_transition(
+        state.*, ScrollViewportInputKind.focus_reveal,
+        ScrollViewportCommand.home);
+    result.requested_x = target_x - state.*.offset_x;
+    result.requested_y = target_y - state.*.offset_y;
+    result.mutation = scroll_to(state, target_x, target_y);
+    result.accepted = (result.mutation.error == ScrollError.none) as i32;
+    result.rejected = (result.accepted == 0) as i32;
+    result.evidence_hash = scroll_viewport_transition_hash(result);
+    return result;
+}
+
+fn scroll_viewport_target_reveal_hash(
+    value: ScrollViewportTargetReveal) i64 {
+    let hash: i64 = scroll_viewport_mix(17, value.id.value);
+    hash = scroll_viewport_mix(hash, value.id.generation);
+    hash = scroll_viewport_mix(hash, value.content_bounds.x);
+    hash = scroll_viewport_mix(hash, value.content_bounds.y);
+    hash = scroll_viewport_mix(hash, value.content_bounds.width);
+    hash = scroll_viewport_mix(hash, value.content_bounds.height);
+    hash = scroll_viewport_mix(hash, value.found as i64);
+    hash = scroll_viewport_mix(hash, value.focusable as i64);
+    return scroll_viewport_mix(hash, value.transition.evidence_hash);
+}
+
+// Resolves a stable semantic ID against unscrolled content geometry, then
+// mutates ScrollState so the host can rebuild that same ID into the viewport.
+// This is the automation/focus bridge for offscreen descendants: discovery is
+// semantic, scrolling is stateful, and no pixel guess is required.
+fn scroll_viewport_reveal_semantic_id(
+    state:  *ScrollState,
+    axis: ScrollViewportAxis, direction: LayoutDirection, enabled: i32,
+    content:  *SemanticsTree,
+    id: NodeKey) ScrollViewportTargetReveal {
+    let result: ScrollViewportTargetReveal = ScrollViewportTargetReveal{
+        .id = id,
+        .content_bounds = rect(0, 0, 0, 0),
+        .found = 0,
+        .focusable = 0,
+        .transition = scroll_viewport_reject(state.*,
+            ScrollViewportInputKind.focus_reveal,
+            ScrollViewportCommand.home, 0, 0,
+            ScrollError.invalid_target),
+        .evidence_hash = 0,
+    };
+    let index: i32 = semantics_find_index_borrowed(content, id);
+    if (index < 0) {
+        result.evidence_hash = scroll_viewport_target_reveal_hash(result);
+        return result;
+    }
+    let node: SemanticsNode = content.*.nodes.data[index];
+    result.found = 1;
+    result.content_bounds = node.bounds;
+    result.focusable = (node.disabled == 0 && node.hidden == 0 &&
+        node.has_bounds != 0 && node.bounds.width > 0 &&
+        node.bounds.height > 0 && node.focus_order > 0 &&
+        semantic_actions_has(node.action_mask,
+            SemanticAction.focus) != 0) as i32;
+    if (result.focusable != 0) {
+        result.transition = scroll_viewport_reveal_focus(state, axis,
+            direction, enabled, node.bounds);
+    }
+    result.evidence_hash = scroll_viewport_target_reveal_hash(result);
+    return result;
+}
+
+fn scroll_viewport_resource_copy(resource:  RenderResource)
+    RenderResource {
+    return RenderResource{
+        .id = resource.id,
+        .kind = resource.kind,
+        .payload = render_resource_payload_copy(
+            resource.payload.data[0..resource.payload.len]),
+        .revision = resource.revision,
+        .format_tag = resource.format_tag,
+        .width = resource.width,
+        .height = resource.height,
+        .color_space = resource.color_space,
+        .content_hash = resource.content_hash,
+    };
+}
+
+fn scroll_viewport_stage_display(source:  *DisplayList)
+    ScrollViewportDisplayStage {
+    let staged: DisplayList = display_list_make_with_resource_limits(
+        source.*.resources.max_resources,
+        source.*.resources.max_total_bytes,
+        source.*.resources.max_payload_bytes);
+    let result: ScrollViewportDisplayStage = ScrollViewportDisplayStage{
+        .display = staged,
+        .valid = 0,
+    };
+    if (source.*.sealed != 0 || source.*.resources.sealed != 0 ||
+        source.*.last_error != DisplayError.none ||
+        source.*.resources.last_error != RenderResourceError.none ||
+        source.*.error_index != 0 - 1 || source.*.resources.error_id != 0 ||
+        render_resource_store_configuration_valid(source.*.resources) == 0 ||
+        source.*.stack_depth < 0 || source.*.layer_depth < 0) { return result; }
+    let total: i64 = 0;
+    let resource_index: i32 = 0;
+    while (resource_index < source.*.resources.resources.len) {
+        let resource: RenderResource =
+            source.*.resources.resources.data[resource_index];
+        if (resource.id <= 0 || resource.payload.len <= 0 ||
+            render_resource_hash(resource) != resource.content_hash ||
+            (resource_index > 0 && source.*.resources.resources.data[
+                resource_index - 1].id >= resource.id)) { return result; }
+        push[RenderResource](&result.display.resources.resources,
+            scroll_viewport_resource_copy(resource));
+        total = total + resource.payload.len as i64;
+        resource_index = resource_index + 1;
+    }
+    if (total != source.*.resources.total_bytes ||
+        render_resource_store_hash(&source.*.resources) !=
+            source.*.resources.content_hash) { return result; }
+    result.display.resources.total_bytes = source.*.resources.total_bytes;
+    result.display.resources.revision = source.*.resources.revision;
+    result.display.resources.content_hash = source.*.resources.content_hash;
+    result.display.resources.last_error = RenderResourceError.none;
+    result.display.resources.error_id = 0;
+    result.display.content_hash = display_mix(17,
+        result.display.resources.content_hash);
+    result.display.revision = result.display.resources.revision;
+    let operation_index: i32 = 0;
+    while (operation_index < source.*.ops.len) {
+        if (display_list_push(&result.display,
+            source.*.ops.data[operation_index]) != DisplayError.none) {
+            return result;
+        }
+        operation_index = operation_index + 1;
+    }
+    if (result.display.stack_depth != source.*.stack_depth ||
+        result.display.layer_depth != source.*.layer_depth ||
+        result.display.revision != source.*.revision ||
+        result.display.content_hash != source.*.content_hash ||
+        display_list_calculate_hash(&result.display) !=
+            source.*.content_hash) { return result; }
+    result.valid = 1;
+    return result;
+}
+
+fn scroll_viewport_stage_add_resource(stage:  *DisplayList,
+    resource: RenderResource) RenderResourceError {
+    if (render_resource_find_index(&stage.*.resources, resource.id) >= 0) {
+        return RenderResourceError.duplicate_id;
+    }
+    if (stage.*.resources.resources.len >= stage.*.resources.max_resources) {
+        return RenderResourceError.too_many_resources;
+    }
+    if (resource.payload.len as i64 > stage.*.resources.max_payload_bytes) {
+        return RenderResourceError.payload_limit;
+    }
+    if (resource.payload.len as i64 > stage.*.resources.max_total_bytes -
+        stage.*.resources.total_bytes) { return RenderResourceError.total_limit; }
+    let copy: RenderResource = scroll_viewport_resource_copy(resource);
+    let index: i32 = render_resource_insert_index(&stage.*.resources,
+        resource.id);
+    push[RenderResource](&stage.*.resources.resources, copy);
+    let i: i32 = stage.*.resources.resources.len - 1;
+    while (i > index) {
+        stage.*.resources.resources.data[i] =
+            stage.*.resources.resources.data[i - 1];
+        i = i - 1;
+    }
+    stage.*.resources.resources.data[index] = copy;
+    stage.*.resources.total_bytes = stage.*.resources.total_bytes +
+        resource.payload.len as i64;
+    stage.*.resources.revision = stage.*.resources.revision +
+        resource.revision + 1;
+    render_resource_store_rehash(&stage.*.resources);
+    stage.*.resources.last_error = RenderResourceError.none;
+    stage.*.resources.error_id = 0;
+    stage.*.revision = stage.*.ops.len as i64 + stage.*.resources.revision;
+    stage.*.content_hash = display_list_calculate_hash(stage);
+    return RenderResourceError.none;
+}
+
+fn scroll_viewport_host_checkpoint(semantics:  *SemanticsTree,
+    hits:  *HitTree) ScrollViewportHostCheckpoint {
+    return ScrollViewportHostCheckpoint{
+        .semantics = semantics_tree_checkpoint(semantics),
+        .hit_length = hits.*.nodes.len,
+        .hit_revision = hits.*.revision,
+        .hit_last_error = hits.*.last_error,
+        .hit_error_node = hits.*.error_node,
+    };
+}
+
+fn scroll_viewport_host_rollback(semantics:  *SemanticsTree,
+    hits:  *HitTree,
+    checkpoint: ScrollViewportHostCheckpoint) void {
+    _ = semantics_tree_rollback(semantics, checkpoint.semantics);
+    hits.*.nodes.len = checkpoint.hit_length;
+    hits.*.revision = checkpoint.hit_revision;
+    hits.*.last_error = checkpoint.hit_last_error;
+    hits.*.error_node = checkpoint.hit_error_node;
+}
+
+fn scroll_viewport_semantic_spec(
+    node: @retained_by_return SemanticsNode) SemanticsSpec {
+    return SemanticsSpec{
+        .id = node.id,
+        .parent = node.parent,
+        .role = node.role,
+        .name = node.name.data[0..node.name.len],
+        .description = node.description.data[0..node.description.len],
+        .value = node.value.data[0..node.value.len],
+        .action_mask = node.action_mask,
+        .focus_order = node.focus_order,
+        .disabled = node.disabled,
+        .selected = node.selected,
+        .focused = node.focused,
+        .hidden = node.hidden,
+        .live_region = node.live_region,
+        .has_range = node.has_range,
+        .range_min = node.range_min,
+        .range_max = node.range_max,
+        .range_value = node.range_value,
+        .range_step = node.range_step,
+        .text_length = node.text_length,
+        .selection_start = node.selection_start,
+        .selection_end = node.selection_end,
+        .has_bounds = node.has_bounds,
+        .bounds = node.bounds,
+        .labelled_by = node.labelled_by,
+        .described_by = node.described_by,
+        .controls = node.controls,
+        .row_count = node.row_count,
+        .column_count = node.column_count,
+        .row_index = node.row_index,
+        .column_index = node.column_index,
+        .row_span = node.row_span,
+        .column_span = node.column_span,
+        .level = node.level,
+        .set_size = node.set_size,
+        .position_in_set = node.position_in_set,
+        .expanded = node.expanded,
+    };
+}
+
+// Find the content root — the first node whose parent is the semantic root
+// key.  In a well-formed tree this is nodes.data[0], so the common case is
+// O(1).  The fallback scan guarantees correctness even if a caller prepends
+// child nodes before the root.
+fn scroll_viewport_semantic_content_root(
+    content:  *SemanticsTree) NodeKey {
+    if (content.*.nodes.len > 0 &&
+        node_key_equal(content.*.nodes.data[0].parent,
+            semantic_root_key()) != 0) {
+        return content.*.nodes.data[0].id;
+    }
+    let i: i32 = 0;
+    while (i < content.*.nodes.len) {
+        if (node_key_equal(content.*.nodes.data[i].parent,
+            semantic_root_key()) != 0) {
+            return content.*.nodes.data[i].id;
+        }
+        i = i + 1;
+    }
+    return semantic_none_key();
+}
+
+// Find the hit-tree content root — the first node whose parent is the hit
+// root key.  Same O(1) common-case rationale as the semantic variant.
+fn scroll_viewport_hit_content_root(
+    content:  *HitTree) NodeKey {
+    if (content.*.nodes.len > 0 &&
+        node_key_equal(content.*.nodes.data[0].parent,
+            hit_root_key()) != 0) {
+        return content.*.nodes.data[0].id;
+    }
+    let i: i32 = 0;
+    while (i < content.*.nodes.len) {
+        if (node_key_equal(content.*.nodes.data[i].parent,
+            hit_root_key()) != 0) {
+            return content.*.nodes.data[i].id;
+        }
+        i = i + 1;
+    }
+    return hit_root_key();
+}
+
+fn scroll_viewport_hosted_semantic_spec(
+    node: @retained_by_return SemanticsNode,
+    spec:  ScrollViewportSpec,
+    geometry: ScrollViewportGeometry,
+    content_root: NodeKey) SemanticsSpec {
+    let hosted: SemanticsSpec = scroll_viewport_semantic_spec(node);
+    if (node_key_equal(hosted.parent, semantic_root_key()) != 0 ||
+        node_key_equal(hosted.parent, content_root) != 0) {
+        hosted.parent = spec.id;
+    }
+    if (hosted.focus_order > 0) {
+        hosted.focus_order = hosted.focus_order +
+            spec.content_focus_order_offset;
+    }
+    if (hosted.has_bounds != 0) {
+        let shifted: Rect = rect(
+            hosted.bounds.x + geometry.content_transform.translate_x,
+            hosted.bounds.y + geometry.content_transform.translate_y,
+            hosted.bounds.width, hosted.bounds.height);
+        // Preserve complete transformed bounds for every semantic descendant.
+        // Ancestor viewport geometry supplies the clip to native adapters;
+        // complete bounds keep hosted ID -> content-rect reveal reversible.
+        // Normal pointer hits are still intersected with the viewport below.
+        hosted.bounds = shifted;
+    }
+    if (spec.enabled == 0) {
+        hosted.disabled = 1;
+        hosted.focused = 0;
+        hosted.action_mask = 0;
+        hosted.focus_order = 0;
+    }
+    return hosted;
+}
+
+fn scroll_viewport_semantic_descendant(tree:  *SemanticsTree,
+    id: NodeKey, ancestor: NodeKey) i32 {
+    let index: i32 = semantics_find_index_borrowed(tree, id);
+    let examined: i32 = 0;
+    while (index >= 0 && examined <= tree.*.nodes.len) {
+        let parent: NodeKey = tree.*.nodes.data[index].parent;
+        if (node_key_equal(parent, ancestor) != 0) { return 1; }
+        if (node_key_equal(parent, semantic_root_key()) != 0) { return 0; }
+        index = semantics_find_index_borrowed(tree, parent);
+        examined = examined + 1;
+    }
+    return 0;
+}
+
+// Hosted variant for composition owners that have already released the
+// source artifact. Full transformed semantic bounds are inverted through the
+// exact ScrollViewportGeometry; callers do not retain a second target map.
+fn scroll_viewport_reveal_hosted_semantic_id(
+    state:  *ScrollState,
+    axis: ScrollViewportAxis, direction: LayoutDirection, enabled: i32,
+    hosted:  *SemanticsTree,
+    geometry: ScrollViewportGeometry,
+    viewport_id: NodeKey, id: NodeKey) ScrollViewportTargetReveal {
+    let result: ScrollViewportTargetReveal = ScrollViewportTargetReveal{
+        .id = id,
+        .content_bounds = rect(0, 0, 0, 0),
+        .found = 0,
+        .focusable = 0,
+        .transition = scroll_viewport_reject(state.*,
+            ScrollViewportInputKind.focus_reveal,
+            ScrollViewportCommand.home, 0, 0,
+            ScrollError.invalid_target),
+        .evidence_hash = 0,
+    };
+    if (geometry.valid == 0 ||
+        node_key_equal(id, viewport_id) != 0 ||
+        node_key_equal(id,
+            scroll_viewport_horizontal_range_id(viewport_id)) != 0 ||
+        node_key_equal(id,
+            scroll_viewport_vertical_range_id(viewport_id)) != 0 ||
+        scroll_viewport_semantic_descendant(hosted, id,
+            viewport_id) == 0) {
+        result.evidence_hash = scroll_viewport_target_reveal_hash(result);
+        return result;
+    }
+    let index: i32 = semantics_find_index_borrowed(hosted, id);
+    let node: SemanticsNode = hosted.*.nodes.data[index];
+    result.found = 1;
+    result.content_bounds = rect(
+        node.bounds.x - geometry.content_transform.translate_x,
+        node.bounds.y - geometry.content_transform.translate_y,
+        node.bounds.width, node.bounds.height);
+    result.focusable = (node.disabled == 0 && node.hidden == 0 &&
+        node.has_bounds != 0 && node.bounds.width > 0 &&
+        node.bounds.height > 0 && node.focus_order > 0 &&
+        semantic_actions_has(node.action_mask,
+            SemanticAction.focus) != 0) as i32;
+    if (result.focusable != 0) {
+        result.transition = scroll_viewport_reveal_focus(state, axis,
+            direction, enabled, result.content_bounds);
+    }
+    result.evidence_hash = scroll_viewport_target_reveal_hash(result);
+    return result;
+}
+
+fn scroll_viewport_hosted_hit_node(source: HitNode,
+    spec:  ScrollViewportSpec,
+    geometry: ScrollViewportGeometry,
+    content_root: NodeKey) HitNode {
+    let hosted: HitNode = source;
+    if (node_key_equal(hosted.parent, hit_root_key()) != 0 ||
+        node_key_equal(hosted.parent, content_root) != 0) {
+        hosted.parent = spec.id;
+    }
+    let local_visible: Rect = rect(
+        geometry.visible_content_bounds.x - source.transform.translate_x,
+        geometry.visible_content_bounds.y - source.transform.translate_y,
+        geometry.visible_content_bounds.width,
+        geometry.visible_content_bounds.height);
+    let source_clip: Rect = source.bounds;
+    if (source.has_clip != 0) { source_clip = source.clip; }
+    let clipped: Rect = scroll_viewport_intersection(source_clip,
+        local_visible);
+    hosted.transform.translate_x = source.transform.translate_x +
+        geometry.content_transform.translate_x;
+    hosted.transform.translate_y = source.transform.translate_y +
+        geometry.content_transform.translate_y;
+    hosted.z_order = spec.z_order + source.z_order + 1;
+    hosted.has_clip = 1;
+    if (scroll_viewport_rect_nonempty(clipped) != 0) {
+        hosted.clip = local_visible;
+        hosted.enabled = (source.enabled != 0 && spec.enabled != 0) as i32;
+        hosted.focusable = (source.focusable != 0 &&
+            hosted.enabled != 0) as i32;
+    } else {
+        hosted.clip = source.bounds;
+        hosted.enabled = 0;
+        hosted.focusable = 0;
+    }
+    return hosted;
+}
+
+fn scroll_viewport_content_hit_transform_supported(node: HitNode) i32 {
+    return (node.transform.scale_x == unit_scale() &&
+        node.transform.scale_y == unit_scale() &&
+        node.transform.skew_x == 0 && node.transform.skew_y == 0) as i32;
+}
+
+fn scroll_viewport_content_valid(content_display:  *DisplayList,
+    content_semantics:  *SemanticsTree,
+    content_hits:  *HitTree) i32 {
+    if (display_list_verify(content_display) != DisplayError.none ||
+        content_display.*.stack_depth != 0 ||
+        content_display.*.layer_depth != 0 ||
+        content_semantics.*.last_error != SemanticsError.none ||
+        content_hits.*.last_error != HitTreeError.none) { return 0; }
+    let i: i32 = 0;
+    while (i < content_hits.*.nodes.len) {
+        if (scroll_viewport_content_hit_transform_supported(
+            content_hits.*.nodes.data[i]) == 0) { return 0; }
+        i = i + 1;
+    }
+    return 1;
+}
+
+fn scroll_viewport_focus_order_exists(tree:  *SemanticsTree,
+    order: i64) i32 {
+    let i: i32 = 0;
+    while (i < tree.*.nodes.len) {
+        if (tree.*.nodes.data[i].focus_order == order) { return 1; }
+        i = i + 1;
+    }
+    return 0;
+}
+
+fn scroll_viewport_capacity_error(spec:  ScrollViewportSpec,
+    geometry: ScrollViewportGeometry,
+    content_display:  *DisplayList,
+    content_semantics:  *SemanticsTree,
+    content_hits:  *HitTree) ScrollViewportCapacityError {
+    let display_count: i32 = content_display.*.ops.len + 4 +
+        geometry.horizontal_track_visible * 2 +
+        geometry.vertical_track_visible * 2 +
+        (spec.focused != 0 && spec.focus_visible != 0 &&
+            spec.enabled != 0) as i32;
+    if (display_count > spec.limits.display_operations) {
+        return ScrollViewportCapacityError.display_operations;
+    }
+    if (content_hits.*.nodes.len + 1 > spec.limits.hit_nodes) {
+        return ScrollViewportCapacityError.hit_nodes;
+    }
+    let axis_semantics: i32 = geometry.horizontal_track_visible +
+        geometry.vertical_track_visible;
+    if (content_semantics.*.nodes.len + 1 + axis_semantics >
+        spec.limits.semantic_nodes) {
+        return ScrollViewportCapacityError.semantic_nodes;
+    }
+    return ScrollViewportCapacityError.none;
+}
+
+fn scroll_viewport_empty_artifact(spec:  ScrollViewportSpec,
+    state: ScrollState) ScrollViewportArtifact {
+    return ScrollViewportArtifact{
+        .id = spec.id,
+        .geometry = scroll_viewport_geometry(spec, state),
+        .state_hash = scroll_state_hash(state),
+        .scrollable = 0,
+        .enabled = spec.enabled,
+        .focused = spec.focused,
+        .focus_ring_visible = 0,
+        .track_token = SemanticColorToken.surface_inset,
+        .thumb_token = SemanticColorToken.border_emphasis,
+        .focus_token = SemanticColorToken.focus,
+        .display_op_start = 0 - 1,
+        .display_op_end = 0 - 1,
+        .display_operations_added = 0,
+        .display_resources_added = 0,
+        .hit_node_start = 0 - 1,
+        .hit_node_end = 0 - 1,
+        .semantic_node_start = 0 - 1,
+        .semantic_node_end = 0 - 1,
+        .evidence_hash = 0,
+    };
+}
+
+fn scroll_viewport_result(spec:  ScrollViewportSpec,
+    state: ScrollState) ScrollViewportBuildResult {
+    return ScrollViewportBuildResult{
+        .artifact = scroll_viewport_empty_artifact(spec, state),
+        .error = ScrollViewportBuildError.none,
+        .capacity_error = ScrollViewportCapacityError.none,
+        .display_error = DisplayError.none,
+        .resource_error = RenderResourceError.none,
+        .hit_error = HitTreeError.none,
+        .semantics_error = SemanticsError.none,
+    };
+}
+
+fn scroll_viewport_artifact_hash(spec:  ScrollViewportSpec,
+    artifact: ScrollViewportArtifact) i64 {
+    let hash: i64 = scroll_viewport_mix(17, artifact.id.value);
+    hash = scroll_viewport_mix(hash, artifact.id.generation);
+    hash = scroll_viewport_mix(hash, artifact.geometry.evidence_hash);
+    hash = scroll_viewport_mix(hash, artifact.state_hash);
+    hash = scroll_viewport_mix(hash, spec.axis as i64);
+    hash = scroll_viewport_mix(hash, spec.direction as i64);
+    hash = scroll_viewport_mix(hash, spec.density as i64);
+    hash = scroll_viewport_mix(hash, artifact.scrollable as i64);
+    hash = scroll_viewport_mix(hash, artifact.enabled as i64);
+    hash = scroll_viewport_mix(hash, artifact.focused as i64);
+    hash = scroll_viewport_mix(hash, artifact.focus_ring_visible as i64);
+    hash = scroll_viewport_mix(hash, artifact.track_token as i64);
+    hash = scroll_viewport_mix(hash, artifact.thumb_token as i64);
+    hash = scroll_viewport_mix(hash, artifact.display_operations_added as i64);
+    hash = scroll_viewport_mix(hash, artifact.display_resources_added as i64);
+    hash = scroll_viewport_mix(hash,
+        artifact.hit_node_end - artifact.hit_node_start);
+    return scroll_viewport_mix(hash,
+        artifact.semantic_node_end - artifact.semantic_node_start);
+}
+
+fn scroll_viewport_add_root_semantic(spec:  ScrollViewportSpec,
+    state: ScrollState, geometry: ScrollViewportGeometry,
+    destination:  *SemanticsTree) SemanticsError {
+    let semantic: SemanticsSpec = semantics_spec(spec.id,
+        spec.semantic_parent, SemanticRole.group, spec.name);
+    semantic.description = spec.description;
+    semantic.value = spec.value;
+    semantic.has_bounds = 1;
+    semantic.bounds = geometry.viewport_bounds;
+    semantic.disabled = (spec.enabled == 0) as i32;
+    semantic.focused = spec.focused;
+    semantic.focus_order = spec.focus_order;
+    let scrollable: i32 = scroll_viewport_axis_has_overflow(state,
+        spec.axis);
+    if (spec.enabled != 0 && scrollable != 0) {
+        semantic.action_mask = semantic_actions(SemanticAction.scroll);
+    }
+    if (spec.enabled != 0 && spec.focus_order > 0) {
+        semantic.action_mask = semantic_actions_add(semantic.action_mask,
+            SemanticAction.focus);
+    }
+    if (scrollable != 0) {
+        semantic.has_range = 1;
+        semantic.range_min = 0;
+        semantic.range_step = unit_scale();
+        if (scroll_viewport_axis_y(spec.axis) != 0 &&
+            geometry.vertical_max > 0) {
+            semantic.range_max = geometry.vertical_max;
+            semantic.range_value = geometry.vertical_value;
+        } else {
+            semantic.range_max = geometry.horizontal_max;
+            semantic.range_value = geometry.horizontal_value;
+        }
+    }
+    return semantics_add(destination, semantic);
+}
+
+fn scroll_viewport_add_axis_semantic(spec:  ScrollViewportSpec,
+    geometry: ScrollViewportGeometry, horizontal: i32,
+    destination:  *SemanticsTree) SemanticsError {
+    let id: NodeKey = scroll_viewport_vertical_range_id(spec.id);
+    let name: []u8 = "Vertical scroll position";
+    let bounds: Rect = geometry.vertical_track_bounds;
+    let maximum: i64 = geometry.vertical_max;
+    let value: i64 = geometry.vertical_value;
+    if (horizontal != 0) {
+        id = scroll_viewport_horizontal_range_id(spec.id);
+        name = "Horizontal scroll position";
+        bounds = geometry.horizontal_track_bounds;
+        maximum = geometry.horizontal_max;
+        value = geometry.horizontal_value;
+    }
+    let semantic: SemanticsSpec = semantics_spec(id, spec.id,
+        SemanticRole.slider, name);
+    semantic.description = "Read and mutate through the viewport scroll contract";
+    semantic.value = spec.value;
+    semantic.has_bounds = 1;
+    semantic.bounds = bounds;
+    semantic.disabled = (spec.enabled == 0) as i32;
+    semantic.has_range = 1;
+    semantic.range_min = 0;
+    semantic.range_max = maximum;
+    semantic.range_value = value;
+    semantic.range_step = unit_scale();
+    if (spec.enabled != 0) {
+        semantic.action_mask = semantic_actions(SemanticAction.scroll);
+    }
+    return semantics_add(destination, semantic);
+}
+
+fn scroll_viewport_add_semantics(spec:  ScrollViewportSpec,
+    state: ScrollState, geometry: ScrollViewportGeometry,
+    content:  *SemanticsTree,
+    destination:  *SemanticsTree) SemanticsError {
+    let error: SemanticsError = scroll_viewport_add_root_semantic(
+        spec, state, geometry, destination);
+    if (error != SemanticsError.none) { return error; }
+    if (geometry.horizontal_track_visible != 0) {
+        error = scroll_viewport_add_axis_semantic(spec, geometry, 1,
+            destination);
+        if (error != SemanticsError.none) { return error; }
+    }
+    if (geometry.vertical_track_visible != 0) {
+        error = scroll_viewport_add_axis_semantic(spec, geometry, 0,
+            destination);
+        if (error != SemanticsError.none) { return error; }
+    }
+    let content_root: NodeKey =
+        scroll_viewport_semantic_content_root(content);
+    let i: i32 = 0;
+    while (i < content.*.nodes.len) {
+        let hosted: SemanticsSpec = scroll_viewport_hosted_semantic_spec(
+            content.*.nodes.data[i], spec, geometry, content_root);
+        error = semantics_add(destination, hosted);
+        if (error != SemanticsError.none) { return error; }
+        i = i + 1;
+    }
+    return SemanticsError.none;
+}
+
+fn scroll_viewport_add_hits(spec:  ScrollViewportSpec,
+    geometry: ScrollViewportGeometry,
+    content:  *HitTree,
+    destination:  *HitTree) HitTreeError {
+    let root: HitNode = hit_node(spec.id, spec.hit_parent,
+        geometry.viewport_bounds);
+    root.has_clip = 1;
+    root.clip = geometry.clip_bounds;
+    root.z_order = spec.z_order;
+    root.enabled = spec.enabled;
+    root.focusable = (spec.enabled != 0 && spec.focus_order > 0) as i32;
+    let error: HitTreeError = hit_tree_add(destination, root);
+    if (error != HitTreeError.none) { return error; }
+    let content_root: NodeKey =
+        scroll_viewport_hit_content_root(content);
+    let i: i32 = 0;
+    while (i < content.*.nodes.len) {
+        let hosted: HitNode = scroll_viewport_hosted_hit_node(
+            content.*.nodes.data[i], spec, geometry, content_root);
+        error = hit_tree_add(destination, hosted);
+        if (error != HitTreeError.none) { return error; }
+        i = i + 1;
+    }
+    return HitTreeError.none;
+}
+
+fn scroll_viewport_push(stage:  *DisplayList,
+    op: DisplayOp) DisplayError {
+    return display_list_push(stage, op);
+}
+
+fn scroll_viewport_add_display(spec:  ScrollViewportSpec,
+    geometry: ScrollViewportGeometry,
+    content:  *DisplayList,
+    stage:  *DisplayList) ScrollViewportBuildResult {
+    let state: ScrollState = scroll_state(
+        size(spec.bounds.width, spec.bounds.height),
+        size(spec.bounds.width, spec.bounds.height));
+    let result: ScrollViewportBuildResult = scroll_viewport_result(spec, state);
+    let resource_index: i32 = 0;
+    while (resource_index < content.*.resources.resources.len) {
+        let resource_error: RenderResourceError =
+            scroll_viewport_stage_add_resource(stage,
+                content.*.resources.resources.data[resource_index]);
+        if (resource_error != RenderResourceError.none) {
+            result.error = ScrollViewportBuildError.display_error;
+            result.resource_error = resource_error;
+            return result;
+        }
+        resource_index = resource_index + 1;
+    }
+    let op: DisplayOp = display_op(DisplayOpKind.save, spec.id);
+    let display_error: DisplayError = scroll_viewport_push(stage, op);
+    if (display_error != DisplayError.none) {
+        result.error = ScrollViewportBuildError.display_error;
+        result.display_error = display_error;
+        return result;
+    }
+    op = display_op(DisplayOpKind.clip_rect, spec.id);
+    op.bounds = geometry.clip_bounds;
+    display_error = scroll_viewport_push(stage, op);
+    if (display_error != DisplayError.none) {
+        result.error = ScrollViewportBuildError.display_error;
+        result.display_error = display_error;
+        return result;
+    }
+    op = display_op(DisplayOpKind.concat_transform, spec.id);
+    op.transform = geometry.content_transform;
+    display_error = scroll_viewport_push(stage, op);
+    if (display_error != DisplayError.none) {
+        result.error = ScrollViewportBuildError.display_error;
+        result.display_error = display_error;
+        return result;
+    }
+    let operation_index: i32 = 0;
+    while (operation_index < content.*.ops.len) {
+        display_error = scroll_viewport_push(stage,
+            content.*.ops.data[operation_index]);
+        if (display_error != DisplayError.none) {
+            result.error = ScrollViewportBuildError.display_error;
+            result.display_error = display_error;
+            return result;
+        }
+        operation_index = operation_index + 1;
+    }
+    op = display_op(DisplayOpKind.restore, spec.id);
+    display_error = scroll_viewport_push(stage, op);
+    if (display_error != DisplayError.none) {
+        result.error = ScrollViewportBuildError.display_error;
+        result.display_error = display_error;
+        return result;
+    }
+    if (spec.focused != 0 && spec.focus_visible != 0 && spec.enabled != 0) {
+        op = display_op(DisplayOpKind.stroke_rect, spec.id);
+        op.bounds = geometry.viewport_bounds;
+        op.paint = semantic_color_with_alpha(
+            SemanticColorToken.focus, 52000);
+        op.paint.stroke_width = 2 * unit_scale();
+        display_error = scroll_viewport_push(stage, op);
+        if (display_error != DisplayError.none) {
+            result.error = ScrollViewportBuildError.display_error;
+            result.display_error = display_error;
+            return result;
+        }
+    }
+    let radius: i64 = flex_spacing(FlexSpacingToken.tiny,
+        spec.density) / 2;
+    if (geometry.horizontal_track_visible != 0) {
+        op = display_op(DisplayOpKind.fill_rounded_rect, spec.id);
+        op.bounds = geometry.horizontal_track_bounds;
+        op.parameter = radius;
+        op.paint = semantic_color_with_alpha(
+            SemanticColorToken.surface_inset, 52000);
+        display_error = scroll_viewport_push(stage, op);
+        if (display_error != DisplayError.none) {
+            result.error = ScrollViewportBuildError.display_error;
+            result.display_error = display_error;
+            return result;
+        }
+        op = display_op(DisplayOpKind.fill_rounded_rect, spec.id);
+        op.bounds = geometry.horizontal_thumb_bounds;
+        op.parameter = radius;
+        op.paint = semantic_color_with_alpha(
+            SemanticColorToken.border_emphasis, 52000);
+        display_error = scroll_viewport_push(stage, op);
+        if (display_error != DisplayError.none) {
+            result.error = ScrollViewportBuildError.display_error;
+            result.display_error = display_error;
+            return result;
+        }
+    }
+    if (geometry.vertical_track_visible != 0) {
+        op = display_op(DisplayOpKind.fill_rounded_rect, spec.id);
+        op.bounds = geometry.vertical_track_bounds;
+        op.parameter = radius;
+        op.paint = semantic_color_with_alpha(
+            SemanticColorToken.surface_inset, 52000);
+        display_error = scroll_viewport_push(stage, op);
+        if (display_error != DisplayError.none) {
+            result.error = ScrollViewportBuildError.display_error;
+            result.display_error = display_error;
+            return result;
+        }
+        op = display_op(DisplayOpKind.fill_rounded_rect, spec.id);
+        op.bounds = geometry.vertical_thumb_bounds;
+        op.parameter = radius;
+        op.paint = semantic_color_with_alpha(
+            SemanticColorToken.border_emphasis, 52000);
+        display_error = scroll_viewport_push(stage, op);
+        if (display_error != DisplayError.none) {
+            result.error = ScrollViewportBuildError.display_error;
+            result.display_error = display_error;
+            return result;
+        }
+    }
+    return result;
+}
+
+fn scroll_viewport_resource_preflight(content:  *DisplayList,
+    destination:  *DisplayList) RenderResourceError {
+    if (destination.*.resources.resources.len >
+        destination.*.resources.max_resources -
+            content.*.resources.resources.len) {
+        return RenderResourceError.too_many_resources;
+    }
+    if (content.*.resources.total_bytes >
+        destination.*.resources.max_total_bytes -
+            destination.*.resources.total_bytes) {
+        return RenderResourceError.total_limit;
+    }
+    let i: i32 = 0;
+    while (i < content.*.resources.resources.len) {
+        let resource: RenderResource = content.*.resources.resources.data[i];
+        if (render_resource_find_index(&destination.*.resources,
+            resource.id) >= 0) { return RenderResourceError.duplicate_id; }
+        if (resource.payload.len as i64 >
+            destination.*.resources.max_payload_bytes) {
+            return RenderResourceError.payload_limit;
+        }
+        i = i + 1;
+    }
+    return RenderResourceError.none;
+}
+
+fn scroll_viewport_preflight_nodes(spec:  ScrollViewportSpec,
+    geometry: ScrollViewportGeometry,
+    content_semantics:  *SemanticsTree,
+    content_hits:  *HitTree,
+    destination_semantics:  *SemanticsTree,
+    destination_hits:  *HitTree) ScrollViewportBuildResult {
+    let state: ScrollState = scroll_state(
+        size(spec.bounds.width, spec.bounds.height),
+        size(spec.bounds.width, spec.bounds.height));
+    let result: ScrollViewportBuildResult = scroll_viewport_result(spec, state);
+    if (node_key_equal(spec.semantic_parent, semantic_root_key()) == 0 &&
+        semantics_find_index(destination_semantics.*,
+            spec.semantic_parent) < 0) {
+        result.error = ScrollViewportBuildError.semantics_error;
+        result.semantics_error = SemanticsError.missing_parent;
+        return result;
+    }
+    if (node_key_equal(spec.hit_parent, hit_root_key()) == 0 &&
+        hit_tree_find_index(destination_hits.*,
+            spec.hit_parent) < 0) {
+        result.error = ScrollViewportBuildError.hit_error;
+        result.hit_error = HitTreeError.missing_parent;
+        return result;
+    }
+    if (semantics_find_index(destination_semantics.*, spec.id) >= 0) {
+        result.error = ScrollViewportBuildError.semantics_error;
+        result.semantics_error = SemanticsError.duplicate_id;
+        return result;
+    }
+    let horizontal_range: NodeKey =
+        scroll_viewport_horizontal_range_id(spec.id);
+    let vertical_range: NodeKey =
+        scroll_viewport_vertical_range_id(spec.id);
+    if ((geometry.horizontal_track_visible != 0 &&
+            semantics_find_index(destination_semantics.*,
+                horizontal_range) >= 0) ||
+        (geometry.vertical_track_visible != 0 &&
+            semantics_find_index(destination_semantics.*,
+                vertical_range) >= 0)) {
+        result.error = ScrollViewportBuildError.semantics_error;
+        result.semantics_error = SemanticsError.duplicate_id;
+        return result;
+    }
+    if (hit_tree_find_index(destination_hits.*, spec.id) >= 0) {
+        result.error = ScrollViewportBuildError.hit_error;
+        result.hit_error = HitTreeError.duplicate_id;
+        return result;
+    }
+    if (spec.focus_order > 0 && scroll_viewport_focus_order_exists(
+        destination_semantics, spec.focus_order) != 0) {
+        result.error = ScrollViewportBuildError.semantics_error;
+        result.semantics_error = SemanticsError.duplicate_focus_order;
+        return result;
+    }
+    let focused_count: i32 = spec.focused;
+    let content_root: NodeKey =
+        scroll_viewport_semantic_content_root(content_semantics);
+    let semantic_index: i32 = 0;
+    while (semantic_index < content_semantics.*.nodes.len) {
+        let node: SemanticsNode =
+            content_semantics.*.nodes.data[semantic_index];
+        if (node_key_equal(node.id, spec.id) != 0 ||
+            (geometry.horizontal_track_visible != 0 &&
+                node_key_equal(node.id, horizontal_range) != 0) ||
+            (geometry.vertical_track_visible != 0 &&
+                node_key_equal(node.id, vertical_range) != 0) ||
+            semantics_find_index(destination_semantics.*, node.id) >= 0) {
+            result.error = ScrollViewportBuildError.semantics_error;
+            result.semantics_error = SemanticsError.duplicate_id;
+            return result;
+        }
+        if (node.focus_order > 0) {
+            if (node.focus_order > scroll_viewport_focus_order_limit() -
+                spec.content_focus_order_offset) {
+                result.error = ScrollViewportBuildError.invalid_spec;
+                return result;
+            }
+            let order: i64 = node.focus_order +
+                spec.content_focus_order_offset;
+            if (order == spec.focus_order ||
+                scroll_viewport_focus_order_exists(
+                    destination_semantics, order) != 0) {
+                result.error = ScrollViewportBuildError.semantics_error;
+                result.semantics_error = SemanticsError.duplicate_focus_order;
+                return result;
+            }
+        }
+        if (node.focused != 0) {
+            focused_count = focused_count + 1;
+            let hosted: SemanticsSpec = scroll_viewport_hosted_semantic_spec(
+                node, spec, geometry, content_root);
+            if (hosted.hidden != 0 || hosted.disabled != 0) {
+                result.error = ScrollViewportBuildError.invalid_content;
+                return result;
+            }
+        }
+        semantic_index = semantic_index + 1;
+    }
+    if (focused_count > 1) {
+        result.error = ScrollViewportBuildError.invalid_content;
+        return result;
+    }
+    let hit_index: i32 = 0;
+    while (hit_index < content_hits.*.nodes.len) {
+        let node: HitNode = content_hits.*.nodes.data[hit_index];
+        if (node_key_equal(node.id, spec.id) != 0 ||
+            hit_tree_find_index(destination_hits.*, node.id) >= 0) {
+            result.error = ScrollViewportBuildError.hit_error;
+            result.hit_error = HitTreeError.duplicate_id;
+            return result;
+        }
+        if (node.z_order < 0 || node.z_order >
+            scroll_viewport_focus_order_limit() - spec.z_order - 1) {
+            result.error = ScrollViewportBuildError.invalid_content;
+            return result;
+        }
+        hit_index = hit_index + 1;
+    }
+    return result;
+}
+
+// Hosts already-built content as one failure-atomic contribution. Content
+// display operations use content coordinates. Content semantic bounds and hit
+// transforms use that same coordinate space; root parents are reparented under
+// the viewport while stable child IDs and relationships are preserved.
+fn scroll_viewport_contribute(spec:  ScrollViewportSpec,
+    state: ScrollState,
+    content_display:  *DisplayList,
+    content_semantics:  *SemanticsTree,
+    content_hits:  *HitTree,
+    destination_display:  *DisplayList,
+    destination_semantics:  *SemanticsTree,
+    destination_hits:  *HitTree) ScrollViewportBuildResult {
+    let result: ScrollViewportBuildResult = scroll_viewport_result(spec, state);
+    if (scroll_viewport_spec_valid(spec) == 0) {
+        result.error = ScrollViewportBuildError.invalid_spec;
+        return result;
+    }
+    if (scroll_state_valid(state) != ScrollError.none ||
+        state.viewport.width != spec.bounds.width ||
+        state.viewport.height != spec.bounds.height) {
+        result.error = ScrollViewportBuildError.invalid_state;
+        return result;
+    }
+    let geometry: ScrollViewportGeometry = scroll_viewport_geometry(spec, state);
+    if (geometry.valid == 0) {
+        result.error = ScrollViewportBuildError.invalid_state;
+        return result;
+    }
+    if (scroll_viewport_content_valid(content_display,
+        content_semantics, content_hits) == 0) {
+        result.error = ScrollViewportBuildError.invalid_content;
+        return result;
+    }
+    if (destination_display.*.sealed != 0 ||
+        destination_display.*.resources.sealed != 0 ||
+        destination_display.*.last_error != DisplayError.none ||
+        destination_display.*.resources.last_error != RenderResourceError.none) {
+        result.error = ScrollViewportBuildError.invalid_destination;
+        return result;
+    }
+    let capacity: ScrollViewportCapacityError = scroll_viewport_capacity_error(
+        spec, geometry, content_display, content_semantics, content_hits);
+    if (capacity != ScrollViewportCapacityError.none) {
+        result.error = ScrollViewportBuildError.capacity_error;
+        result.capacity_error = capacity;
+        return result;
+    }
+    let resource_preflight: RenderResourceError =
+        scroll_viewport_resource_preflight(content_display,
+            destination_display);
+    if (resource_preflight != RenderResourceError.none) {
+        result.resource_error = resource_preflight;
+        if (resource_preflight == RenderResourceError.duplicate_id) {
+            result.error = ScrollViewportBuildError.resource_collision;
+        } else {
+            result.error = ScrollViewportBuildError.capacity_error;
+            result.capacity_error =
+                ScrollViewportCapacityError.display_resources;
+        }
+        return result;
+    }
+    let node_preflight: ScrollViewportBuildResult =
+        scroll_viewport_preflight_nodes(spec, geometry,
+            content_semantics, content_hits,
+            destination_semantics, destination_hits);
+    if (node_preflight.error != ScrollViewportBuildError.none) {
+        return node_preflight;
+    }
+
+    let staged: ScrollViewportDisplayStage =
+        scroll_viewport_stage_display(destination_display);
+    if (staged.valid == 0) {
+        display_list_free(&staged.display);
+        result.error = ScrollViewportBuildError.invalid_destination;
+        return result;
+    }
+    let display_before: i32 = staged.display.ops.len;
+    let resources_before: i32 = staged.display.resources.resources.len;
+    let staged_result: ScrollViewportBuildResult = scroll_viewport_add_display(
+        spec, geometry, content_display, &staged.display);
+    if (staged_result.error != ScrollViewportBuildError.none) {
+        result.error = staged_result.error;
+        result.display_error = staged_result.display_error;
+        result.resource_error = staged_result.resource_error;
+        display_list_free(&staged.display);
+        return result;
+    }
+
+    let checkpoint: ScrollViewportHostCheckpoint =
+        scroll_viewport_host_checkpoint(destination_semantics,
+            destination_hits);
+    let semantics_error: SemanticsError = scroll_viewport_add_semantics(
+        spec, state, geometry, content_semantics, destination_semantics);
+    if (semantics_error != SemanticsError.none) {
+        scroll_viewport_host_rollback(destination_semantics,
+            destination_hits, checkpoint);
+        display_list_free(&staged.display);
+        result.error = ScrollViewportBuildError.semantics_error;
+        result.semantics_error = semantics_error;
+        return result;
+    }
+    let hit_error: HitTreeError = scroll_viewport_add_hits(spec, geometry,
+        content_hits, destination_hits);
+    if (hit_error != HitTreeError.none) {
+        scroll_viewport_host_rollback(destination_semantics,
+            destination_hits, checkpoint);
+        display_list_free(&staged.display);
+        result.error = ScrollViewportBuildError.hit_error;
+        result.hit_error = hit_error;
+        return result;
+    }
+
+    let previous: DisplayList = destination_display.*;
+    destination_display.* = staged.display;
+    display_list_free(&previous);
+    result.artifact = ScrollViewportArtifact{
+        .id = spec.id,
+        .geometry = geometry,
+        .state_hash = scroll_state_hash(state),
+        .scrollable = scroll_viewport_axis_has_overflow(state, spec.axis),
+        .enabled = spec.enabled,
+        .focused = spec.focused,
+        .focus_ring_visible = (spec.focused != 0 &&
+            spec.focus_visible != 0 && spec.enabled != 0) as i32,
+        .track_token = SemanticColorToken.surface_inset,
+        .thumb_token = SemanticColorToken.border_emphasis,
+        .focus_token = SemanticColorToken.focus,
+        .display_op_start = display_before,
+        .display_op_end = destination_display.*.ops.len,
+        .display_operations_added = destination_display.*.ops.len -
+            display_before,
+        .display_resources_added =
+            destination_display.*.resources.resources.len - resources_before,
+        .hit_node_start = checkpoint.hit_length,
+        .hit_node_end = destination_hits.*.nodes.len,
+        .semantic_node_start = checkpoint.semantics.length,
+        .semantic_node_end = destination_semantics.*.nodes.len,
+        .evidence_hash = 0,
+    };
+    result.artifact.evidence_hash = scroll_viewport_artifact_hash(
+        spec, result.artifact);
+    return result;
+}

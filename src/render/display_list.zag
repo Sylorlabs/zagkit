@@ -1,0 +1,420 @@
+@import("std:list")
+@import("../core/geometry.zag")
+@import("../core/view_contract.zag")
+@import("resources.zag")
+@import("path.zag")
+@import("image.zag")
+
+enum DisplayOpKind {
+    save,
+    restore,
+    clip_rect,
+    concat_transform,
+    fill_rect,
+    stroke_rect,
+    draw_path,
+    draw_image,
+    draw_glyph_run,
+    begin_layer,
+    end_layer,
+    apply_effect,
+    fill_rounded_rect,
+}
+
+enum DisplayError {
+    none,
+    not_sealed,
+    sealed,
+    content_mutated,
+    invalid_geometry,
+    invalid_resource,
+    invalid_parameter,
+    stack_underflow,
+    layer_underflow,
+    unbalanced_stack,
+    unbalanced_layers,
+}
+
+struct Paint {
+    red: i64,
+    green: i64,
+    blue: i64,
+    alpha: i64,
+    stroke_width: i64,
+}
+
+struct Transform {
+    scale_x: i64,
+    skew_x: i64,
+    skew_y: i64,
+    scale_y: i64,
+    translate_x: i64,
+    translate_y: i64,
+}
+
+struct DisplayOp {
+    kind: DisplayOpKind,
+    owner: NodeKey,
+    bounds: Rect,
+    paint: Paint,
+    transform: Transform,
+    resource_id: i64,
+    parameter: i64,
+}
+
+struct DisplayList {
+    ops: ArrayList[DisplayOp],
+    resources: RenderResourceStore,
+    sealed: i32,
+    stack_depth: i32,
+    layer_depth: i32,
+    revision: i64,
+    content_hash: i64,
+    last_error: DisplayError,
+    error_index: i32,
+}
+
+fn display_color_channel(value: i64) i64 {
+    if (value < 0) { return 0; }
+    if (value > 65535) { return 65535; }
+    return value;
+}
+
+fn display_fixed_value_valid(value: i64) i32 {
+    return (value >= 0 - unbounded_extent() && value <= unbounded_extent()) as i32;
+}
+
+fn display_paint_valid(paint: Paint) i32 {
+    return (paint.red >= 0 && paint.red <= 65535 &&
+        paint.green >= 0 && paint.green <= 65535 &&
+        paint.blue >= 0 && paint.blue <= 65535 &&
+        paint.alpha >= 0 && paint.alpha <= 65535 &&
+        paint.stroke_width >= 0 && display_fixed_value_valid(paint.stroke_width) != 0) as i32;
+}
+
+fn display_transform_valid(transform: Transform) i32 {
+    return (display_fixed_value_valid(transform.scale_x) != 0 &&
+        display_fixed_value_valid(transform.skew_x) != 0 &&
+        display_fixed_value_valid(transform.skew_y) != 0 &&
+        display_fixed_value_valid(transform.scale_y) != 0 &&
+        display_fixed_value_valid(transform.translate_x) != 0 &&
+        display_fixed_value_valid(transform.translate_y) != 0) as i32;
+}
+
+fn paint_rgba16(red: i64, green: i64, blue: i64, alpha: i64) Paint {
+    return Paint{
+        .red = display_color_channel(red),
+        .green = display_color_channel(green),
+        .blue = display_color_channel(blue),
+        .alpha = display_color_channel(alpha),
+        .stroke_width = unit_scale(),
+    };
+}
+
+fn transform_identity() Transform {
+    return Transform{
+        .scale_x = unit_scale(),
+        .skew_x = 0,
+        .skew_y = 0,
+        .scale_y = unit_scale(),
+        .translate_x = 0,
+        .translate_y = 0,
+    };
+}
+
+fn display_op(kind: DisplayOpKind, owner: NodeKey) DisplayOp {
+    return DisplayOp{
+        .kind = kind,
+        .owner = owner,
+        .bounds = rect(0, 0, 0, 0),
+        .paint = paint_rgba16(0, 0, 0, 65535),
+        .transform = transform_identity(),
+        .resource_id = 0,
+        .parameter = 0,
+    };
+}
+
+fn display_list_make_with_resource_limits(max_resources: i32,
+    max_total_bytes: i64, max_payload_bytes: i64) DisplayList {
+    let resources: RenderResourceStore = render_resource_store_make(
+        max_resources, max_total_bytes, max_payload_bytes
+    );
+    return DisplayList{
+        .ops = make[DisplayOp](32),
+        .resources = resources,
+        .sealed = 0,
+        .stack_depth = 0,
+        .layer_depth = 0,
+        .revision = 0,
+        .content_hash = display_mix(17, resources.content_hash),
+        .last_error = DisplayError.none,
+        .error_index = 0 - 1,
+    };
+}
+
+fn display_list_make() DisplayList {
+    return display_list_make_with_resource_limits(4096, 268435456, 33554432);
+}
+
+fn display_list_free(list: *DisplayList) void {
+    render_resource_store_free(&list.*.resources);
+    free[DisplayOp](&list.*.ops);
+}
+
+fn display_mix(hash: i64, value: i64) i64 {
+    let modulus: i64 = 2147483647;
+    let component: i64 = value % modulus;
+    if (component < 0) { component = component + modulus; }
+    return (hash * 131 + component) % modulus;
+}
+
+fn display_hash_op(hash: i64, op: DisplayOp) i64 {
+    let result: i64 = display_mix(hash, op.kind as i64);
+    result = display_mix(result, op.owner.value);
+    result = display_mix(result, op.owner.generation);
+    result = display_mix(result, op.bounds.x);
+    result = display_mix(result, op.bounds.y);
+    result = display_mix(result, op.bounds.width);
+    result = display_mix(result, op.bounds.height);
+    result = display_mix(result, op.paint.red);
+    result = display_mix(result, op.paint.green);
+    result = display_mix(result, op.paint.blue);
+    result = display_mix(result, op.paint.alpha);
+    result = display_mix(result, op.paint.stroke_width);
+    result = display_mix(result, op.transform.scale_x);
+    result = display_mix(result, op.transform.skew_x);
+    result = display_mix(result, op.transform.skew_y);
+    result = display_mix(result, op.transform.scale_y);
+    result = display_mix(result, op.transform.translate_x);
+    result = display_mix(result, op.transform.translate_y);
+    result = display_mix(result, op.resource_id);
+    return display_mix(result, op.parameter);
+}
+
+fn display_list_calculate_hash(list: DisplayList) i64 {
+    let hash: i64 = display_mix(17, list.resources.content_hash);
+    let i: i32 = 0;
+    while (i < list.ops.len) {
+        hash = display_hash_op(hash, list.ops.data[i]);
+        i = i + 1;
+    }
+    return hash;
+}
+
+fn display_list_add_resource(list: *DisplayList,
+    spec: RenderResourceSpec) RenderResourceError {
+    if (list.*.sealed != 0) { return RenderResourceError.sealed; }
+    let error: RenderResourceError = render_resource_add(&list.*.resources, spec);
+    if (error == RenderResourceError.none) {
+        list.*.revision = list.*.ops.len as i64 + list.*.resources.revision;
+        list.*.content_hash = display_list_calculate_hash(list.*);
+        list.*.last_error = DisplayError.none;
+        list.*.error_index = 0 - 1;
+    }
+    return error;
+}
+
+fn display_list_replace_resource(list: *DisplayList,
+    spec: RenderResourceSpec) RenderResourceError {
+    if (list.*.sealed != 0) { return RenderResourceError.sealed; }
+    let error: RenderResourceError = render_resource_replace(&list.*.resources, spec);
+    if (error == RenderResourceError.none) {
+        list.*.revision = list.*.ops.len as i64 + list.*.resources.revision;
+        list.*.content_hash = display_list_calculate_hash(list.*);
+        list.*.last_error = DisplayError.none;
+        list.*.error_index = 0 - 1;
+    }
+    return error;
+}
+
+fn display_fail(list: *DisplayList, error: DisplayError) DisplayError {
+    list.*.last_error = error;
+    list.*.error_index = list.*.ops.len;
+    return error;
+}
+
+fn display_fail_at(list: *DisplayList, error: DisplayError, index: i32) DisplayError {
+    list.*.last_error = error;
+    list.*.error_index = index;
+    return error;
+}
+
+fn display_expected_resource_kind(kind: DisplayOpKind) i64 {
+    return switch (kind) {
+        .draw_path => RenderResourceKind.path as i64,
+        .draw_image => RenderResourceKind.image as i64,
+        .draw_glyph_run => RenderResourceKind.glyph_run as i64,
+        .apply_effect => RenderResourceKind.effect as i64,
+        .save => 0 - 1,
+        .restore => 0 - 1,
+        .clip_rect => 0 - 1,
+        .concat_transform => 0 - 1,
+        .fill_rect => 0 - 1,
+        .stroke_rect => 0 - 1,
+        .begin_layer => 0 - 1,
+        .end_layer => 0 - 1,
+        .fill_rounded_rect => 0 - 1,
+    };
+}
+
+fn display_resource_reference_valid(list: DisplayList, op: DisplayOp) i32 {
+    let expected: i64 = display_expected_resource_kind(op.kind);
+    if (expected < 0) { return 1; }
+    let index: i32 = render_resource_find_index(list.resources, op.resource_id);
+    if (index < 0) { return 0; }
+    let resource: RenderResource = list.resources.resources.data[index];
+    if ((resource.kind as i64) != expected) { return 0; }
+    if (op.kind == DisplayOpKind.draw_path) {
+        return (resource.format_tag == path_resource_format_tag()) as i32;
+    }
+    return 1;
+}
+
+fn display_resource_payload_valid(resource: RenderResource) i32 {
+    if (resource.kind == RenderResourceKind.path) {
+        return (resource.format_tag == path_resource_format_tag() &&
+            path_payload_valid(resource.payload.data[0..resource.payload.len]) != 0) as i32;
+    }
+    if (resource.kind == RenderResourceKind.image) {
+        return (image_resource_validate(resource) == ImagePayloadError.none) as i32;
+    }
+    return 1;
+}
+
+fn display_op_requires_bounds(kind: DisplayOpKind) i32 {
+    return (kind == DisplayOpKind.clip_rect || kind == DisplayOpKind.fill_rect ||
+        kind == DisplayOpKind.fill_rounded_rect ||
+        kind == DisplayOpKind.stroke_rect || kind == DisplayOpKind.draw_image ||
+        kind == DisplayOpKind.begin_layer) as i32;
+}
+
+fn display_op_requires_resource(kind: DisplayOpKind) i32 {
+    return (kind == DisplayOpKind.draw_path || kind == DisplayOpKind.draw_image ||
+        kind == DisplayOpKind.draw_glyph_run || kind == DisplayOpKind.apply_effect) as i32;
+}
+
+fn display_list_push(list: *DisplayList, op: DisplayOp) DisplayError {
+    if (list.*.sealed != 0) { return display_fail(list, DisplayError.sealed); }
+    if (display_fixed_value_valid(op.bounds.x) == 0 ||
+        display_fixed_value_valid(op.bounds.y) == 0 ||
+        display_fixed_value_valid(op.bounds.width) == 0 ||
+        display_fixed_value_valid(op.bounds.height) == 0) {
+        return display_fail(list, DisplayError.invalid_geometry);
+    }
+    if (display_op_requires_bounds(op.kind) != 0 &&
+        (op.bounds.width <= 0 || op.bounds.height <= 0)) {
+        return display_fail(list, DisplayError.invalid_geometry);
+    }
+    if (display_op_requires_resource(op.kind) != 0 && op.resource_id <= 0) {
+        return display_fail(list, DisplayError.invalid_resource);
+    }
+    if (display_paint_valid(op.paint) == 0 || display_transform_valid(op.transform) == 0 ||
+        op.parameter < 0 || display_fixed_value_valid(op.parameter) == 0) {
+        return display_fail(list, DisplayError.invalid_parameter);
+    }
+    if (op.kind == DisplayOpKind.stroke_rect && op.paint.stroke_width <= 0) {
+        return display_fail(list, DisplayError.invalid_parameter);
+    }
+    if (op.kind == DisplayOpKind.fill_rounded_rect &&
+        (op.parameter <= 0 || op.parameter * 2 > op.bounds.width ||
+         op.parameter * 2 > op.bounds.height)) {
+        return display_fail(list, DisplayError.invalid_parameter);
+    }
+    if (op.kind == DisplayOpKind.draw_image &&
+        (op.paint.red != 0 || op.paint.green != 0 || op.paint.blue != 0 ||
+         op.paint.stroke_width != unit_scale())) {
+        return display_fail(list, DisplayError.invalid_parameter);
+    }
+    if (op.kind == DisplayOpKind.begin_layer && (op.parameter < 0 || op.parameter > 65535)) {
+        return display_fail(list, DisplayError.invalid_parameter);
+    }
+    if (op.kind == DisplayOpKind.restore && list.*.stack_depth <= 0) {
+        return display_fail(list, DisplayError.stack_underflow);
+    }
+    if (op.kind == DisplayOpKind.end_layer && list.*.layer_depth <= 0) {
+        return display_fail(list, DisplayError.layer_underflow);
+    }
+
+    push[DisplayOp](&list.*.ops, op);
+    if (op.kind == DisplayOpKind.save) { list.*.stack_depth = list.*.stack_depth + 1; }
+    if (op.kind == DisplayOpKind.restore) { list.*.stack_depth = list.*.stack_depth - 1; }
+    if (op.kind == DisplayOpKind.begin_layer) { list.*.layer_depth = list.*.layer_depth + 1; }
+    if (op.kind == DisplayOpKind.end_layer) { list.*.layer_depth = list.*.layer_depth - 1; }
+    list.*.revision = list.*.ops.len as i64 + list.*.resources.revision;
+    list.*.content_hash = display_hash_op(list.*.content_hash, op);
+    list.*.last_error = DisplayError.none;
+    list.*.error_index = 0 - 1;
+    return DisplayError.none;
+}
+
+fn display_list_seal(list: *DisplayList) DisplayError {
+    if (list.*.sealed != 0) { return DisplayError.none; }
+    if (list.*.stack_depth != 0) { return display_fail(list, DisplayError.unbalanced_stack); }
+    if (list.*.layer_depth != 0) { return display_fail(list, DisplayError.unbalanced_layers); }
+    let resource_index: i32 = 0;
+    while (resource_index < list.*.resources.resources.len) {
+        if (display_resource_payload_valid(
+            list.*.resources.resources.data[resource_index]) == 0) {
+            return display_fail_at(list, DisplayError.invalid_resource, 0 - 1);
+        }
+        resource_index = resource_index + 1;
+    }
+    let i: i32 = 0;
+    while (i < list.*.ops.len) {
+        if (display_resource_reference_valid(list.*, list.*.ops.data[i]) == 0) {
+            return display_fail_at(list, DisplayError.invalid_resource, i);
+        }
+        i = i + 1;
+    }
+    if (render_resource_store_seal(&list.*.resources) != RenderResourceError.none) {
+        return display_fail(list, DisplayError.invalid_resource);
+    }
+    list.*.content_hash = display_list_calculate_hash(list.*);
+    list.*.revision = list.*.ops.len as i64 + list.*.resources.revision;
+    list.*.sealed = 1;
+    list.*.last_error = DisplayError.none;
+    list.*.error_index = 0 - 1;
+    return DisplayError.none;
+}
+
+fn display_list_verify(list: DisplayList) DisplayError {
+    if (list.sealed == 0) { return DisplayError.not_sealed; }
+    if (render_resource_store_verify(list.resources) != RenderResourceError.none) {
+        return DisplayError.content_mutated;
+    }
+    let resource_index: i32 = 0;
+    while (resource_index < list.resources.resources.len) {
+        if (display_resource_payload_valid(
+            list.resources.resources.data[resource_index]) == 0) {
+            return DisplayError.content_mutated;
+        }
+        resource_index = resource_index + 1;
+    }
+    let hash: i64 = display_mix(17, list.resources.content_hash);
+    let stack_depth: i32 = 0;
+    let layer_depth: i32 = 0;
+    let i: i32 = 0;
+    while (i < list.ops.len) {
+        let op: DisplayOp = list.ops.data[i];
+        if (display_resource_reference_valid(list, op) == 0) {
+            return DisplayError.content_mutated;
+        }
+        hash = display_hash_op(hash, op);
+        if (op.kind == DisplayOpKind.save) { stack_depth = stack_depth + 1; }
+        if (op.kind == DisplayOpKind.restore) {
+            if (stack_depth <= 0) { return DisplayError.content_mutated; }
+            stack_depth = stack_depth - 1;
+        }
+        if (op.kind == DisplayOpKind.begin_layer) { layer_depth = layer_depth + 1; }
+        if (op.kind == DisplayOpKind.end_layer) {
+            if (layer_depth <= 0) { return DisplayError.content_mutated; }
+            layer_depth = layer_depth - 1;
+        }
+        i = i + 1;
+    }
+    if (stack_depth != 0 || layer_depth != 0 || hash != list.content_hash ||
+        list.revision != list.ops.len as i64 + list.resources.revision) {
+        return DisplayError.content_mutated;
+    }
+    return DisplayError.none;
+}

@@ -1,0 +1,320 @@
+@import("../src/layout/flex_wrap.zag")
+
+struct TestState { passed: i32, failed: i32 }
+
+fn expect(state: *TestState, condition: i32, name: []u8) void {
+    if (condition != 0) {
+        state.*.passed = state.*.passed + 1;
+        _zag_print("ok  "); _zag_println(name);
+    } else {
+        state.*.failed = state.*.failed + 1;
+        _zag_print("FAIL "); _zag_println(name);
+    }
+}
+
+fn report_i64(label: []u8, value: i64) void {
+    let text: []u8 = _zag_i64_to_str(value);
+    _zag_print(label); _zag_println(text); _zag_str_free(text);
+}
+
+fn wrap_items(count: i32, main: i64, cross: i64) ArrayList[FlexItem] {
+    let items: ArrayList[FlexItem] = make[FlexItem](count);
+    let i: i32 = 0;
+    while (i < count) {
+        push[FlexItem](&items, flex_item((i + 1) as i64, main, cross));
+        i = i + 1;
+    }
+    return items;
+}
+
+fn adaptive_contract(state: *TestState) void {
+    expect(state, flex_spacing(FlexSpacingToken.small, FlexDensity.standard) == 8 * unit_scale() &&
+        flex_spacing(FlexSpacingToken.small, FlexDensity.compact) == 6 * unit_scale() &&
+        flex_spacing(FlexSpacingToken.small, FlexDensity.touch) == 10 * unit_scale(),
+        "semantic spacing resolves to exact density-aware units");
+    expect(state, flex_spacing(FlexSpacingToken.none, FlexDensity.touch) == 0 &&
+        flex_spacing(FlexSpacingToken.xxlarge, FlexDensity.standard) == 32 * unit_scale(),
+        "spacing scale keeps explicit zero and largest token stable");
+
+    let context: FlexAdaptiveContext = flex_adaptive_context(size(800 * unit_scale(), 600 * unit_scale()));
+    context.density = FlexDensity.touch;
+    context.direction = LayoutDirection.rtl;
+    context.safe_area = Insets{
+        .top = unit_scale(), .right = 2 * unit_scale(),
+        .bottom = 3 * unit_scale(), .left = 4 * unit_scale(),
+    };
+    let style: FlexStyle = flex_adaptive_style(
+        FlexAxis.row, FlexSpacingToken.small, FlexSpacingToken.medium, context, 1
+    );
+    expect(state, style.gap == 10 * unit_scale() && style.direction == LayoutDirection.rtl &&
+        style.padding.top == 16 * unit_scale() && style.padding.right == 17 * unit_scale() &&
+        style.padding.bottom == 18 * unit_scale() && style.padding.left == 19 * unit_scale(),
+        "adaptive style composes token padding and physical safe areas exactly");
+
+    let compact: FlexAdaptiveContext = flex_adaptive_context(size(599 * unit_scale(), 800 * unit_scale()));
+    let medium: FlexAdaptiveContext = flex_adaptive_context(size(600 * unit_scale(), 800 * unit_scale()));
+    let expanded: FlexAdaptiveContext = flex_adaptive_context(size(1024 * unit_scale(), 800 * unit_scale()));
+    expect(state, flex_breakpoint(compact) == FlexBreakpoint.compact &&
+        flex_breakpoint(medium) == FlexBreakpoint.medium &&
+        flex_breakpoint(expanded) == FlexBreakpoint.expanded,
+        "breakpoint boundaries are exact in density-independent content width");
+    medium.text_scale = 2 * unit_scale();
+    expect(state, flex_breakpoint(medium) == FlexBreakpoint.compact,
+        "large text moves the same viewport to a safer compact composition");
+    expanded.safe_area.left = 250 * unit_scale();
+    expanded.safe_area.right = 250 * unit_scale();
+    expect(state, flex_breakpoint(expanded) == FlexBreakpoint.compact &&
+        flex_content_size(expanded).width == 524 * unit_scale(),
+        "safe areas participate in breakpoint truth rather than clipping afterward");
+    expanded.safe_area.left = unbounded_extent();
+    expanded.safe_area.right = unbounded_extent();
+    expect(state, flex_content_size(expanded).width == 0,
+        "extreme platform insets clamp before content arithmetic");
+    let extreme_style: FlexStyle = flex_adaptive_style(
+        FlexAxis.row, FlexSpacingToken.small, FlexSpacingToken.medium, expanded, 1
+    );
+    expect(state, extreme_style.padding.left == unbounded_extent() / 4 &&
+        extreme_style.padding.right == unbounded_extent() / 4,
+        "token padding cannot push normalized safe areas outside bounded layout geometry");
+}
+
+fn row_wrap_contract(state: *TestState) void {
+    let items: ArrayList[FlexItem] = wrap_items(5, 3 * unit_scale(), 2 * unit_scale());
+    let base: FlexStyle = flex_style(FlexAxis.row, unit_scale(), insets_all(unit_scale()));
+    let style: FlexWrapStyle = flex_wrap_style(base, unit_scale());
+    let result: FlexWrapResult = flex_wrap_layout(
+        items, tight_constraints(10 * unit_scale(), 10 * unit_scale()), style
+    );
+    expect(state, result.lines.len == 3 && result.lines.data[0].count == 2 &&
+        result.lines.data[1].count == 2 && result.lines.data[2].count == 1 && result.wrapped == 1,
+        "row wrapping creates deterministic stable-ID line ranges");
+    expect(state, result.placements.data[0].frame.x == unit_scale() &&
+        result.placements.data[1].frame.x == 5 * unit_scale() &&
+        result.placements.data[2].frame.x == unit_scale(),
+        "item gaps and line reset positions stay exact");
+    expect(state, result.placements.data[0].frame.y == unit_scale() &&
+        result.placements.data[2].frame.y == 4 * unit_scale() &&
+        result.placements.data[4].frame.y == 7 * unit_scale(),
+        "line gaps and outer padding stay exact");
+    expect(state, result.overflow_main == 0 && result.overflow_cross == 0 &&
+        result.duplicate_ids == 0 && result.layout_hash != 0,
+        "wrapped layout reports clean overflow and deterministic identity");
+
+    let repeated: FlexWrapResult = flex_wrap_layout(
+        items, tight_constraints(10 * unit_scale(), 10 * unit_scale()), style
+    );
+    expect(state, repeated.layout_hash == result.layout_hash,
+        "identical wrap inputs produce identical placement identity");
+    flex_wrap_free(&repeated);
+    flex_wrap_free(&result);
+    free[FlexItem](&items);
+}
+
+fn rtl_and_line_alignment_contract(state: *TestState) void {
+    let items: ArrayList[FlexItem] = wrap_items(5, 3 * unit_scale(), 2 * unit_scale());
+    let base: FlexStyle = flex_style(FlexAxis.row, unit_scale(), insets_all(unit_scale()));
+    base.direction = LayoutDirection.rtl;
+    let style: FlexWrapStyle = flex_wrap_style(base, unit_scale());
+    style.line_alignment = FlexLineAlignment.center;
+    let result: FlexWrapResult = flex_wrap_layout(
+        items, tight_constraints(10 * unit_scale(), 14 * unit_scale()), style
+    );
+    expect(state, result.placements.data[0].frame.x == 6 * unit_scale() &&
+        result.placements.data[1].frame.x == 2 * unit_scale(),
+        "RTL wrap reverses physical placement while preserving logical item order");
+    expect(state, result.lines.data[0].cross_offset == 3 * unit_scale() &&
+        result.placements.data[0].frame.y == 3 * unit_scale(),
+        "center line alignment distributes cross-axis room exactly");
+    flex_wrap_free(&result);
+
+    style.line_alignment = FlexLineAlignment.stretch;
+    let stretched: FlexWrapResult = flex_wrap_layout(
+        items, tight_constraints(10 * unit_scale(), 13 * unit_scale()), style
+    );
+    expect(state, stretched.lines.data[0].cross_extent == 3 * unit_scale() &&
+        stretched.lines.data[1].cross_offset == 5 * unit_scale() &&
+        stretched.lines.data[2].cross_offset == 9 * unit_scale(),
+        "line stretching distributes the exact remainder without changing item size");
+    flex_wrap_free(&stretched);
+    free[FlexItem](&items);
+}
+
+fn column_wrap_contract(state: *TestState) void {
+    let items: ArrayList[FlexItem] = wrap_items(5, 3 * unit_scale(), 2 * unit_scale());
+    let base: FlexStyle = flex_style(FlexAxis.column, unit_scale(), insets_all(unit_scale()));
+    let style: FlexWrapStyle = flex_wrap_style(base, unit_scale());
+    let result: FlexWrapResult = flex_wrap_layout(
+        items, tight_constraints(10 * unit_scale(), 10 * unit_scale()), style
+    );
+    expect(state, result.lines.len == 3 && result.placements.data[0].frame.x == unit_scale() &&
+        result.placements.data[2].frame.x == 4 * unit_scale() &&
+        result.placements.data[4].frame.x == 7 * unit_scale(),
+        "column wrapping advances physical columns with exact line gaps");
+    expect(state, result.placements.data[0].frame.y == unit_scale() &&
+        result.placements.data[1].frame.y == 5 * unit_scale(),
+        "column main-axis gaps remain exact");
+    flex_wrap_free(&result);
+
+    base.direction = LayoutDirection.rtl;
+    style.flex = base;
+    let rtl: FlexWrapResult = flex_wrap_layout(
+        items, tight_constraints(10 * unit_scale(), 10 * unit_scale()), style
+    );
+    expect(state, rtl.placements.data[0].frame.x == 7 * unit_scale() &&
+        rtl.placements.data[2].frame.x == 4 * unit_scale() &&
+        rtl.placements.data[4].frame.x == unit_scale(),
+        "RTL column wrapping advances line bands from the physical right");
+    flex_wrap_free(&rtl);
+    free[FlexItem](&items);
+}
+
+fn baseline_and_growth_contract(state: *TestState) void {
+    let baseline_items: ArrayList[FlexItem] = make[FlexItem](2);
+    let a: FlexItem = flex_item(1, 3 * unit_scale(), 4 * unit_scale()); a.baseline = unit_scale();
+    let b: FlexItem = flex_item(2, 3 * unit_scale(), 4 * unit_scale()); b.baseline = 3 * unit_scale();
+    push[FlexItem](&baseline_items, a); push[FlexItem](&baseline_items, b);
+    let base: FlexStyle = flex_style(FlexAxis.row, unit_scale(), insets_all(unit_scale()));
+    base.cross_alignment = CrossAlignment.baseline;
+    let baseline_result: FlexWrapResult = flex_wrap_layout(
+        baseline_items, tight_constraints(10 * unit_scale(), 8 * unit_scale()), flex_wrap_style(base, 0)
+    );
+    expect(state, baseline_result.lines.data[0].cross_extent == 6 * unit_scale() &&
+        baseline_result.placements.data[0].baseline == baseline_result.placements.data[1].baseline,
+        "wrapped baseline lines reserve ascent plus descent without clipping");
+    flex_wrap_free(&baseline_result); free[FlexItem](&baseline_items);
+
+    let grow_items: ArrayList[FlexItem] = wrap_items(3, 2 * unit_scale(), 2 * unit_scale());
+    grow_items.data[0].grow = 1; grow_items.data[1].grow = 1; grow_items.data[2].grow = 1;
+    let grow_style: FlexWrapStyle = flex_wrap_style(
+        flex_style(FlexAxis.row, unit_scale(), insets_all(unit_scale())), unit_scale()
+    );
+    let grown: FlexWrapResult = flex_wrap_layout(
+        grow_items, tight_constraints(8 * unit_scale(), 7 * unit_scale()), grow_style
+    );
+    if (grown.placements.data[0].frame.width != 5 * unit_scale() / 2 ||
+        grown.placements.data[1].frame.width != 5 * unit_scale() / 2 ||
+        grown.placements.data[2].frame.width != 6 * unit_scale()) {
+        report_i64("  grown line count=", grown.lines.len as i64);
+        report_i64("  first width=", grown.placements.data[0].frame.width);
+        report_i64("  second width=", grown.placements.data[1].frame.width);
+        report_i64("  third width=", grown.placements.data[2].frame.width);
+    }
+    expect(state, grown.lines.len == 2 && grown.placements.data[0].frame.width == 5 * unit_scale() / 2 &&
+        grown.placements.data[1].frame.width == 5 * unit_scale() / 2 &&
+        grown.placements.data[2].frame.width == 6 * unit_scale(),
+        "grow and exact remainder distribution execute independently per wrapped line");
+    flex_wrap_free(&grown); free[FlexItem](&grow_items);
+}
+
+fn overflow_and_property_contract(state: *TestState) void {
+    let items: ArrayList[FlexItem] = wrap_items(3, 5 * unit_scale(), 2 * unit_scale());
+    let i: i32 = 0;
+    while (i < items.len) { items.data[i].min_main = 5 * unit_scale(); i = i + 1; }
+    let base: FlexStyle = flex_style(FlexAxis.row, unit_scale(), insets_all(unit_scale()));
+    let wrapped: FlexWrapResult = flex_wrap_layout(
+        items, tight_constraints(6 * unit_scale(), 10 * unit_scale()), flex_wrap_style(base, unit_scale())
+    );
+    expect(state, wrapped.lines.len == 3 && wrapped.overflow_main == unit_scale(),
+        "oversized minimums wrap individually and retain exact main overflow truth");
+    flex_wrap_free(&wrapped);
+
+    let nowrap_style: FlexWrapStyle = flex_wrap_style(base, unit_scale());
+    nowrap_style.wrap = 0;
+    let nowrap: FlexWrapResult = flex_wrap_layout(
+        items, tight_constraints(6 * unit_scale(), 4 * unit_scale()), nowrap_style
+    );
+    expect(state, nowrap.lines.len == 1 && nowrap.overflow_main == 13 * unit_scale() && nowrap.wrapped == 0,
+        "disabled wrapping preserves one line and reports all constrained overflow");
+    flex_wrap_free(&nowrap);
+
+    items.data[1].id = items.data[0].id;
+    let duplicate: FlexWrapResult = flex_wrap_layout(
+        items, tight_constraints(6 * unit_scale(), 10 * unit_scale()), flex_wrap_style(base, unit_scale())
+    );
+    expect(state, duplicate.duplicate_ids == 1,
+        "duplicate stable IDs remain fail-visible through wrapped layout");
+    flex_wrap_free(&duplicate); free[FlexItem](&items);
+
+    let all_valid: i32 = 1;
+    let width: i64 = 8;
+    while (width <= 32) {
+        let sweep: ArrayList[FlexItem] = wrap_items(10, 2 * unit_scale(), unit_scale());
+        let result: FlexWrapResult = flex_wrap_layout(
+            sweep,
+            Constraints{
+                .min_width = width * unit_scale(), .max_width = width * unit_scale(),
+                .min_height = 0, .max_height = unbounded_extent(),
+            },
+            flex_wrap_style(flex_style(FlexAxis.row, unit_scale(), insets_all(unit_scale())), unit_scale())
+        );
+        let j: i32 = 0;
+        while (j < result.placements.len) {
+            let frame: Rect = result.placements.data[j].frame;
+            if (result.placements.data[j].id != (j + 1) as i64 || frame.x < unit_scale() ||
+                frame.x + frame.width > width * unit_scale() - unit_scale()) { all_valid = 0; }
+            j = j + 1;
+        }
+        flex_wrap_free(&result); free[FlexItem](&sweep);
+        width = width + 1;
+    }
+    expect(state, all_valid == 1,
+        "25-width wrap sweep preserves logical IDs and physical content bounds");
+}
+
+fn malformed_contract(state: *TestState) void {
+    let items: ArrayList[FlexItem] = wrap_items(2, 2 * unit_scale(), unit_scale());
+    items.data[1].id = 0;
+    let style: FlexWrapStyle = flex_wrap_style(
+        flex_style(FlexAxis.row, unit_scale(), insets_all(0)), unit_scale()
+    );
+    let malformed: FlexWrapResult = flex_wrap_layout(
+        items, tight_constraints(10 * unit_scale(), 4 * unit_scale()), style
+    );
+    expect(state, malformed.error == FlexWrapError.invalid_item && malformed.error_index == 1 &&
+        malformed.placements.len == 0 && malformed.lines.len == 0 && malformed.layout_hash != 0,
+        "malformed item geometry fails at the exact item before placement");
+    flex_wrap_free(&malformed);
+
+    items.data[1].id = 2;
+    let invalid_style: FlexWrapStyle = style;
+    invalid_style.line_gap = unbounded_extent() / 2;
+    let bad_style: FlexWrapResult = flex_wrap_layout(
+        items, tight_constraints(10 * unit_scale(), 4 * unit_scale()), invalid_style
+    );
+    expect(state, bad_style.error == FlexWrapError.invalid_style && bad_style.placements.len == 0,
+        "unsafe style extents fail before layout arithmetic");
+    flex_wrap_free(&bad_style);
+
+    items.data[0].basis = unbounded_extent();
+    items.data[1].basis = unbounded_extent();
+    let overflow: FlexWrapResult = flex_wrap_layout(
+        items,
+        Constraints{
+            .min_width = 0, .max_width = unbounded_extent(),
+            .min_height = 0, .max_height = unbounded_extent(),
+        },
+        flex_wrap_style(flex_style(FlexAxis.row, 0, insets_all(0)), 0)
+    );
+    expect(state, overflow.error == FlexWrapError.arithmetic_overflow && overflow.error_index == 1,
+        "unbounded intrinsic totals fail visibly instead of wrapping signed arithmetic");
+    flex_wrap_free(&overflow);
+    free[FlexItem](&items);
+}
+
+fn main() i32 {
+    let state: TestState = TestState{ .passed = 0, .failed = 0 };
+    adaptive_contract(&state);
+    row_wrap_contract(&state);
+    rtl_and_line_alignment_contract(&state);
+    column_wrap_contract(&state);
+    baseline_and_growth_contract(&state);
+    overflow_and_property_contract(&state);
+    malformed_contract(&state);
+    let passed_text: []u8 = _zag_i64_to_str(state.passed as i64);
+    let failed_text: []u8 = _zag_i64_to_str(state.failed as i64);
+    _zag_print("Flex adaptive contract: pass="); _zag_print(passed_text);
+    _zag_print(" fail="); _zag_println(failed_text);
+    _zag_str_free(passed_text); _zag_str_free(failed_text);
+    if (state.failed == 0) { return 0; }
+    return 1;
+}

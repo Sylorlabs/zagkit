@@ -1,0 +1,203 @@
+@import("std:list")
+@import("../src/layout/overlay.zag")
+
+struct TestState { passed: i32, failed: i32 }
+
+fn expect(state: *TestState, condition: i32, name: []u8) void {
+    if (condition != 0) {
+        state.*.passed = state.*.passed + 1;
+        _zag_print("ok  "); _zag_println(name);
+    } else {
+        state.*.failed = state.*.failed + 1;
+        _zag_print("FAIL "); _zag_println(name);
+    }
+}
+
+fn metrics(min_width: i64, min_height: i64, width: i64, height: i64) IntrinsicMetrics {
+    return intrinsic_metrics(min_width, min_height, width, height, width * 2, height * 2, height - 1);
+}
+
+fn alignment_contract(state: *TestState) void {
+    let items: ArrayList[OverlayItem] = make[OverlayItem](4);
+    let start: OverlayItem = overlay_item(1, metrics(2, 2, 4, 3));
+    start.insets = insets_all(1);
+    start.z_order = 2;
+    push[OverlayItem](&items, start);
+    let centered: OverlayItem = overlay_item(2, metrics(2, 2, 4, 4));
+    centered.horizontal = PlacementAlignment.center;
+    centered.vertical = PlacementAlignment.center;
+    centered.z_order = 1;
+    push[OverlayItem](&items, centered);
+    let ended: OverlayItem = overlay_item(3, metrics(2, 2, 3, 2));
+    ended.horizontal = PlacementAlignment.end;
+    ended.vertical = PlacementAlignment.end;
+    push[OverlayItem](&items, ended);
+    let stretched: OverlayItem = overlay_item(4, intrinsic_metrics(3, 2, 4, 3, 20, 20, 2));
+    stretched.horizontal = PlacementAlignment.stretch;
+    stretched.vertical = PlacementAlignment.stretch;
+    push[OverlayItem](&items, stretched);
+
+    let result: OverlayResult = overlay_layout(
+        items, tight_constraints(20, 14), overlay_style(insets_all(2), LayoutDirection.ltr)
+    );
+    expect(state, result.error == OverlayError.none && result.placements.len == 4 &&
+        result.container.width == 20 && result.container.height == 14,
+        "overlay resolves every stable item inside exact constrained bounds");
+    expect(state, result.placements.data[0].frame.x == 3 && result.placements.data[0].frame.y == 3 &&
+        result.placements.data[0].z_order == 2,
+        "logical start composes outer padding item insets and retained z-order");
+    expect(state, result.placements.data[1].frame.x == 8 && result.placements.data[1].frame.y == 5,
+        "overlay center alignment distributes odd-independent free space deterministically");
+    expect(state, result.placements.data[2].frame.x == 15 && result.placements.data[2].frame.y == 10,
+        "overlay end alignment reaches the physical trailing content edges");
+    expect(state, result.placements.data[3].frame.x == 2 && result.placements.data[3].frame.y == 2 &&
+        result.placements.data[3].frame.width == 16 && result.placements.data[3].frame.height == 10,
+        "overlay stretch consumes available content without discarding intrinsic maxima");
+    expect(state, result.placements.data[0].baseline == 5 && result.layout_hash != 0 &&
+        result.overflow_width == 0 && result.overflow_height == 0,
+        "overlay retains baseline identity and explicit clean overflow truth");
+
+    let repeated: OverlayResult = overlay_layout(
+        items, tight_constraints(20, 14), overlay_style(insets_all(2), LayoutDirection.ltr)
+    );
+    expect(state, repeated.layout_hash == result.layout_hash,
+        "identical overlay inputs produce identical layout identity");
+    overlay_free(&repeated);
+    overlay_free(&result);
+    free[OverlayItem](&items);
+}
+
+fn rtl_contract(state: *TestState) void {
+    let items: ArrayList[OverlayItem] = make[OverlayItem](2);
+    let start: OverlayItem = overlay_item(1, metrics(2, 2, 4, 3));
+    push[OverlayItem](&items, start);
+    let end: OverlayItem = overlay_item(2, metrics(2, 2, 4, 3));
+    end.horizontal = PlacementAlignment.end;
+    push[OverlayItem](&items, end);
+    let rtl: OverlayResult = overlay_layout(
+        items, tight_constraints(20, 10), overlay_style(insets_all(2), LayoutDirection.rtl)
+    );
+    expect(state, rtl.placements.data[0].frame.x == 14 && rtl.placements.data[1].frame.x == 2,
+        "RTL swaps logical start and end while preserving physical padding truth");
+    let ltr: OverlayResult = overlay_layout(
+        items, tight_constraints(20, 10), overlay_style(insets_all(2), LayoutDirection.ltr)
+    );
+    expect(state, rtl.layout_hash != ltr.layout_hash,
+        "layout identity records direction even when other overlay inputs match");
+    overlay_free(&ltr); overlay_free(&rtl); free[OverlayItem](&items);
+}
+
+fn intrinsic_and_overflow_contract(state: *TestState) void {
+    let items: ArrayList[OverlayItem] = make[OverlayItem](1);
+    let item: OverlayItem = overlay_item(1, metrics(8, 6, 12, 10));
+    item.insets = Insets{ .top = 2, .right = 3, .bottom = 4, .left = 5 };
+    push[OverlayItem](&items, item);
+    let intrinsic: OverlayResult = overlay_layout(
+        items,
+        Constraints{
+            .min_width = 0, .max_width = unbounded_extent(),
+            .min_height = 0, .max_height = unbounded_extent(),
+        },
+        overlay_style(insets_all(1), LayoutDirection.ltr)
+    );
+    expect(state, intrinsic.container.width == 22 && intrinsic.container.height == 18,
+        "unbounded overlay container derives exact preferred size from padding and insets");
+    overlay_free(&intrinsic);
+
+    let tight: OverlayResult = overlay_layout(
+        items, tight_constraints(10, 8), overlay_style(insets_all(1), LayoutDirection.ltr)
+    );
+    expect(state, tight.placements.data[0].frame.width == 8 && tight.placements.data[0].frame.height == 6 &&
+        tight.overflow_width == 8 && tight.overflow_height == 6,
+        "minimum intrinsic overlay size remains visible as per-axis overflow under pressure");
+    overlay_free(&tight); free[OverlayItem](&items);
+
+    let empty: ArrayList[OverlayItem] = make[OverlayItem](1);
+    let padding_overflow: OverlayResult = overlay_layout(
+        empty, tight_constraints(4, 4), overlay_style(insets_all(3), LayoutDirection.ltr)
+    );
+    expect(state, padding_overflow.overflow_width == 2 && padding_overflow.overflow_height == 2,
+        "overlay reports outer padding overflow even without children");
+    overlay_free(&padding_overflow); free[OverlayItem](&empty);
+}
+
+fn failure_contract(state: *TestState) void {
+    let items: ArrayList[OverlayItem] = make[OverlayItem](2);
+    push[OverlayItem](&items, overlay_item(1, metrics(1, 1, 2, 2)));
+    push[OverlayItem](&items, overlay_item(1, metrics(1, 1, 2, 2)));
+    let duplicate: OverlayResult = overlay_layout(
+        items, tight_constraints(10, 10), overlay_style(insets_all(0), LayoutDirection.ltr)
+    );
+    expect(state, duplicate.error == OverlayError.duplicate_id && duplicate.error_index == 1 &&
+        duplicate.placements.len == 0 && duplicate.layout_hash != 0,
+        "duplicate overlay IDs fail at the exact item with owned empty output");
+    overlay_free(&duplicate);
+
+    items.data[1].id = 2;
+    items.data[1].horizontal = PlacementAlignment.baseline;
+    let bad_alignment: OverlayResult = overlay_layout(
+        items, tight_constraints(10, 10), overlay_style(insets_all(0), LayoutDirection.ltr)
+    );
+    expect(state, bad_alignment.error == OverlayError.invalid_item && bad_alignment.error_index == 1,
+        "unsupported overlay baseline alignment fails instead of pretending to align");
+    overlay_free(&bad_alignment);
+
+    items.data[1].horizontal = PlacementAlignment.start;
+    items.data[1].metrics.preferred.width = 0;
+    let malformed: OverlayResult = overlay_layout(
+        items, tight_constraints(10, 10), overlay_style(insets_all(0), LayoutDirection.ltr)
+    );
+    expect(state, malformed.error == OverlayError.invalid_item && malformed.error_index == 1,
+        "nonmonotonic overlay intrinsics fail before placement");
+    overlay_free(&malformed);
+
+    items.data[1].metrics = metrics(1, 1, 2, 2);
+    items.data[0].insets.left = unbounded_extent();
+    let unsafe_result: OverlayResult = overlay_layout(
+        items, tight_constraints(10, 10), overlay_style(insets_all(0), LayoutDirection.ltr)
+    );
+    expect(state, unsafe_result.error == OverlayError.invalid_item && unsafe_result.error_index == 0,
+        "unsafe overlay insets fail before bounded arithmetic");
+    overlay_free(&unsafe_result); free[OverlayItem](&items);
+}
+
+fn property_contract(state: *TestState) void {
+    let all_valid: i32 = 1;
+    let extent: i64 = 4;
+    while (extent <= 256) {
+        let items: ArrayList[OverlayItem] = make[OverlayItem](1);
+        let item: OverlayItem = overlay_item(1, intrinsic_metrics(1, 1, 2, 2, unbounded_extent(), unbounded_extent(), 1));
+        item.horizontal = PlacementAlignment.stretch;
+        item.vertical = PlacementAlignment.stretch;
+        push[OverlayItem](&items, item);
+        let result: OverlayResult = overlay_layout(
+            items, tight_constraints(extent, extent), overlay_style(insets_all(1), LayoutDirection.ltr)
+        );
+        let frame: Rect = result.placements.data[0].frame;
+        if (result.error != OverlayError.none || frame.x != 1 || frame.y != 1 ||
+            frame.width != extent - 2 || frame.height != extent - 2 ||
+            frame.x + frame.width != extent - 1 || frame.y + frame.height != extent - 1) {
+            all_valid = 0;
+        }
+        overlay_free(&result); free[OverlayItem](&items);
+        extent = extent + 1;
+    }
+    expect(state, all_valid == 1,
+        "253-extent overlay sweep preserves exact padding and stretch bounds");
+}
+
+fn main() i32 {
+    let state: TestState = TestState{ .passed = 0, .failed = 0 };
+    alignment_contract(&state);
+    rtl_contract(&state);
+    intrinsic_and_overflow_contract(&state);
+    failure_contract(&state);
+    property_contract(&state);
+    let passed_text: []u8 = _zag_i64_to_str(state.passed as i64);
+    let failed_text: []u8 = _zag_i64_to_str(state.failed as i64);
+    _zag_print("Overlay contract: pass="); _zag_print(passed_text);
+    _zag_print(" fail="); _zag_println(failed_text);
+    _zag_str_free(passed_text); _zag_str_free(failed_text);
+    if (state.failed == 0) { return 0; }
+    return 1;
+}

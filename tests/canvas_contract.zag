@@ -1,0 +1,504 @@
+@import("../src/components/canvas.zag")
+
+struct TestState { passed: i32, failed: i32 }
+
+fn expect(state: *TestState, condition: i32, name: []u8) void {
+    if (condition != 0) {
+        state.*.passed = state.*.passed + 1;
+        _zag_print("ok  "); _zag_println(name);
+    } else {
+        state.*.failed = state.*.failed + 1;
+        _zag_print("FAIL "); _zag_println(name);
+    }
+}
+
+fn test_canvas(key: NodeKey, red: i64) Canvas {
+    let spec: CanvasSpec = canvas_spec(key,
+        rect(0, 0, 200 * unit_scale(), 100 * unit_scale()),
+        CanvasSemanticsPolicy.named_group, "CAD viewport");
+    let canvas: Canvas = canvas_make(spec, canvas_limits_default());
+    let fill: DisplayOp = canvas_op(canvas, DisplayOpKind.fill_rect);
+    fill.bounds = rect(0, 0, 200 * unit_scale(), 100 * unit_scale());
+    fill.paint = paint_rgba16(red, 20000, 30000, 65535);
+    _ = canvas_push(&canvas, fill);
+    _ = canvas_seal(&canvas);
+    return canvas;
+}
+
+fn retained_and_replay_contract(state: *TestState) void {
+    let first: Canvas = test_canvas(node_key_scoped(100, 7), 10000);
+    let repeated: Canvas = test_canvas(node_key_scoped(100, 7), 10000);
+    let changed: Canvas = test_canvas(node_key_scoped(100, 7), 10001);
+    let other_generation: Canvas = test_canvas(node_key_scoped(100, 8), 10000);
+    expect(state, canvas_verify(&first) == CanvasError.none &&
+        canvas_replay_hash(&first) == canvas_replay_hash(&repeated),
+        "identical Canvas frames replay to one deterministic identity");
+    expect(state, first.content_hash != changed.content_hash &&
+        first.content_hash != other_generation.content_hash,
+        "paint and stable-key generation changes alter Canvas identity");
+
+    let first_view: CanvasRetainedResult = canvas_retained_spec(&first);
+    let changed_view: CanvasRetainedResult = canvas_retained_spec(&changed);
+    expect(state, first_view.error == CanvasError.none &&
+        node_key_equal(first_view.spec.key, first.key) == 1 &&
+        first_view.spec.kind == canvas_render_kind(),
+        "Canvas exposes its exact NodeKey through the retained ViewSpec bridge");
+
+    let empty: ArrayList[RenderNode] = make[RenderNode](1);
+    let first_specs: ArrayList[ViewSpec] = make[ViewSpec](1);
+    push[ViewSpec](&first_specs, first_view.spec);
+    let next_instance_id: i64 = 1;
+    let inserted: ReconcileResult = reconcile(empty, first_specs, &next_instance_id);
+    let reused: ReconcileResult = reconcile(inserted.nodes, first_specs, &next_instance_id);
+    let changed_specs: ArrayList[ViewSpec] = make[ViewSpec](1);
+    push[ViewSpec](&changed_specs, changed_view.spec);
+    let updated: ReconcileResult = reconcile(reused.nodes, changed_specs, &next_instance_id);
+    expect(state, inserted.inserted == 1 && reused.reused == 1 &&
+        inserted.nodes.data[0].instance_id == reused.nodes.data[0].instance_id,
+        "same-key Canvas frames retain the same RenderNode instance");
+    expect(state, updated.updated == 1 && updated.nodes.data[0].generation == 1 &&
+        updated.nodes.data[0].instance_id == reused.nodes.data[0].instance_id,
+        "new immediate content updates rather than replaces the retained node");
+
+    first.display.ops.data[0].paint.red = first.display.ops.data[0].paint.red + 1;
+    expect(state, canvas_replay_hash(&first) == 0 &&
+        first.last_error == CanvasError.content_mutated,
+        "out-of-contract command mutation invalidates replay evidence");
+    first.display.ops.data[0].paint.red = first.display.ops.data[0].paint.red - 1;
+    expect(state, canvas_verify(&first) == CanvasError.none,
+        "restoring immutable command bytes restores Canvas verification");
+
+    reconcile_free(&updated); reconcile_free(&reused); reconcile_free(&inserted);
+    free[ViewSpec](&changed_specs); free[ViewSpec](&first_specs);
+    free[RenderNode](&empty);
+    _ = canvas_free(&other_generation); _ = canvas_free(&changed);
+    _ = canvas_free(&repeated); _ = canvas_free(&first);
+}
+
+fn contribution_semantics_and_hit_contract(state: *TestState) void {
+    let spec: CanvasSpec = canvas_spec(node_key_scoped(200, 3),
+        rect(0, 0, 200 * unit_scale(), 100 * unit_scale()),
+        CanvasSemanticsPolicy.named_group, "Assembly viewport");
+    spec.description = "Direct manipulation surface";
+    spec.has_clip = 1;
+    spec.clip = rect(10 * unit_scale(), 10 * unit_scale(),
+        180 * unit_scale(), 80 * unit_scale());
+    spec.transform.translate_x = 100 * unit_scale();
+    spec.transform.translate_y = 50 * unit_scale();
+    spec.hit_testable = 1;
+    spec.focusable = 1;
+    spec.focus_order = 4;
+    spec.z_order = 9;
+    let canvas: Canvas = canvas_make(spec, canvas_limits_default());
+    let fill: DisplayOp = canvas_op(canvas, DisplayOpKind.fill_rect);
+    fill.bounds = rect(0, 0, 200 * unit_scale(), 100 * unit_scale());
+    fill.paint = paint_rgba16(5000, 10000, 20000, 65535);
+    expect(state, canvas_push(&canvas, fill) == CanvasError.none &&
+        canvas_seal(&canvas) == CanvasError.none,
+        "valid immediate commands seal under one Canvas owner");
+
+    let destination: DisplayList = display_list_make();
+    expect(state, canvas_contribute_display(&canvas, &destination) == CanvasError.none &&
+        destination.ops.len == 5,
+        "Canvas contributes one balanced transform and clip envelope");
+    expect(state, destination.ops.data[0].kind == DisplayOpKind.save &&
+        destination.ops.data[1].kind == DisplayOpKind.concat_transform &&
+        destination.ops.data[2].kind == DisplayOpKind.clip_rect &&
+        destination.ops.data[3].kind == DisplayOpKind.fill_rect &&
+        destination.ops.data[4].kind == DisplayOpKind.restore,
+        "display contribution preserves explicit save transform clip content restore order");
+    let owners_match: i32 = 1;
+    let i: i32 = 0;
+    while (i < destination.ops.len) {
+        if (node_key_equal(destination.ops.data[i].owner, canvas.key) == 0) {
+            owners_match = 0;
+        }
+        i = i + 1;
+    }
+    expect(state, owners_match == 1 &&
+        destination.ops.data[2].bounds.x == 10 * unit_scale(),
+        "every contributed operation retains the stable Canvas key and local clip");
+    expect(state, display_list_seal(&destination) == DisplayError.none &&
+        display_list_verify(destination) == DisplayError.none,
+        "contributed commands remain a valid immutable parent DisplayList");
+
+    let semantics: SemanticsTree = semantics_tree_make();
+    expect(state, canvas_contribute_semantics(&canvas, &semantics) == CanvasError.none &&
+        semantics.nodes.len == 1,
+        "named Canvas contributes one semantic node");
+    let semantic: SemanticsNode = semantics.nodes.data[0];
+    expect(state, semantic.role == SemanticRole.group &&
+        semantic_text_equal(semantic.name, "Assembly viewport") == 1 &&
+        semantic_text_equal(semantic.description, "Direct manipulation surface") == 1,
+        "group policy preserves owned accessible name and description");
+    expect(state, semantic.bounds.x == 110 * unit_scale() &&
+        semantic.bounds.y == 60 * unit_scale() &&
+        semantic.bounds.width == 180 * unit_scale() &&
+        semantic.bounds.height == 80 * unit_scale(),
+        "semantic bounds are the transformed effective Canvas clip");
+    expect(state, semantic.focus_order == 4 &&
+        semantic_actions_has(semantic.action_mask, SemanticAction.focus) == 1,
+        "focusable Canvas exposes the same explicit focus policy to semantics");
+
+    let hits: HitTree = hit_tree_make();
+    expect(state, canvas_contribute_hit(&canvas, &hits) == CanvasError.none &&
+        hits.nodes.len == 1 && hits.nodes.data[0].z_order == 9,
+        "interactive Canvas contributes the same retained identity to HitTree");
+    let world_hit: HitResult = hit_test(hits,
+        120 * unit_scale(), 70 * unit_scale());
+    let direct_hit: CanvasLocalResult = canvas_local_from_world(&canvas,
+        120 * unit_scale(), 70 * unit_scale());
+    expect(state, world_hit.found == 1 && direct_hit.found == 1 &&
+        world_hit.local_x == 20 * unit_scale() &&
+        direct_hit.x == world_hit.local_x && direct_hit.y == world_hit.local_y,
+        "HitTree and direct Canvas conversion agree on exact local coordinates");
+    let clipped: CanvasLocalResult = canvas_local_from_world(&canvas,
+        105 * unit_scale(), 55 * unit_scale());
+    expect(state, clipped.error == CanvasError.none && clipped.found == 0,
+        "local coordinate conversion rejects points outside the declared clip");
+
+    let rotated_spec: CanvasSpec = canvas_spec(node_key(201),
+        rect(0, 0, 64, 32), CanvasSemanticsPolicy.named_image, "Rotated preview");
+    rotated_spec.transform.scale_x = 0;
+    rotated_spec.transform.skew_x = 0 - unit_scale();
+    rotated_spec.transform.skew_y = unit_scale();
+    rotated_spec.transform.scale_y = 0;
+    rotated_spec.transform.translate_x = 128;
+    rotated_spec.hit_testable = 1;
+    let rotated: Canvas = canvas_make(rotated_spec, canvas_limits_default());
+    _ = canvas_seal(&rotated);
+    let rotated_tree: SemanticsTree = semantics_tree_make();
+    _ = canvas_contribute_semantics(&rotated, &rotated_tree);
+    let rotated_local: CanvasLocalResult = canvas_local_from_world(&rotated, 112, 32);
+    expect(state, rotated_tree.nodes.len == 1 &&
+        rotated_tree.nodes.data[0].bounds.x == 96 &&
+        rotated_tree.nodes.data[0].bounds.width == 32 &&
+        rotated_tree.nodes.data[0].bounds.height == 64,
+        "rotated Canvas exposes a deterministic transformed semantic AABB");
+    expect(state, rotated_local.found == 1 && rotated_local.x == 32 &&
+        rotated_local.y == 16,
+        "rotated affine inversion preserves exact Canvas-local coordinates");
+
+    semantics_tree_free(&rotated_tree); _ = canvas_free(&rotated);
+    hit_tree_free(&hits); semantics_tree_free(&semantics);
+    display_list_free(&destination); _ = canvas_free(&canvas);
+}
+
+fn semantic_policy_contract(state: *TestState) void {
+    let image_spec: CanvasSpec = canvas_spec(node_key(301),
+        rect(0, 0, 64, 64), CanvasSemanticsPolicy.named_image, "Rendered preview");
+    let image_canvas: Canvas = canvas_make(image_spec, canvas_limits_default());
+    _ = canvas_seal(&image_canvas);
+    let tree: SemanticsTree = semantics_tree_make();
+    _ = canvas_contribute_semantics(&image_canvas, &tree);
+    expect(state, tree.nodes.len == 1 && tree.nodes.data[0].role == SemanticRole.image &&
+        tree.nodes.data[0].hidden == 0,
+        "named-image policy emits visible image semantics");
+
+    let decorative_spec: CanvasSpec = canvas_spec(node_key(302),
+        rect(0, 0, 64, 64), CanvasSemanticsPolicy.decorative, "");
+    let decorative: Canvas = canvas_make(decorative_spec, canvas_limits_default());
+    _ = canvas_seal(&decorative);
+    expect(state, canvas_contribute_semantics(&decorative, &tree) == CanvasError.none &&
+        tree.nodes.len == 2 && tree.nodes.data[1].role == SemanticRole.group &&
+        tree.nodes.data[1].hidden == 1 && tree.nodes.data[1].name.len == 0,
+        "decorative policy remains explicitly represented and hidden");
+    let hits: HitTree = hit_tree_make();
+    expect(state, canvas_contribute_hit(&decorative, &hits) ==
+        CanvasError.not_interactive && hits.nodes.len == 0,
+        "decorative Canvas cannot silently become an interactive pixel target");
+
+    let disabled_spec: CanvasSpec = canvas_spec(node_key(303),
+        rect(0, 0, 64, 64), CanvasSemanticsPolicy.named_group,
+        "Unavailable viewport");
+    disabled_spec.hit_testable = 1;
+    disabled_spec.focusable = 1;
+    disabled_spec.focus_order = 7;
+    disabled_spec.enabled = 0;
+    let disabled: Canvas = canvas_make(disabled_spec, canvas_limits_default());
+    _ = canvas_seal(&disabled);
+    expect(state, canvas_contribute_semantics(&disabled, &tree) == CanvasError.none &&
+        tree.nodes.data[2].disabled == 1 && tree.nodes.data[2].focus_order == 7 &&
+        tree.nodes.data[2].action_mask == 0,
+        "disabled Canvas remains ordered and discoverable without a focus action");
+    expect(state, canvas_contribute_hit(&disabled, &hits) == CanvasError.none &&
+        hits.nodes.len == 1 && hits.nodes.data[0].enabled == 0 &&
+        hit_test(hits, 10, 10).found == 0,
+        "disabled Canvas cannot win pointer hit testing");
+
+    hit_tree_free(&hits); semantics_tree_free(&tree);
+    _ = canvas_free(&disabled); _ = canvas_free(&decorative);
+    _ = canvas_free(&image_canvas);
+}
+
+fn resource_ownership_contract(state: *TestState) void {
+    let pixels: ArrayList[u8] = make[u8](4);
+    push[u8](&pixels, 10); push[u8](&pixels, 20);
+    push[u8](&pixels, 30); push[u8](&pixels, 255);
+    let spec: CanvasSpec = canvas_spec(node_key_scoped(400, 2),
+        rect(0, 0, 64, 64), CanvasSemanticsPolicy.named_image, "One pixel");
+    let canvas: Canvas = canvas_make(spec, canvas_limits_default());
+    let resource: CanvasResourceSpec = canvas_resource_spec(7,
+        RenderResourceKind.image, pixels.data[0..pixels.len],
+        image_resource_format_tag());
+    resource.width = 1;
+    resource.height = 1;
+    resource.color_space = RenderColorSpace.srgb;
+    expect(state, canvas_add_resource(&canvas, resource) == CanvasError.none,
+        "Canvas copies a namespaced local resource into owned storage");
+    let global_id: i64 = canvas_resource_id(canvas.key, 7);
+    pixels.data[0] = 99;
+    expect(state, canvas.display.resources.resources.data[0].id == global_id &&
+        canvas.display.resources.resources.data[0].payload.data[0] == 10,
+        "caller byte mutation cannot alter Canvas-owned resource bytes");
+    expect(state, global_id == canvas_resource_id(canvas.key, 7) &&
+        global_id != canvas_resource_id(node_key_scoped(401, 2), 7) &&
+        global_id != canvas_resource_id(canvas.key, 8),
+        "resource identity is stable and scoped by Canvas key and local ID");
+    let draw: DisplayOp = canvas_resource_op(canvas, DisplayOpKind.draw_image, 7);
+    draw.bounds = rect(0, 0, 64, 64);
+    expect(state, canvas_push(&canvas, draw) == CanvasError.none &&
+        canvas_seal(&canvas) == CanvasError.none,
+        "namespaced resource references seal against their exact kind");
+
+    let destination: DisplayList = display_list_make();
+    expect(state, canvas_contribute_display(&canvas, &destination) == CanvasError.none &&
+        destination.resources.resources.len == 1 &&
+        destination.resources.resources.data[0].payload.data[0] == 10,
+        "display contribution takes an independent copy of Canvas resources");
+    expect(state, canvas_free(&canvas) == CanvasError.none &&
+        canvas_free(&canvas) == CanvasError.released,
+        "Canvas cleanup is explicit and a repeated release fails without double-freeing");
+    expect(state, display_list_seal(&destination) == DisplayError.none &&
+        display_list_verify(destination) == DisplayError.none &&
+        destination.resources.resources.data[0].payload.data[0] == 10,
+        "parent DisplayList remains valid after Canvas-owned resources are released");
+    display_list_free(&destination); free[u8](&pixels);
+}
+
+fn invalid_construction_contract(state: *TestState) void {
+    let empty_name: CanvasSpec = canvas_spec(node_key(500),
+        rect(0, 0, 64, 64), CanvasSemanticsPolicy.named_group, "");
+    let empty: Canvas = canvas_make(empty_name, canvas_limits_default());
+    expect(state, empty.last_error == CanvasError.invalid_semantics,
+        "named Canvas requires an explicit accessible name");
+
+    let decorative_interactive: CanvasSpec = canvas_spec(node_key(501),
+        rect(0, 0, 64, 64), CanvasSemanticsPolicy.decorative, "");
+    decorative_interactive.hit_testable = 1;
+    let bad_decorative: Canvas = canvas_make(decorative_interactive,
+        canvas_limits_default());
+    expect(state, bad_decorative.last_error == CanvasError.invalid_semantics,
+        "decorative Canvas fails closed when configured as interactive");
+
+    let clipped_spec: CanvasSpec = canvas_spec(node_key(502),
+        rect(0, 0, 64, 64), CanvasSemanticsPolicy.named_image, "Clip");
+    clipped_spec.has_clip = 1;
+    clipped_spec.clip = rect(32, 32, 64, 64);
+    let clipped: Canvas = canvas_make(clipped_spec, canvas_limits_default());
+    expect(state, clipped.last_error == CanvasError.invalid_clip,
+        "clip geometry cannot escape Canvas bounds");
+
+    let singular_spec: CanvasSpec = canvas_spec(node_key(503),
+        rect(0, 0, 64, 64), CanvasSemanticsPolicy.named_image, "Transform");
+    singular_spec.transform.scale_x = 0;
+    let singular: Canvas = canvas_make(singular_spec, canvas_limits_default());
+    expect(state, singular.last_error == CanvasError.invalid_transform,
+        "singular Canvas transforms fail before display or hit-tree mutation");
+
+    let invalid_key_spec: CanvasSpec = canvas_spec(node_key(0),
+        rect(0, 0, 64, 64), CanvasSemanticsPolicy.named_group, "Key");
+    let invalid_key: Canvas = canvas_make(invalid_key_spec, canvas_limits_default());
+    expect(state, invalid_key.last_error == CanvasError.invalid_key,
+        "reserved and nonpositive Canvas identities fail visibly");
+
+    let oversized_name: ArrayList[u8] = make[u8](4100);
+    let name_index: i32 = 0;
+    while (name_index < 4097) {
+        push[u8](&oversized_name, 65);
+        name_index = name_index + 1;
+    }
+    let oversized_spec: CanvasSpec = canvas_spec(node_key(504),
+        rect(0, 0, 64, 64), CanvasSemanticsPolicy.named_group,
+        oversized_name.data[0..oversized_name.len]);
+    let oversized: Canvas = canvas_make(oversized_spec, canvas_limits_default());
+    expect(state, oversized.last_error == CanvasError.invalid_semantics &&
+        oversized.name.len == 0,
+        "oversized borrowed semantic text fails before Canvas takes a proportional copy");
+
+    let invalid_limits: CanvasLimits = canvas_limits_default();
+    invalid_limits.max_resources = 0;
+    let limited: Canvas = canvas_make(canvas_spec(node_key(505),
+        rect(0, 0, 64, 64), CanvasSemanticsPolicy.named_group, "Limits"),
+        invalid_limits);
+    expect(state, limited.last_error == CanvasError.invalid_limits &&
+        limited.name.len == 0,
+        "invalid allocation limits fail before borrowed metadata is copied");
+
+    let malformed_name: ArrayList[u8] = make[u8](2);
+    push[u8](&malformed_name, 194); push[u8](&malformed_name, 65);
+    let malformed: Canvas = canvas_make(canvas_spec(node_key(506),
+        rect(0, 0, 64, 64), CanvasSemanticsPolicy.named_group,
+        malformed_name.data[0..malformed_name.len]), canvas_limits_default());
+    expect(state, malformed.last_error == CanvasError.invalid_semantics &&
+        malformed.name.len == 0,
+        "malformed UTF-8 metadata fails before Canvas takes ownership");
+
+    _ = canvas_free(&malformed); free[u8](&malformed_name);
+    _ = canvas_free(&limited); _ = canvas_free(&oversized);
+    free[u8](&oversized_name);
+    _ = canvas_free(&invalid_key); _ = canvas_free(&singular);
+    _ = canvas_free(&clipped); _ = canvas_free(&bad_decorative);
+    _ = canvas_free(&empty);
+}
+
+fn operation_and_resource_limits_contract(state: *TestState) void {
+    let limits: CanvasLimits = canvas_limits_default();
+    limits.max_operations = 1;
+    let spec: CanvasSpec = canvas_spec(node_key(600), rect(0, 0, 64, 64),
+        CanvasSemanticsPolicy.named_group, "Limited");
+    let canvas: Canvas = canvas_make(spec, limits);
+    let first: DisplayOp = canvas_op(canvas, DisplayOpKind.fill_rect);
+    first.bounds = rect(0, 0, 64, 64);
+    let second: DisplayOp = first;
+    expect(state, canvas_push(&canvas, first) == CanvasError.none &&
+        canvas_push(&canvas, second) == CanvasError.too_many_operations &&
+        canvas.display.ops.len == 1,
+        "operation ceiling rejects overflow before command mutation");
+
+    let owner_limits: CanvasLimits = canvas_limits_default();
+    let owner_canvas: Canvas = canvas_make(canvas_spec(node_key(601),
+        rect(0, 0, 64, 64), CanvasSemanticsPolicy.named_group, "Owner"), owner_limits);
+    let foreign: DisplayOp = display_op(DisplayOpKind.fill_rect, node_key(999));
+    foreign.bounds = rect(0, 0, 64, 64);
+    expect(state, canvas_push(&owner_canvas, foreign) == CanvasError.invalid_owner &&
+        owner_canvas.display.ops.len == 0,
+        "commands owned by another retained node fail before mutation");
+
+    let byte_limits: CanvasLimits = canvas_limits_default();
+    byte_limits.max_resource_bytes = 2;
+    byte_limits.max_total_resource_bytes = 2;
+    let byte_canvas: Canvas = canvas_make(canvas_spec(node_key(602),
+        rect(0, 0, 64, 64), CanvasSemanticsPolicy.named_image, "Bytes"), byte_limits);
+    expect(state, canvas_add_resource(&byte_canvas, canvas_resource_spec(1,
+        RenderResourceKind.effect, "123", 1)) == CanvasError.resource_failure &&
+        byte_canvas.resource_error == RenderResourceError.payload_limit &&
+        byte_canvas.display.resources.resources.len == 0,
+        "resource byte ceiling exposes the underlying failure without taking ownership");
+
+    _ = canvas_free(&byte_canvas); _ = canvas_free(&owner_canvas);
+    _ = canvas_free(&canvas);
+}
+
+fn transactional_destination_contract(state: *TestState) void {
+    let pixels: []u8 = "RGBA";
+    let spec: CanvasSpec = canvas_spec(node_key(700), rect(0, 0, 64, 64),
+        CanvasSemanticsPolicy.named_image, "Collision");
+    let canvas: Canvas = canvas_make(spec, canvas_limits_default());
+    let resource: CanvasResourceSpec = canvas_resource_spec(1,
+        RenderResourceKind.image, pixels, image_resource_format_tag());
+    resource.width = 1; resource.height = 1;
+    resource.color_space = RenderColorSpace.srgb;
+    _ = canvas_add_resource(&canvas, resource);
+    let image: DisplayOp = canvas_resource_op(canvas, DisplayOpKind.draw_image, 1);
+    image.bounds = rect(0, 0, 64, 64);
+    _ = canvas_push(&canvas, image); _ = canvas_seal(&canvas);
+
+    let collision: DisplayList = display_list_make();
+    let existing: RenderResourceSpec = render_resource_spec(
+        canvas_resource_id(canvas.key, 1), RenderResourceKind.image,
+        pixels, image_resource_format_tag());
+    existing.width = 1; existing.height = 1;
+    existing.color_space = RenderColorSpace.srgb;
+    _ = display_list_add_resource(&collision, existing);
+    let old_hash: i64 = collision.content_hash;
+    let old_revision: i64 = collision.revision;
+    expect(state, canvas_contribute_display(&canvas, &collision) ==
+        CanvasError.resource_collision && collision.ops.len == 0 &&
+        collision.resources.resources.len == 1 &&
+        collision.content_hash == old_hash && collision.revision == old_revision,
+        "resource collision preflight leaves the destination byte-for-byte unchanged");
+
+    let unsealed: Canvas = canvas_make(canvas_spec(node_key(701),
+        rect(0, 0, 64, 64), CanvasSemanticsPolicy.named_group, "Unsealed"),
+        canvas_limits_default());
+    let untouched: DisplayList = display_list_make();
+    expect(state, canvas_contribute_display(&unsealed, &untouched) ==
+        CanvasError.not_sealed && untouched.ops.len == 0 &&
+        untouched.resources.resources.len == 0,
+        "unsealed Canvas cannot contribute partial display state");
+
+    let tight_limits: CanvasLimits = canvas_limits_default();
+    tight_limits.max_operations = 0;
+    tight_limits.max_destination_operations = 4;
+    let tight: Canvas = canvas_make(canvas_spec(node_key(702),
+        rect(0, 0, 64, 64), CanvasSemanticsPolicy.named_group, "Tight"),
+        tight_limits);
+    _ = canvas_seal(&tight);
+    let crowded: DisplayList = display_list_make();
+    let background: DisplayOp = display_op(DisplayOpKind.fill_rect, node_key(99));
+    background.bounds = rect(0, 0, 64, 64);
+    _ = display_list_push(&crowded, background);
+    let crowded_hash: i64 = crowded.content_hash;
+    expect(state, canvas_contribute_display(&tight, &crowded) ==
+        CanvasError.destination_limit && crowded.ops.len == 1 &&
+        crowded.content_hash == crowded_hash,
+        "destination operation ceiling fails before envelope mutation");
+
+    display_list_free(&crowded); _ = canvas_free(&tight);
+    display_list_free(&untouched); _ = canvas_free(&unsealed);
+    display_list_free(&collision); _ = canvas_free(&canvas);
+}
+
+fn tree_failure_and_cleanup_contract(state: *TestState) void {
+    let spec: CanvasSpec = canvas_spec(node_key(800), rect(0, 0, 64, 64),
+        CanvasSemanticsPolicy.named_group, "Orphan");
+    spec.semantic_parent = node_key(899);
+    spec.hit_parent = node_key(899);
+    spec.hit_testable = 1;
+    let canvas: Canvas = canvas_make(spec, canvas_limits_default());
+    _ = canvas_seal(&canvas);
+    let semantics: SemanticsTree = semantics_tree_make();
+    let hits: HitTree = hit_tree_make();
+    expect(state, canvas_contribute_semantics(&canvas, &semantics) ==
+        CanvasError.semantics_failure &&
+        canvas.semantics_error == SemanticsError.missing_parent &&
+        semantics.nodes.len == 0,
+        "semantic parent failure is surfaced without partial tree mutation");
+    expect(state, canvas_contribute_hit(&canvas, &hits) == CanvasError.hit_failure &&
+        canvas.hit_error == HitTreeError.missing_parent && hits.nodes.len == 0,
+        "hit parent failure is surfaced without partial tree mutation");
+    hit_tree_free(&hits); semantics_tree_free(&semantics); _ = canvas_free(&canvas);
+
+    let cleanup_ok: i32 = 1;
+    let i: i32 = 0;
+    while (i < 256) {
+        let item: Canvas = canvas_make(canvas_spec(node_key(1000 + i as i64),
+            rect(0, 0, 64, 64), CanvasSemanticsPolicy.decorative, ""),
+            canvas_limits_default());
+        if (canvas_seal(&item) != CanvasError.none ||
+            canvas_free(&item) != CanvasError.none) { cleanup_ok = 0; }
+        i = i + 1;
+    }
+    expect(state, cleanup_ok == 1,
+        "256 create seal cleanup cycles preserve explicit ownership invariants");
+}
+
+fn main() i32 {
+    let state: TestState = TestState{ .passed = 0, .failed = 0 };
+    retained_and_replay_contract(&state);
+    contribution_semantics_and_hit_contract(&state);
+    semantic_policy_contract(&state);
+    resource_ownership_contract(&state);
+    invalid_construction_contract(&state);
+    operation_and_resource_limits_contract(&state);
+    transactional_destination_contract(&state);
+    tree_failure_and_cleanup_contract(&state);
+    let passed: []u8 = _zag_i64_to_str(state.passed as i64);
+    let failed: []u8 = _zag_i64_to_str(state.failed as i64);
+    _zag_print("Canvas contract: pass="); _zag_print(passed);
+    _zag_print(" fail="); _zag_println(failed);
+    _zag_str_free(passed); _zag_str_free(failed);
+    if (state.failed == 0) { return 0; }
+    return 1;
+}

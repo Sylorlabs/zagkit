@@ -1,0 +1,726 @@
+@import("std:list")
+@import("../core/geometry.zag")
+@import("common.zag")
+@import("measure.zag")
+
+enum GridTrackKind { fixed, intrinsic, fraction }
+enum GridError {
+    none,
+    too_many_items,
+    too_many_tracks,
+    invalid_constraints,
+    invalid_style,
+    invalid_track,
+    invalid_item,
+    duplicate_id,
+    collision,
+    no_space,
+    arithmetic_overflow,
+}
+
+struct GridTrack {
+    kind: GridTrackKind,
+    minimum: i64,
+    preferred: i64,
+    maximum: i64,
+    fraction: i64,
+}
+
+struct GridItem {
+    id: i64,
+    row: i32,
+    column: i32,
+    row_span: i32,
+    column_span: i32,
+    metrics: IntrinsicMetrics,
+    horizontal: PlacementAlignment,
+    vertical: PlacementAlignment,
+    z_order: i64,
+}
+
+struct GridStyle {
+    column_gap: i64,
+    row_gap: i64,
+    padding: Insets,
+    direction: LayoutDirection,
+    horizontal_content: ContentAlignment,
+    vertical_content: ContentAlignment,
+    allow_overlap: i32,
+}
+
+struct GridCell {
+    row: i32,
+    column: i32,
+}
+
+struct GridTrackPlacement {
+    offset: i64,
+    extent: i64,
+}
+
+struct GridPlacement {
+    id: i64,
+    row: i32,
+    column: i32,
+    row_span: i32,
+    column_span: i32,
+    frame: Rect,
+    baseline: i64,
+    z_order: i64,
+}
+
+struct GridResult {
+    placements: ArrayList[GridPlacement],
+    columns: ArrayList[GridTrackPlacement],
+    rows: ArrayList[GridTrackPlacement],
+    container: Size,
+    overflow_width: i64,
+    overflow_height: i64,
+    overlap_cells: i32,
+    layout_hash: i64,
+    error: GridError,
+    error_index: i32,
+}
+
+struct GridDistribution { leading: i64, extra_gap: i64 }
+
+fn grid_fixed(value: i64) GridTrack {
+    return GridTrack{ .kind = GridTrackKind.fixed, .minimum = value, .preferred = value,
+        .maximum = value, .fraction = 0 };
+}
+
+fn grid_intrinsic(minimum: i64, preferred: i64, maximum: i64) GridTrack {
+    return GridTrack{ .kind = GridTrackKind.intrinsic, .minimum = minimum,
+        .preferred = preferred, .maximum = maximum, .fraction = 0 };
+}
+
+fn grid_fraction(fraction: i64, minimum: i64, maximum: i64) GridTrack {
+    return GridTrack{ .kind = GridTrackKind.fraction, .minimum = minimum,
+        .preferred = minimum, .maximum = maximum, .fraction = fraction };
+}
+
+fn grid_item(id: i64, metrics: IntrinsicMetrics) GridItem {
+    return GridItem{
+        .id = id, .row = 0 - 1, .column = 0 - 1, .row_span = 1, .column_span = 1,
+        .metrics = metrics, .horizontal = PlacementAlignment.stretch,
+        .vertical = PlacementAlignment.stretch, .z_order = 0,
+    };
+}
+
+fn grid_item_at(id: i64, row: i32, column: i32, metrics: IntrinsicMetrics) GridItem {
+    let item: GridItem = grid_item(id, metrics);
+    item.row = row;
+    item.column = column;
+    return item;
+}
+
+fn grid_style(column_gap: i64, row_gap: i64, padding: Insets) GridStyle {
+    return GridStyle{
+        .column_gap = column_gap, .row_gap = row_gap, .padding = padding,
+        .direction = LayoutDirection.ltr,
+        .horizontal_content = ContentAlignment.start,
+        .vertical_content = ContentAlignment.start,
+        .allow_overlap = 0,
+    };
+}
+
+fn grid_free(result: *GridResult) void {
+    free[GridPlacement](&result.*.placements);
+    free[GridTrackPlacement](&result.*.columns);
+    free[GridTrackPlacement](&result.*.rows);
+}
+
+fn grid_mix(hash: i64, value: i64) i64 { return (hash * 1099511628211) ^ value; }
+
+fn grid_error_result(error: GridError, index: i32) GridResult {
+    let result: GridResult = GridResult{
+        .placements = make[GridPlacement](1),
+        .columns = make[GridTrackPlacement](1),
+        .rows = make[GridTrackPlacement](1),
+        .container = size(0, 0), .overflow_width = 0, .overflow_height = 0,
+        .overlap_cells = 0, .layout_hash = 17, .error = error, .error_index = index,
+    };
+    result.layout_hash = grid_mix(grid_mix(result.layout_hash, error as i64), index as i64);
+    return result;
+}
+
+fn grid_checked_add(a: i64, b: i64) i64 {
+    if (a < 0 || b < 0 || a > unbounded_extent() - b) { return 0 - 1; }
+    return a + b;
+}
+
+fn grid_extent_valid(value: i64) i32 {
+    return (value >= 0 && value <= unbounded_extent() / 4) as i32;
+}
+
+fn grid_insets_valid(value: Insets) i32 {
+    return (grid_extent_valid(value.top) == 1 && grid_extent_valid(value.right) == 1 &&
+        grid_extent_valid(value.bottom) == 1 && grid_extent_valid(value.left) == 1) as i32;
+}
+
+fn grid_track_valid(track: GridTrack) i32 {
+    if (track.minimum < 0 || track.preferred < track.minimum ||
+        track.maximum < track.preferred || track.maximum > unbounded_extent()) { return 0; }
+    if (track.kind == GridTrackKind.fixed) {
+        return (track.minimum == track.preferred && track.preferred == track.maximum &&
+            track.fraction == 0) as i32;
+    }
+    if (track.kind == GridTrackKind.intrinsic) { return (track.fraction == 0) as i32; }
+    return (track.fraction > 0 && track.fraction <= 4096 &&
+        track.preferred == track.minimum) as i32;
+}
+
+fn grid_item_valid(item: GridItem, row_count: i32, column_count: i32) i32 {
+    if (item.id <= 0 || intrinsic_metric_valid(item.metrics) == 0 ||
+        item.row_span <= 0 || item.column_span <= 0 ||
+        item.row_span > row_count || item.column_span > column_count ||
+        item.horizontal == PlacementAlignment.baseline ||
+        (item.vertical == PlacementAlignment.baseline && item.row_span != 1)) { return 0; }
+    let automatic: i32 = (item.row == 0 - 1 && item.column == 0 - 1) as i32;
+    let explicit: i32 = (item.row >= 0 && item.column >= 0 &&
+        item.row + item.row_span <= row_count &&
+        item.column + item.column_span <= column_count) as i32;
+    return (automatic == 1 || explicit == 1) as i32;
+}
+
+fn grid_cells_free(occupancy: ArrayList[i32], columns: i32, row: i32, column: i32,
+    row_span: i32, column_span: i32) i32 {
+    let r: i32 = row;
+    while (r < row + row_span) {
+        let c: i32 = column;
+        while (c < column + column_span) {
+            if (occupancy.data[r * columns + c] != 0) { return 0; }
+            c = c + 1;
+        }
+        r = r + 1;
+    }
+    return 1;
+}
+
+fn grid_mark_cells(occupancy: *ArrayList[i32], columns: i32, row: i32, column: i32,
+    row_span: i32, column_span: i32, marker: i32) i32 {
+    let overlaps: i32 = 0;
+    let r: i32 = row;
+    while (r < row + row_span) {
+        let c: i32 = column;
+        while (c < column + column_span) {
+            let index: i32 = r * columns + c;
+            if (occupancy.*.data[index] != 0) { overlaps = overlaps + 1; }
+            occupancy.*.data[index] = marker;
+            c = c + 1;
+        }
+        r = r + 1;
+    }
+    return overlaps;
+}
+
+fn grid_track_initial(track: GridTrack) i64 { return track.preferred; }
+
+fn grid_span_extent(sizes: ArrayList[i64], start: i32, count: i32, gap: i64) i64 {
+    let extent: i64 = 0;
+    let i: i32 = 0;
+    while (i < count) {
+        extent = grid_checked_add(extent, sizes.data[start + i]);
+        if (extent < 0) { return 0 - 1; }
+        if (i > 0) {
+            extent = grid_checked_add(extent, gap);
+            if (extent < 0) { return 0 - 1; }
+        }
+        i = i + 1;
+    }
+    return extent;
+}
+
+fn grid_grow_span(tracks: ArrayList[GridTrack], sizes: *ArrayList[i64], start: i32,
+    count: i32, gap: i64, target: i64) i32 {
+    let current: i64 = grid_span_extent(sizes.*, start, count, gap);
+    if (current < 0) { return 0; }
+    let remaining: i64 = target - current;
+    if (remaining <= 0) { return 1; }
+    let rounds: i32 = 0;
+    while (remaining > 0 && rounds < count + 1) {
+        let active: i32 = 0;
+        let i: i32 = 0;
+        while (i < count) {
+            let index: i32 = start + i;
+            if (tracks.data[index].kind != GridTrackKind.fixed &&
+                sizes.*.data[index] < tracks.data[index].maximum) { active = active + 1; }
+            i = i + 1;
+        }
+        if (active == 0) { return 1; }
+        let before: i64 = remaining;
+        i = 0;
+        while (i < count && remaining > 0) {
+            let index: i32 = start + i;
+            if (tracks.data[index].kind != GridTrackKind.fixed &&
+                sizes.*.data[index] < tracks.data[index].maximum) {
+                let share: i64 = remaining / (active as i64);
+                if (share < 1) { share = 1; }
+                let capacity: i64 = tracks.data[index].maximum - sizes.*.data[index];
+                if (share > capacity) { share = capacity; }
+                if (share > remaining) { share = remaining; }
+                sizes.*.data[index] = sizes.*.data[index] + share;
+                remaining = remaining - share;
+                active = active - 1;
+            }
+            i = i + 1;
+        }
+        if (remaining == before) { return 1; }
+        rounds = rounds + 1;
+    }
+    return 1;
+}
+
+fn grid_axis_prepare(items: ArrayList[GridItem], cells: ArrayList[GridCell],
+    tracks: ArrayList[GridTrack], sizes: *ArrayList[i64], gap: i64, horizontal: i32) i32 {
+    let i: i32 = 0;
+    while (i < tracks.len) { push[i64](sizes, grid_track_initial(tracks.data[i])); i = i + 1; }
+    i = 0;
+    while (i < items.len) {
+        let start: i32 = cells.data[i].row;
+        let count: i32 = items.data[i].row_span;
+        let minimum: i64 = items.data[i].metrics.minimum.height;
+        let preferred: i64 = items.data[i].metrics.preferred.height;
+        if (horizontal != 0) {
+            start = cells.data[i].column;
+            count = items.data[i].column_span;
+            minimum = items.data[i].metrics.minimum.width;
+            preferred = items.data[i].metrics.preferred.width;
+        }
+        if (grid_grow_span(tracks, sizes, start, count, gap, minimum) == 0 ||
+            grid_grow_span(tracks, sizes, start, count, gap, preferred) == 0) { return i; }
+        i = i + 1;
+    }
+    return 0 - 1;
+}
+
+fn grid_sizes_sum(sizes: ArrayList[i64]) i64 {
+    let total: i64 = 0;
+    let i: i32 = 0;
+    while (i < sizes.len) {
+        total = grid_checked_add(total, sizes.data[i]);
+        if (total < 0) { return 0 - 1; }
+        i = i + 1;
+    }
+    return total;
+}
+
+fn grid_grow_available(tracks: ArrayList[GridTrack], sizes: *ArrayList[i64], extra: i64,
+    fraction_only: i32) i64 {
+    let remaining: i64 = extra;
+    let rounds: i32 = 0;
+    while (remaining > 0 && rounds < tracks.len + 1) {
+        let weight: i64 = 0;
+        let last_eligible: i32 = 0 - 1;
+        let i: i32 = 0;
+        while (i < tracks.len) {
+            let eligible: i32 = (sizes.*.data[i] < tracks.data[i].maximum &&
+                tracks.data[i].kind != GridTrackKind.fixed) as i32;
+            if (eligible == 1 && (fraction_only == 0 || tracks.data[i].kind == GridTrackKind.fraction)) {
+                if (fraction_only != 0) { weight = weight + tracks.data[i].fraction; }
+                else { weight = weight + 1; }
+                last_eligible = i;
+            }
+            i = i + 1;
+        }
+        if (weight == 0) { return remaining; }
+        let before: i64 = remaining;
+        i = 0;
+        while (i < tracks.len && remaining > 0) {
+            let eligible: i32 = (sizes.*.data[i] < tracks.data[i].maximum &&
+                tracks.data[i].kind != GridTrackKind.fixed) as i32;
+            if (eligible == 1 && (fraction_only == 0 || tracks.data[i].kind == GridTrackKind.fraction)) {
+                let item_weight: i64 = 1;
+                if (fraction_only != 0) { item_weight = tracks.data[i].fraction; }
+                let share: i64 = (before * item_weight) / weight;
+                if (i == last_eligible) { share = remaining; }
+                let capacity: i64 = tracks.data[i].maximum - sizes.*.data[i];
+                if (share > capacity) { share = capacity; }
+                if (share > remaining) { share = remaining; }
+                sizes.*.data[i] = sizes.*.data[i] + share;
+                remaining = remaining - share;
+            }
+            i = i + 1;
+        }
+        if (remaining == before) { return remaining; }
+        rounds = rounds + 1;
+    }
+    return remaining;
+}
+
+fn grid_shrink_available(tracks: ArrayList[GridTrack], sizes: *ArrayList[i64], need: i64) i64 {
+    let remaining: i64 = need;
+    let rounds: i32 = 0;
+    while (remaining > 0 && rounds < tracks.len + 1) {
+        let active: i32 = 0;
+        let i: i32 = 0;
+        while (i < tracks.len) {
+            if (tracks.data[i].kind != GridTrackKind.fixed &&
+                sizes.*.data[i] > tracks.data[i].minimum) { active = active + 1; }
+            i = i + 1;
+        }
+        if (active == 0) { return remaining; }
+        let before: i64 = remaining;
+        i = 0;
+        while (i < tracks.len && remaining > 0) {
+            if (tracks.data[i].kind != GridTrackKind.fixed &&
+                sizes.*.data[i] > tracks.data[i].minimum) {
+                let share: i64 = remaining / (active as i64);
+                if (share < 1) { share = 1; }
+                let capacity: i64 = sizes.*.data[i] - tracks.data[i].minimum;
+                if (share > capacity) { share = capacity; }
+                if (share > remaining) { share = remaining; }
+                sizes.*.data[i] = sizes.*.data[i] - share;
+                remaining = remaining - share;
+                active = active - 1;
+            }
+            i = i + 1;
+        }
+        if (remaining == before) { return remaining; }
+        rounds = rounds + 1;
+    }
+    return remaining;
+}
+
+fn grid_adjust_axis(tracks: ArrayList[GridTrack], sizes: *ArrayList[i64], available: i64,
+    alignment: ContentAlignment) i64 {
+    let used: i64 = grid_sizes_sum(sizes.*);
+    if (used < 0) { return 0 - 1; }
+    if (used < available) {
+        let remaining: i64 = grid_grow_available(tracks, sizes, available - used, 1);
+        if (alignment == ContentAlignment.stretch && remaining > 0) {
+            _ = grid_grow_available(tracks, sizes, remaining, 0);
+        }
+    } else if (used > available) {
+        _ = grid_shrink_available(tracks, sizes, used - available);
+    }
+    return grid_sizes_sum(sizes.*);
+}
+
+fn grid_distribution(free_space: i64, count: i32, alignment: ContentAlignment) GridDistribution {
+    let free: i64 = free_space;
+    if (free < 0) { free = 0; }
+    let result: GridDistribution = GridDistribution{ .leading = 0, .extra_gap = 0 };
+    switch (alignment) {
+        .start => { }
+        .center => { result.leading = free / 2; }
+        .end => { result.leading = free; }
+        .space_between => { if (count > 1) { result.extra_gap = free / ((count - 1) as i64); } }
+        .space_around => {
+            if (count > 0) { result.extra_gap = free / (count as i64); result.leading = result.extra_gap / 2; }
+        }
+        .space_evenly => {
+            if (count > 0) { result.extra_gap = free / ((count + 1) as i64); result.leading = result.extra_gap; }
+        }
+        .stretch => { }
+    }
+    return result;
+}
+
+fn grid_axis_item_size(minimum: i64, preferred: i64, maximum: i64, available: i64,
+    alignment: PlacementAlignment) i64 {
+    if (alignment == PlacementAlignment.stretch) { return clamp_i64(available, minimum, maximum); }
+    let upper: i64 = maximum;
+    if (available < upper) { upper = available; }
+    return clamp_i64(preferred, minimum, upper);
+}
+
+fn grid_axis_item_offset(available: i64, extent: i64, alignment: PlacementAlignment) i64 {
+    if (alignment == PlacementAlignment.center) { return (available - extent) / 2; }
+    if (alignment == PlacementAlignment.end) { return available - extent; }
+    return 0;
+}
+
+fn grid_track_hash(track: GridTrack) i64 {
+    let hash: i64 = grid_mix(17, track.kind as i64);
+    hash = grid_mix(hash, track.minimum); hash = grid_mix(hash, track.preferred);
+    hash = grid_mix(hash, track.maximum); hash = grid_mix(hash, track.fraction);
+    return hash;
+}
+
+fn grid_input_hash(items: ArrayList[GridItem], columns: ArrayList[GridTrack],
+    rows: ArrayList[GridTrack], constraints: Constraints, style: GridStyle) i64 {
+    let hash: i64 = grid_mix(grid_mix(17, columns.len as i64), rows.len as i64);
+    hash = grid_mix(hash, constraints.min_width); hash = grid_mix(hash, constraints.max_width);
+    hash = grid_mix(hash, constraints.min_height); hash = grid_mix(hash, constraints.max_height);
+    hash = grid_mix(hash, style.column_gap); hash = grid_mix(hash, style.row_gap);
+    hash = grid_mix(hash, style.padding.top); hash = grid_mix(hash, style.padding.right);
+    hash = grid_mix(hash, style.padding.bottom); hash = grid_mix(hash, style.padding.left);
+    hash = grid_mix(hash, style.direction as i64);
+    hash = grid_mix(hash, style.horizontal_content as i64);
+    hash = grid_mix(hash, style.vertical_content as i64);
+    hash = grid_mix(hash, style.allow_overlap as i64);
+    let i: i32 = 0;
+    while (i < columns.len) { hash = grid_mix(hash, grid_track_hash(columns.data[i])); i = i + 1; }
+    i = 0;
+    while (i < rows.len) { hash = grid_mix(hash, grid_track_hash(rows.data[i])); i = i + 1; }
+    i = 0;
+    while (i < items.len) {
+        let item: GridItem = items.data[i];
+        hash = grid_mix(hash, item.id); hash = grid_mix(hash, item.row as i64);
+        hash = grid_mix(hash, item.column as i64); hash = grid_mix(hash, item.row_span as i64);
+        hash = grid_mix(hash, item.column_span as i64);
+        hash = grid_mix(hash, intrinsic_metrics_hash(item.metrics));
+        hash = grid_mix(hash, item.horizontal as i64); hash = grid_mix(hash, item.vertical as i64);
+        hash = grid_mix(hash, item.z_order);
+        i = i + 1;
+    }
+    return hash;
+}
+
+fn grid_output_hash(result: GridResult) i64 {
+    let hash: i64 = grid_mix(grid_mix(17, result.container.width), result.container.height);
+    hash = grid_mix(hash, result.overflow_width); hash = grid_mix(hash, result.overflow_height);
+    hash = grid_mix(hash, result.overlap_cells as i64); hash = grid_mix(hash, result.error as i64);
+    let i: i32 = 0;
+    while (i < result.columns.len) {
+        hash = grid_mix(hash, result.columns.data[i].offset);
+        hash = grid_mix(hash, result.columns.data[i].extent); i = i + 1;
+    }
+    i = 0;
+    while (i < result.rows.len) {
+        hash = grid_mix(hash, result.rows.data[i].offset);
+        hash = grid_mix(hash, result.rows.data[i].extent); i = i + 1;
+    }
+    i = 0;
+    while (i < result.placements.len) {
+        let placement: GridPlacement = result.placements.data[i];
+        hash = grid_mix(hash, placement.id); hash = grid_mix(hash, placement.row as i64);
+        hash = grid_mix(hash, placement.column as i64);
+        hash = grid_mix(hash, placement.frame.x); hash = grid_mix(hash, placement.frame.y);
+        hash = grid_mix(hash, placement.frame.width); hash = grid_mix(hash, placement.frame.height);
+        hash = grid_mix(hash, placement.baseline); hash = grid_mix(hash, placement.z_order);
+        i = i + 1;
+    }
+    return hash;
+}
+
+fn grid_layout(items: ArrayList[GridItem], columns: ArrayList[GridTrack], rows: ArrayList[GridTrack],
+    raw_constraints: Constraints, style: GridStyle) GridResult {
+    if (items.len > 4096) { return grid_error_result(GridError.too_many_items, 0 - 1); }
+    if (columns.len <= 0 || rows.len <= 0 || columns.len > 128 || rows.len > 128) {
+        return grid_error_result(GridError.too_many_tracks, 0 - 1);
+    }
+    let constraints: Constraints = normalize_constraints(raw_constraints);
+    if (constraints.min_width > unbounded_extent() || constraints.max_width > unbounded_extent() ||
+        constraints.min_height > unbounded_extent() || constraints.max_height > unbounded_extent()) {
+        return grid_error_result(GridError.invalid_constraints, 0 - 1);
+    }
+    if (grid_extent_valid(style.column_gap) == 0 || grid_extent_valid(style.row_gap) == 0 ||
+        grid_insets_valid(style.padding) == 0 ||
+        (style.allow_overlap != 0 && style.allow_overlap != 1)) {
+        return grid_error_result(GridError.invalid_style, 0 - 1);
+    }
+    let i: i32 = 0;
+    while (i < columns.len) {
+        if (grid_track_valid(columns.data[i]) == 0) { return grid_error_result(GridError.invalid_track, i); }
+        i = i + 1;
+    }
+    i = 0;
+    while (i < rows.len) {
+        if (grid_track_valid(rows.data[i]) == 0) { return grid_error_result(GridError.invalid_track, columns.len + i); }
+        i = i + 1;
+    }
+    i = 0;
+    while (i < items.len) {
+        if (grid_item_valid(items.data[i], rows.len, columns.len) == 0) {
+            return grid_error_result(GridError.invalid_item, i);
+        }
+        let j: i32 = 0;
+        while (j < i) {
+            if (items.data[j].id == items.data[i].id) { return grid_error_result(GridError.duplicate_id, i); }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+
+    let occupancy: ArrayList[i32] = make[i32](rows.len * columns.len);
+    i = 0;
+    while (i < rows.len * columns.len) { push[i32](&occupancy, 0); i = i + 1; }
+    let cells: ArrayList[GridCell] = make[GridCell](items.len);
+    let overlap_cells: i32 = 0;
+    i = 0;
+    while (i < items.len) {
+        let item: GridItem = items.data[i];
+        let row: i32 = item.row;
+        let column: i32 = item.column;
+        if (row < 0) {
+            row = 0 - 1;
+            let candidate_row: i32 = 0;
+            while (candidate_row + item.row_span <= rows.len && row < 0) {
+                let candidate_column: i32 = 0;
+                while (candidate_column + item.column_span <= columns.len && row < 0) {
+                    if (grid_cells_free(occupancy, columns.len, candidate_row, candidate_column,
+                        item.row_span, item.column_span) == 1) {
+                        row = candidate_row; column = candidate_column;
+                    }
+                    candidate_column = candidate_column + 1;
+                }
+                candidate_row = candidate_row + 1;
+            }
+            if (row < 0) {
+                free[i32](&occupancy); free[GridCell](&cells);
+                return grid_error_result(GridError.no_space, i);
+            }
+        } else if (grid_cells_free(occupancy, columns.len, row, column,
+            item.row_span, item.column_span) == 0 && style.allow_overlap == 0) {
+            free[i32](&occupancy); free[GridCell](&cells);
+            return grid_error_result(GridError.collision, i);
+        }
+        overlap_cells = overlap_cells + grid_mark_cells(&occupancy, columns.len, row, column,
+            item.row_span, item.column_span, i + 1);
+        push[GridCell](&cells, GridCell{ .row = row, .column = column });
+        i = i + 1;
+    }
+
+    let column_sizes: ArrayList[i64] = make[i64](columns.len);
+    let row_sizes: ArrayList[i64] = make[i64](rows.len);
+    let error_index: i32 = grid_axis_prepare(items, cells, columns, &column_sizes, style.column_gap, 1);
+    if (error_index >= 0) {
+        free[i32](&occupancy); free[GridCell](&cells); free[i64](&column_sizes); free[i64](&row_sizes);
+        return grid_error_result(GridError.arithmetic_overflow, error_index);
+    }
+    error_index = grid_axis_prepare(items, cells, rows, &row_sizes, style.row_gap, 0);
+    if (error_index >= 0) {
+        free[i32](&occupancy); free[GridCell](&cells); free[i64](&column_sizes); free[i64](&row_sizes);
+        return grid_error_result(GridError.arithmetic_overflow, error_index);
+    }
+
+    let horizontal_padding: i64 = grid_checked_add(style.padding.left, style.padding.right);
+    let vertical_padding: i64 = grid_checked_add(style.padding.top, style.padding.bottom);
+    let column_gaps: i64 = 0;
+    i = 1;
+    while (i < columns.len) { column_gaps = grid_checked_add(column_gaps, style.column_gap); i = i + 1; }
+    let row_gaps: i64 = 0;
+    i = 1;
+    while (i < rows.len) { row_gaps = grid_checked_add(row_gaps, style.row_gap); i = i + 1; }
+    let desired_width: i64 = grid_checked_add(grid_checked_add(horizontal_padding, column_gaps), grid_sizes_sum(column_sizes));
+    let desired_height: i64 = grid_checked_add(grid_checked_add(vertical_padding, row_gaps), grid_sizes_sum(row_sizes));
+    if (horizontal_padding < 0 || vertical_padding < 0 || column_gaps < 0 || row_gaps < 0 ||
+        desired_width < 0 || desired_height < 0) {
+        free[i32](&occupancy); free[GridCell](&cells); free[i64](&column_sizes); free[i64](&row_sizes);
+        return grid_error_result(GridError.arithmetic_overflow, 0 - 1);
+    }
+    let container: Size = size(
+        clamp_i64(desired_width, constraints.min_width, constraints.max_width),
+        clamp_i64(desired_height, constraints.min_height, constraints.max_height)
+    );
+    let available_columns: i64 = container.width - horizontal_padding - column_gaps;
+    if (available_columns < 0) { available_columns = 0; }
+    let available_rows: i64 = container.height - vertical_padding - row_gaps;
+    if (available_rows < 0) { available_rows = 0; }
+    let used_columns: i64 = grid_adjust_axis(columns, &column_sizes, available_columns, style.horizontal_content);
+    let used_rows: i64 = grid_adjust_axis(rows, &row_sizes, available_rows, style.vertical_content);
+    if (used_columns < 0 || used_rows < 0) {
+        free[i32](&occupancy); free[GridCell](&cells); free[i64](&column_sizes); free[i64](&row_sizes);
+        return grid_error_result(GridError.arithmetic_overflow, 0 - 1);
+    }
+    let column_distribution: GridDistribution = grid_distribution(
+        available_columns - used_columns, columns.len, style.horizontal_content);
+    let row_distribution: GridDistribution = grid_distribution(
+        available_rows - used_rows, rows.len, style.vertical_content);
+
+    let column_offsets: ArrayList[i64] = make[i64](columns.len);
+    let row_offsets: ArrayList[i64] = make[i64](rows.len);
+    let cursor: i64 = column_distribution.leading;
+    i = 0;
+    while (i < columns.len) {
+        push[i64](&column_offsets, cursor);
+        cursor = cursor + column_sizes.data[i];
+        if (i + 1 < columns.len) { cursor = cursor + style.column_gap + column_distribution.extra_gap; }
+        i = i + 1;
+    }
+    cursor = row_distribution.leading;
+    i = 0;
+    while (i < rows.len) {
+        push[i64](&row_offsets, cursor);
+        cursor = cursor + row_sizes.data[i];
+        if (i + 1 < rows.len) { cursor = cursor + style.row_gap + row_distribution.extra_gap; }
+        i = i + 1;
+    }
+
+    let column_output: ArrayList[GridTrackPlacement] = make[GridTrackPlacement](columns.len);
+    i = 0;
+    while (i < columns.len) {
+        let offset: i64 = style.padding.left + column_offsets.data[i];
+        if (style.direction == LayoutDirection.rtl) {
+            offset = container.width - style.padding.right - column_offsets.data[i] - column_sizes.data[i];
+        }
+        push[GridTrackPlacement](&column_output, GridTrackPlacement{ .offset = offset, .extent = column_sizes.data[i] });
+        i = i + 1;
+    }
+    let row_output: ArrayList[GridTrackPlacement] = make[GridTrackPlacement](rows.len);
+    i = 0;
+    while (i < rows.len) {
+        push[GridTrackPlacement](&row_output, GridTrackPlacement{
+            .offset = style.padding.top + row_offsets.data[i], .extent = row_sizes.data[i],
+        });
+        i = i + 1;
+    }
+
+    let row_baselines: ArrayList[i64] = make[i64](rows.len);
+    i = 0;
+    while (i < rows.len) { push[i64](&row_baselines, 0); i = i + 1; }
+    i = 0;
+    while (i < items.len) {
+        if (items.data[i].vertical == PlacementAlignment.baseline) {
+            let baseline: i64 = items.data[i].metrics.baseline;
+            let row_index: i32 = cells.data[i].row;
+            if (baseline > row_baselines.data[row_index]) { row_baselines.data[row_index] = baseline; }
+        }
+        i = i + 1;
+    }
+
+    let placements: ArrayList[GridPlacement] = make[GridPlacement](items.len);
+    let overflow_width: i64 = desired_width - container.width;
+    if (overflow_width < 0) { overflow_width = 0; }
+    let overflow_height: i64 = desired_height - container.height;
+    if (overflow_height < 0) { overflow_height = 0; }
+    i = 0;
+    while (i < items.len) {
+        let item: GridItem = items.data[i];
+        let cell: GridCell = cells.data[i];
+        let cell_width: i64 = grid_span_extent(column_sizes, cell.column, item.column_span,
+            style.column_gap + column_distribution.extra_gap);
+        let cell_height: i64 = grid_span_extent(row_sizes, cell.row, item.row_span,
+            style.row_gap + row_distribution.extra_gap);
+        let width: i64 = grid_axis_item_size(item.metrics.minimum.width, item.metrics.preferred.width,
+            item.metrics.maximum.width, cell_width, item.horizontal);
+        let height: i64 = grid_axis_item_size(item.metrics.minimum.height, item.metrics.preferred.height,
+            item.metrics.maximum.height, cell_height, item.vertical);
+        let x_offset: i64 = grid_axis_item_offset(cell_width, width, item.horizontal);
+        let y_offset: i64 = grid_axis_item_offset(cell_height, height, item.vertical);
+        if (item.vertical == PlacementAlignment.baseline) {
+            y_offset = row_baselines.data[cell.row] - item.metrics.baseline;
+        }
+        let logical_x: i64 = column_offsets.data[cell.column] + x_offset;
+        let frame_x: i64 = style.padding.left + logical_x;
+        if (style.direction == LayoutDirection.rtl) {
+            frame_x = container.width - style.padding.right - logical_x - width;
+        }
+        let frame: Rect = rect(frame_x, style.padding.top + row_offsets.data[cell.row] + y_offset,
+            width, height);
+        let item_overflow_width: i64 = width - cell_width;
+        if (item_overflow_width > overflow_width) { overflow_width = item_overflow_width; }
+        let item_overflow_height: i64 = height - cell_height;
+        if (item_overflow_height > overflow_height) { overflow_height = item_overflow_height; }
+        push[GridPlacement](&placements, GridPlacement{
+            .id = item.id, .row = cell.row, .column = cell.column,
+            .row_span = item.row_span, .column_span = item.column_span,
+            .frame = frame, .baseline = frame.y + clamp_i64(item.metrics.baseline, 0, frame.height),
+            .z_order = item.z_order,
+        });
+        i = i + 1;
+    }
+
+    let result: GridResult = GridResult{
+        .placements = placements, .columns = column_output, .rows = row_output,
+        .container = container, .overflow_width = overflow_width, .overflow_height = overflow_height,
+        .overlap_cells = overlap_cells, .layout_hash = 0,
+        .error = GridError.none, .error_index = 0 - 1,
+    };
+    result.layout_hash = grid_mix(grid_input_hash(items, columns, rows, constraints, style), grid_output_hash(result));
+    free[i32](&occupancy); free[GridCell](&cells); free[i64](&column_sizes); free[i64](&row_sizes);
+    free[i64](&column_offsets); free[i64](&row_offsets); free[i64](&row_baselines);
+    return result;
+}

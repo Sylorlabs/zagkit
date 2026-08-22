@@ -1,0 +1,181 @@
+@import("../src/automation/talkback.zag")
+
+struct TestState { passed: i32, failed: i32 }
+
+fn expect(state: *TestState, condition: i32, name: []u8) void {
+    if (condition != 0) {
+        state.*.passed = state.*.passed + 1;
+        _zag_print("ok  "); _zag_println(name);
+    } else {
+        state.*.failed = state.*.failed + 1;
+        _zag_print("FAIL "); _zag_println(name);
+    }
+}
+
+fn make_tree() SemanticsTree {
+    let tree: SemanticsTree = semantics_tree_make();
+    let root: SemanticsSpec = semantics_spec(node_key(1), semantic_root_key(), SemanticRole.window, "Window");
+    _ = semantics_add(&tree, root);
+    let button: SemanticsSpec = semantics_spec(node_key(2), node_key(1), SemanticRole.button, "Create part");
+    button.action_mask = semantic_actions_add(semantic_actions(SemanticAction.activate), SemanticAction.focus);
+    button.description = "Creates a part in the active document";
+    button.has_bounds = 1;
+    button.bounds = rect(10, 20, 120, 32);
+    button.selected = 1;
+    _ = semantics_add(&tree, button);
+    let field: SemanticsSpec = semantics_spec(node_key(3), node_key(1), SemanticRole.text_field, "Part name");
+    field.action_mask = semantic_actions_add(semantic_actions(SemanticAction.set_value), SemanticAction.focus);
+    _ = semantics_add(&tree, field);
+    return tree;
+}
+
+fn id_target_contract(state: *TestState) void {
+    let tree: SemanticsTree = make_tree();
+    let capabilities: TalkbackCapabilities = talkback_capabilities();
+    let session: TalkbackSession = talkback_session_make(capabilities);
+    let viewport: Rect = rect(0, 0, 800 * unit_scale(), 600 * unit_scale());
+
+    let discover: TalkbackResponse = talkback_dispatch(&session, tree, viewport, talkback_request(1, TalkbackCommand.discover, semantic_root_key(), tree.revision));
+    let query: TalkbackResponse = talkback_dispatch(&session, tree, viewport, talkback_request(2, TalkbackCommand.query, node_key(2), tree.revision));
+    let click: TalkbackResponse = talkback_dispatch(&session, tree, viewport, talkback_request(3, TalkbackCommand.click, node_key(2), tree.revision));
+    let type_field: TalkbackResponse = talkback_dispatch(&session, tree, viewport, talkback_request(4, TalkbackCommand.type_text, node_key(3), tree.revision));
+    let type_button: TalkbackResponse = talkback_dispatch(&session, tree, viewport, talkback_request(5, TalkbackCommand.type_text, node_key(2), tree.revision));
+    expect(state, discover.status == TalkbackStatus.accepted && discover.result_count == 3 && discover.evidence_hash != 0,
+        "discover returns node count and deterministic tree evidence hash");
+    let stale: TalkbackResponse = talkback_dispatch(&session, tree, viewport, talkback_request(6, TalkbackCommand.click, node_key(2), tree.revision - 1));
+    let missing: TalkbackResponse = talkback_dispatch(&session, tree, viewport, talkback_request(7, TalkbackCommand.click, node_key(99), tree.revision));
+    expect(state, query.status == TalkbackStatus.accepted && click.status == TalkbackStatus.accepted && type_field.status == TalkbackStatus.accepted, "ID queries and declared semantic actions are accepted");
+    expect(state, query.resolved_node_index == semantics_find_index(tree, node_key(2)) && query.result_count == 1, "ID queries resolve to an inspectable semantic node");
+    expect(state, query.resolved_role == SemanticRole.button && query.has_bounds == 1 &&
+        query.bounds.x == 10 && query.bounds.width == 120 && query.action_mask ==
+            semantic_actions_add(semantic_actions(SemanticAction.activate), SemanticAction.focus),
+        "Talkback query evidence exposes role, exact bounds, and declared actions");
+    expect(state, query.name_length == 11 && query.description_length == 37 &&
+        query.value_length == 0 && query.state_flags == 2 && query.evidence_hash != 0,
+        "Talkback query evidence fingerprints owned text and explicit state");
+    expect(state, click.emitted_action == 1 && query.emitted_action == 0, "responses distinguish emitted actions from read-only queries");
+    expect(state, type_button.status == TalkbackStatus.action_unavailable, "an ID action absent from semantics fails visibly");
+
+    expect(state, query.evidence_hash != 0 && discover.evidence_hash != 0, "query and discover evidence hashes are deterministic and retained");
+    expect(state, stale.evidence_hash != 0 && missing.evidence_hash != 0,
+        "failures retain deterministic evidence and stay inspectable");
+    expect(state, stale.status == TalkbackStatus.stale_semantics, "stale semantic revisions cannot silently target replacement nodes");
+    expect(state, missing.status == TalkbackStatus.target_not_found, "missing ID targets return a structured failure");
+
+    let drag: TalkbackResponse = talkback_dispatch(&session, tree, viewport, talkback_request(8, TalkbackCommand.drag, node_key(2), tree.revision));
+    let gesture: TalkbackResponse = talkback_dispatch(&session, tree, viewport, talkback_request(9, TalkbackCommand.gesture, node_key(2), tree.revision));
+    let wait_for: TalkbackResponse = talkback_dispatch(&session, tree, viewport, talkback_request(10, TalkbackCommand.wait_for, node_key(2), tree.revision));
+    let assertion: TalkbackResponse = talkback_dispatch(&session, tree, viewport, talkback_request(11, TalkbackCommand.assert_value, node_key(2), tree.revision));
+    let snapshot: TalkbackResponse = talkback_dispatch(&session, tree, viewport, talkback_request(12, TalkbackCommand.snapshot, semantic_root_key(), 0 - 1));
+    let replay: TalkbackResponse = talkback_dispatch(&session, tree, viewport, talkback_request(13, TalkbackCommand.replay, semantic_root_key(), 0 - 1));
+    session.capabilities.key_actions = 0;
+    let unsupported: TalkbackResponse = talkback_dispatch(&session, tree, viewport, talkback_request(14, TalkbackCommand.key, node_key(3), tree.revision));
+    let bad_timeout_request: TalkbackRequest = talkback_request(15, TalkbackCommand.query, node_key(2), tree.revision);
+    bad_timeout_request.timeout_ms = 0;
+    let bad_timeout: TalkbackResponse = talkback_dispatch(&session, tree, viewport, bad_timeout_request);
+    let timeline: TalkbackResponse = talkback_dispatch(&session, tree, viewport, talkback_request(16, TalkbackCommand.timeline, semantic_root_key(), 0 - 1));
+    let cap_report: TalkbackResponse = talkback_dispatch(&session, tree, viewport, talkback_request(17, TalkbackCommand.capability_report, semantic_root_key(), 0 - 1));
+    expect(state, drag.status == TalkbackStatus.accepted && gesture.status == TalkbackStatus.accepted &&
+        wait_for.status == TalkbackStatus.accepted && assertion.status == TalkbackStatus.accepted &&
+        snapshot.status == TalkbackStatus.accepted && replay.status == TalkbackStatus.accepted && timeline.status == TalkbackStatus.accepted && cap_report.status == TalkbackStatus.accepted,
+        "all action-oriented commands are accepted when command capabilities are enabled");
+    expect(state, drag.evidence_hash != 0 && gesture.evidence_hash != 0 &&
+        wait_for.evidence_hash != 0 && assertion.evidence_hash != 0 &&
+        snapshot.evidence_hash != 0 && replay.evidence_hash != 0 &&
+        timeline.evidence_hash != 0 && cap_report.evidence_hash != 0,
+        "interactive commands and inspectors emit deterministic evidence hashes");
+    expect(state, drag.emitted_action == 1 && gesture.emitted_action == 1 &&
+        wait_for.emitted_action == 1 && assertion.emitted_action == 1 &&
+        snapshot.emitted_action == 1 && replay.emitted_action == 1,
+        "action dispatch is recorded in emitted-action evidence");
+    expect(state, cap_report.result_count == 1 && timeline.result_count == 16, "inspect and timeline expose deterministic result counts");
+    expect(state, replay.row_count == 13, "replay exposes retained timeline length as result metadata");
+    expect(state, unsupported.status == TalkbackStatus.unsupported_command, "commands not advertised by capability remain fail-closed");
+    expect(state, bad_timeout.status == TalkbackStatus.invalid_timeout, "invalid timeout policy is rejected before dispatch");
+    expect(state, unsupported.evidence_hash != 0 && bad_timeout.evidence_hash != 0, "fail-closed results preserve deterministic evidence");
+    expect(state, session.events.len == 17 && session.events.data[16].sequence == 17, "accepted and rejected requests share one ordered evidence log");
+
+    talkback_session_free(&session);
+    semantics_tree_free(&tree);
+}
+
+fn pixel_fallback_contract(state: *TestState) void {
+    let tree: SemanticsTree = make_tree();
+    let capabilities: TalkbackCapabilities = talkback_capabilities();
+    let session: TalkbackSession = talkback_session_make(capabilities);
+    let viewport: Rect = rect(0, 0, 100 * unit_scale(), 80 * unit_scale());
+
+    let denied_request: TalkbackRequest = talkback_pixel_request(20, TalkbackCommand.click, 20, 20, 2, 1);
+    let denied: TalkbackResponse = talkback_dispatch(&session, tree, viewport, denied_request);
+    expect(state, denied.status == TalkbackStatus.pixel_fallback_disabled, "pixel fallback is disabled unless the backend advertises it");
+    expect(state, denied.target_kind == TalkbackTargetKind.pixel && session.events.data[0].target_kind == TalkbackTargetKind.pixel, "pixel attempts are never reported as ID targeting");
+
+    session.capabilities.pixel_fallback = 1;
+    session.capabilities.id_actions = 0;
+    let accepted_request: TalkbackRequest = talkback_pixel_request(21, TalkbackCommand.click, 100, 80, 2, 1);
+    let accepted: TalkbackResponse = talkback_dispatch(&session, tree, viewport, accepted_request);
+    let outside_request: TalkbackRequest = talkback_pixel_request(22, TalkbackCommand.click, 201, 40, 2, 1);
+    let outside: TalkbackResponse = talkback_dispatch(&session, tree, viewport, outside_request);
+    expect(state, accepted.status == TalkbackStatus.accepted, "pixel fallback resolves physical pixels through recorded display scale");
+    expect(state, accepted.emitted_action == 1, "pixel action emission is independent from ID-action capability");
+    expect(state, outside.status == TalkbackStatus.pixel_out_of_bounds, "scaled pixel targets outside the viewport fail visibly");
+    expect(state, session.events.data[1].scale_numerator == 2 && session.events.data[1].scale_denominator == 1 && session.events.data[1].pixel_x == 100, "pixel evidence retains coordinates and scale");
+
+    talkback_session_free(&session);
+    semantics_tree_free(&tree);
+}
+
+fn disabled_query_contract(state: *TestState) void {
+    let tree: SemanticsTree = make_tree();
+    let button_index: i32 = semantics_find_index(tree, node_key(2));
+    tree.nodes.data[button_index].disabled = 1;
+    let session: TalkbackSession = talkback_session_make(talkback_capabilities());
+    let viewport: Rect = rect(0, 0, 800 * unit_scale(), 600 * unit_scale());
+    let query: TalkbackResponse = talkback_dispatch(&session, tree, viewport,
+        talkback_request(40, TalkbackCommand.query, node_key(2), tree.revision));
+    let click: TalkbackResponse = talkback_dispatch(&session, tree, viewport,
+        talkback_request(41, TalkbackCommand.click, node_key(2), tree.revision));
+    expect(state, query.status == TalkbackStatus.accepted &&
+        (query.state_flags & 1) != 0 && query.emitted_action == 0,
+        "disabled targets remain discoverable through read-only ID queries");
+    expect(state, click.status == TalkbackStatus.action_unavailable,
+        "disabled targets reject action commands while remaining queryable");
+    talkback_session_free(&session);
+    semantics_tree_free(&tree);
+}
+
+fn capability_contract(state: *TestState) void {
+    let tree: SemanticsTree = make_tree();
+    let capabilities: TalkbackCapabilities = talkback_capabilities();
+    let session: TalkbackSession = talkback_session_make(capabilities);
+    let viewport: Rect = rect(0, 0, 1, 1);
+    let report: TalkbackResponse = talkback_dispatch(&session, tree, viewport, talkback_request(30, TalkbackCommand.capability_report, semantic_root_key(), 0 - 1));
+    let screenshot: TalkbackResponse = talkback_dispatch(&session, tree, viewport, talkback_request(31, TalkbackCommand.screenshot, semantic_root_key(), 0 - 1));
+    let replay: TalkbackResponse = talkback_dispatch(&session, tree, viewport, talkback_request(32, TalkbackCommand.replay, semantic_root_key(), 0 - 1));
+    let assertion: TalkbackResponse = talkback_dispatch(&session, tree, viewport, talkback_request(33, TalkbackCommand.assert_value, node_key(2), tree.revision));
+    let timeline: TalkbackResponse = talkback_dispatch(&session, tree, viewport, talkback_request(34, TalkbackCommand.timeline, semantic_root_key(), 0 - 1));
+    let query: TalkbackResponse = talkback_dispatch(&session, tree, viewport, talkback_request(35, TalkbackCommand.query, node_key(2), tree.revision));
+    expect(state, report.status == TalkbackStatus.accepted, "capability reporting is always queryable");
+    expect(state, screenshot.status == TalkbackStatus.unsupported_command, "screenshot remains unsupported until transport capture is implemented");
+    expect(state, replay.status == TalkbackStatus.accepted && assertion.status == TalkbackStatus.accepted, "snapshot and replay primitives are accepted when supported");
+    expect(state, timeline.result_count == 5 && query.result_count == 1, "query helpers expose deterministic result counts");
+    expect(state, capabilities.protocol_major == 0 && capabilities.protocol_minor == 2, "the experimental protocol version is explicit");
+    talkback_session_free(&session);
+    semantics_tree_free(&tree);
+}
+
+fn main() i32 {
+    let state: TestState = TestState{ .passed = 0, .failed = 0 };
+    id_target_contract(&state);
+    disabled_query_contract(&state);
+    pixel_fallback_contract(&state);
+    capability_contract(&state);
+    let passed_text: []u8 = _zag_i64_to_str(state.passed as i64);
+    let failed_text: []u8 = _zag_i64_to_str(state.failed as i64);
+    _zag_print("Zagkit Talkback contract: pass="); _zag_print(passed_text);
+    _zag_print(" fail="); _zag_println(failed_text);
+    _zag_str_free(passed_text);
+    _zag_str_free(failed_text);
+    if (state.failed == 0) { return 0; }
+    return 1;
+}

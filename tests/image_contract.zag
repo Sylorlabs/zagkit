@@ -1,0 +1,92 @@
+@import("../src/render/image.zag")
+
+struct TestState { passed: i32, failed: i32 }
+
+fn expect(state: *TestState, condition: i32, name: []u8) void {
+    if (condition != 0) {
+        state.*.passed = state.*.passed + 1;
+        _zag_print("ok  "); _zag_println(name);
+    } else {
+        state.*.failed = state.*.failed + 1;
+        _zag_print("FAIL "); _zag_println(name);
+    }
+}
+
+fn test_resource(kind: RenderResourceKind, payload: []u8, format_tag: i64,
+    width: i64, height: i64, color_space: RenderColorSpace) RenderResource {
+    let spec: RenderResourceSpec = render_resource_spec(1, kind, payload, format_tag);
+    spec.width = width;
+    spec.height = height;
+    spec.color_space = color_space;
+    return render_resource_from_spec(spec);
+}
+
+fn resource_free(resource: *RenderResource) void {
+    free[u8](&resource.*.payload);
+}
+
+fn validation_contract(state: *TestState) void {
+    let valid: RenderResource = test_resource(RenderResourceKind.image,
+        "RGBA", image_resource_format_tag(), 1, 1, RenderColorSpace.srgb);
+    expect(state, image_resource_validate(valid) == ImagePayloadError.none,
+        "one RGBA8 texel with explicit sRGB metadata is canonical");
+    resource_free(&valid);
+
+    let wrong_kind: RenderResource = test_resource(RenderResourceKind.path,
+        "RGBA", image_resource_format_tag(), 1, 1, RenderColorSpace.srgb);
+    expect(state, image_resource_validate(wrong_kind) == ImagePayloadError.wrong_kind,
+        "non-image resources cannot masquerade as decoded pixels");
+    resource_free(&wrong_kind);
+
+    let wrong_format: RenderResource = test_resource(RenderResourceKind.image,
+        "RGBA", 2, 1, 1, RenderColorSpace.srgb);
+    expect(state, image_resource_validate(wrong_format) ==
+        ImagePayloadError.unsupported_format,
+        "unknown decoded-image schemas fail closed");
+    resource_free(&wrong_format);
+
+    let wrong_size: RenderResource = test_resource(RenderResourceKind.image,
+        "RGB", image_resource_format_tag(), 1, 1, RenderColorSpace.srgb);
+    expect(state, image_resource_validate(wrong_size) == ImagePayloadError.size_mismatch,
+        "RGBA8 payload length must match dimensions exactly");
+    resource_free(&wrong_size);
+
+    let no_color: RenderResource = test_resource(RenderResourceKind.image,
+        "RGBA", image_resource_format_tag(), 1, 1, RenderColorSpace.none);
+    expect(state, image_resource_validate(no_color) ==
+        ImagePayloadError.invalid_color_space,
+        "decoded images require explicit color-space truth");
+    resource_free(&no_color);
+
+    let no_dimensions: RenderResource = test_resource(RenderResourceKind.image,
+        "RGBA", image_resource_format_tag(), 0, 1, RenderColorSpace.srgb);
+    expect(state, image_resource_validate(no_dimensions) ==
+        ImagePayloadError.invalid_dimensions,
+        "zero dimensions fail before size arithmetic");
+    resource_free(&no_dimensions);
+}
+
+fn bounds_contract(state: *TestState) void {
+    expect(state, image_payload_expected_bytes(1, 1) == 4 &&
+        image_payload_expected_bytes(1920, 1080) == 8294400,
+        "decoded RGBA8 byte accounting is exact");
+    expect(state, image_payload_expected_bytes(0, 1) == 0 &&
+        image_payload_expected_bytes(1048577, 1) == 0,
+        "invalid dimensions never produce allocation sizes");
+    expect(state, image_payload_expected_bytes(1048576, 1048576) == 0,
+        "multiplication beyond the hard byte domain fails without overflow");
+}
+
+fn main() i32 {
+    let state: TestState = TestState{ .passed = 0, .failed = 0 };
+    validation_contract(&state);
+    bounds_contract(&state);
+    let passed_text: []u8 = _zag_i64_to_str(state.passed as i64);
+    let failed_text: []u8 = _zag_i64_to_str(state.failed as i64);
+    _zag_print("Image contract: pass="); _zag_print(passed_text);
+    _zag_print(" fail="); _zag_println(failed_text);
+    _zag_str_free(passed_text);
+    _zag_str_free(failed_text);
+    if (state.failed == 0) { return 0; }
+    return 1;
+}

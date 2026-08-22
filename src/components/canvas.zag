@@ -1,0 +1,846 @@
+@import("../core/reconcile.zag")
+@import("../render/display_list.zag")
+@import("../semantics/semantics.zag")
+@import("../input/hit_test.zag")
+
+// Canvas is the public immediate drawing escape hatch hosted by one retained
+// NodeKey. A Canvas owns its command and resource bytes until canvas_free.
+
+enum CanvasSemanticsPolicy {
+    named_image,
+    named_group,
+    decorative,
+}
+
+enum CanvasError {
+    none,
+    invalid_key,
+    invalid_limits,
+    invalid_bounds,
+    invalid_clip,
+    invalid_transform,
+    invalid_semantics,
+    invalid_state,
+    sealed,
+    not_sealed,
+    released,
+    too_many_operations,
+    invalid_owner,
+    invalid_resource_id,
+    resource_failure,
+    display_failure,
+    content_mutated,
+    destination_sealed,
+    destination_limit,
+    resource_collision,
+    semantics_failure,
+    hit_failure,
+    not_interactive,
+}
+
+struct CanvasLimits {
+    max_operations: i32,
+    max_resources: i32,
+    max_total_resource_bytes: i64,
+    max_resource_bytes: i64,
+    max_destination_operations: i32,
+}
+
+struct CanvasSpec {
+    key: NodeKey,
+    semantic_parent: NodeKey,
+    hit_parent: NodeKey,
+    bounds: Rect,
+    clip: Rect,
+    has_clip: i32,
+    transform: Transform,
+    semantics_policy: CanvasSemanticsPolicy,
+    name: []u8,
+    description: []u8,
+    hit_testable: i32,
+    focusable: i32,
+    focus_order: i64,
+    enabled: i32,
+    z_order: i64,
+}
+
+struct CanvasResourceSpec {
+    local_id: i64,
+    kind: RenderResourceKind,
+    payload: []u8,
+    format_tag: i64,
+    width: i64,
+    height: i64,
+    color_space: RenderColorSpace,
+}
+
+struct Canvas {
+    key: NodeKey,
+    semantic_parent: NodeKey,
+    hit_parent: NodeKey,
+    bounds: Rect,
+    clip: Rect,
+    has_clip: i32,
+    transform: Transform,
+    semantics_policy: CanvasSemanticsPolicy,
+    name: ArrayList[u8],
+    description: ArrayList[u8],
+    hit_testable: i32,
+    focusable: i32,
+    focus_order: i64,
+    enabled: i32,
+    z_order: i64,
+    limits: CanvasLimits,
+    display: DisplayList,
+    sealed: i32,
+    released: i32,
+    revision: i64,
+    content_hash: i64,
+    last_error: CanvasError,
+    display_error: DisplayError,
+    resource_error: RenderResourceError,
+    semantics_error: SemanticsError,
+    hit_error: HitTreeError,
+    error_index: i32,
+    error_resource_id: i64,
+}
+
+struct CanvasPoint {
+    x: i64,
+    y: i64,
+}
+
+struct CanvasLocalResult {
+    found: i32,
+    x: i64,
+    y: i64,
+    error: CanvasError,
+}
+
+struct CanvasRetainedResult {
+    spec: ViewSpec,
+    error: CanvasError,
+}
+
+fn canvas_render_kind() i64 { return 1128353366; }
+fn canvas_hard_operation_limit() i32 { return 1000000; }
+fn canvas_hard_name_limit() i32 { return 4096; }
+fn canvas_hard_description_limit() i32 { return 16384; }
+fn canvas_local_resource_id_limit() i64 { return 2147483647; }
+
+fn canvas_limits_default() CanvasLimits {
+    return CanvasLimits{
+        .max_operations = 262144,
+        .max_resources = 4096,
+        .max_total_resource_bytes = 268435456,
+        .max_resource_bytes = 33554432,
+        .max_destination_operations = 1000000,
+    };
+}
+
+fn canvas_spec(key: NodeKey, bounds: Rect,
+    semantics_policy: CanvasSemanticsPolicy, name: []u8) CanvasSpec {
+    return CanvasSpec{
+        .key = key,
+        .semantic_parent = semantic_root_key(),
+        .hit_parent = hit_root_key(),
+        .bounds = bounds,
+        .clip = bounds,
+        .has_clip = 0,
+        .transform = transform_identity(),
+        .semantics_policy = semantics_policy,
+        .name = name,
+        .description = "",
+        .hit_testable = 0,
+        .focusable = 0,
+        .focus_order = 0,
+        .enabled = 1,
+        .z_order = 0,
+    };
+}
+
+fn canvas_resource_spec(local_id: i64, kind: RenderResourceKind,
+    payload: []u8, format_tag: i64) CanvasResourceSpec {
+    return CanvasResourceSpec{
+        .local_id = local_id,
+        .kind = kind,
+        .payload = payload,
+        .format_tag = format_tag,
+        .width = 0,
+        .height = 0,
+        .color_space = RenderColorSpace.none,
+    };
+}
+
+fn canvas_mix(hash: i64, value: i64) i64 {
+    let modulus: i64 = 2147483647;
+    let component: i64 = value % modulus;
+    if (component < 0) { component = component + modulus; }
+    return (hash * 131 + component) % modulus;
+}
+
+fn canvas_text_copy(text: []u8) ArrayList[u8] {
+    let owned: ArrayList[u8] = make[u8](text.len);
+    let i: i32 = 0;
+    while (i < text.len) {
+        push[u8](&owned, text[i]);
+        i = i + 1;
+    }
+    return owned;
+}
+
+fn canvas_text_hash(hash: i64, text: ArrayList[u8]) i64 {
+    let result: i64 = canvas_mix(hash, text.len as i64);
+    let i: i32 = 0;
+    while (i < text.len) {
+        result = canvas_mix(result, text.data[i] as i64);
+        i = i + 1;
+    }
+    return result;
+}
+
+fn canvas_text_has_zero(text: []u8) i32 {
+    let i: i32 = 0;
+    while (i < text.len) {
+        if (text[i] == 0) { return 1; }
+        i = i + 1;
+    }
+    return 0;
+}
+
+fn canvas_key_valid(key: NodeKey) i32 {
+    return (key.value > 0 && key.generation >= 0 &&
+        key.generation <= 2147483647) as i32;
+}
+
+fn canvas_parent_valid(key: NodeKey, root: NodeKey) i32 {
+    if (node_key_equal(key, root) == 1) { return 1; }
+    return canvas_key_valid(key);
+}
+
+fn canvas_limits_valid(limits: CanvasLimits) i32 {
+    return (limits.max_operations >= 0 &&
+        limits.max_operations <= canvas_hard_operation_limit() &&
+        limits.max_destination_operations >= 4 &&
+        limits.max_destination_operations <= canvas_hard_operation_limit() &&
+        limits.max_operations <= limits.max_destination_operations - 4 &&
+        limits.max_resources > 0 &&
+        limits.max_resources <= render_resource_hard_count_limit() &&
+        limits.max_total_resource_bytes > 0 &&
+        limits.max_total_resource_bytes <= render_resource_hard_total_limit() &&
+        limits.max_resource_bytes > 0 &&
+        limits.max_resource_bytes <= render_resource_hard_payload_limit() &&
+        limits.max_resource_bytes <= limits.max_total_resource_bytes) as i32;
+}
+
+fn canvas_clip_inside(bounds: Rect, clip: Rect) i32 {
+    return (clip.x >= bounds.x && clip.y >= bounds.y &&
+        clip.x + clip.width <= bounds.x + bounds.width &&
+        clip.y + clip.height <= bounds.y + bounds.height) as i32;
+}
+
+fn canvas_transform_point(transform: Transform, x: i64, y: i64) CanvasPoint {
+    return CanvasPoint{
+        .x = (transform.scale_x * x + transform.skew_x * y) / unit_scale() +
+            transform.translate_x,
+        .y = (transform.skew_y * x + transform.scale_y * y) / unit_scale() +
+            transform.translate_y,
+    };
+}
+
+fn canvas_min_i64(a: i64, b: i64) i64 {
+    if (a < b) { return a; }
+    return b;
+}
+
+fn canvas_max_i64(a: i64, b: i64) i64 {
+    if (a > b) { return a; }
+    return b;
+}
+
+fn canvas_transformed_rect(transform: Transform, value: Rect) Rect {
+    let p0: CanvasPoint = canvas_transform_point(transform, value.x, value.y);
+    let p1: CanvasPoint = canvas_transform_point(transform,
+        value.x + value.width, value.y);
+    let p2: CanvasPoint = canvas_transform_point(transform,
+        value.x, value.y + value.height);
+    let p3: CanvasPoint = canvas_transform_point(transform,
+        value.x + value.width, value.y + value.height);
+    let minimum_x: i64 = canvas_min_i64(canvas_min_i64(p0.x, p1.x),
+        canvas_min_i64(p2.x, p3.x));
+    let maximum_x: i64 = canvas_max_i64(canvas_max_i64(p0.x, p1.x),
+        canvas_max_i64(p2.x, p3.x));
+    let minimum_y: i64 = canvas_min_i64(canvas_min_i64(p0.y, p1.y),
+        canvas_min_i64(p2.y, p3.y));
+    let maximum_y: i64 = canvas_max_i64(canvas_max_i64(p0.y, p1.y),
+        canvas_max_i64(p2.y, p3.y));
+    return rect(minimum_x, minimum_y,
+        maximum_x - minimum_x, maximum_y - minimum_y);
+}
+
+fn canvas_spec_effective_clip(spec: CanvasSpec) Rect {
+    if (spec.has_clip != 0) { return spec.clip; }
+    return spec.bounds;
+}
+
+fn canvas_spec_world_bounds(spec: CanvasSpec) Rect {
+    return canvas_transformed_rect(spec.transform, canvas_spec_effective_clip(spec));
+}
+
+fn canvas_spec_validation(spec: CanvasSpec) CanvasError {
+    if (canvas_key_valid(spec.key) == 0 ||
+        canvas_parent_valid(spec.semantic_parent, semantic_root_key()) == 0 ||
+        canvas_parent_valid(spec.hit_parent, hit_root_key()) == 0) {
+        return CanvasError.invalid_key;
+    }
+    if (hit_geometry_valid(spec.bounds) == 0) { return CanvasError.invalid_bounds; }
+    if ((spec.has_clip != 0 && spec.has_clip != 1) ||
+        (spec.has_clip == 1 && (hit_geometry_valid(spec.clip) == 0 ||
+         canvas_clip_inside(spec.bounds, spec.clip) == 0))) {
+        return CanvasError.invalid_clip;
+    }
+    if (hit_transform_values_valid(spec.transform) == 0) {
+        return CanvasError.invalid_transform;
+    }
+    let determinant: i64 = spec.transform.scale_x * spec.transform.scale_y -
+        spec.transform.skew_x * spec.transform.skew_y;
+    if (determinant == 0) { return CanvasError.invalid_transform; }
+    let world: Rect = canvas_spec_world_bounds(spec);
+    if (world.width <= 0 || world.height <= 0 ||
+        world.x < 0 - unbounded_extent() || world.y < 0 - unbounded_extent() ||
+        world.x > unbounded_extent() - world.width ||
+        world.y > unbounded_extent() - world.height) {
+        return CanvasError.invalid_transform;
+    }
+    if (spec.hit_testable != 0 &&
+        (world.x < -1000000000 || world.y < -1000000000 ||
+         world.x + world.width > 1000000000 ||
+         world.y + world.height > 1000000000)) {
+        return CanvasError.invalid_transform;
+    }
+    if ((spec.hit_testable != 0 && spec.hit_testable != 1) ||
+        (spec.focusable != 0 && spec.focusable != 1) ||
+        (spec.enabled != 0 && spec.enabled != 1) ||
+        (spec.focusable == 1 && (spec.hit_testable == 0 || spec.focus_order <= 0)) ||
+        (spec.focusable == 0 && spec.focus_order != 0) ||
+        spec.focus_order < 0 || spec.z_order < -1000000000 ||
+        spec.z_order > 1000000000) {
+        return CanvasError.invalid_state;
+    }
+    let policy: i64 = spec.semantics_policy as i64;
+    if (policy < CanvasSemanticsPolicy.named_image as i64 ||
+        policy > CanvasSemanticsPolicy.decorative as i64 ||
+        spec.name.len > canvas_hard_name_limit() ||
+        spec.description.len > canvas_hard_description_limit() ||
+        canvas_text_has_zero(spec.name) != 0 ||
+        canvas_text_has_zero(spec.description) != 0 ||
+        semantic_text_input_valid(spec.name) == 0 ||
+        semantic_text_input_valid(spec.description) == 0) {
+        return CanvasError.invalid_semantics;
+    }
+    if (spec.semantics_policy == CanvasSemanticsPolicy.decorative) {
+        if (spec.name.len != 0 || spec.description.len != 0 ||
+            spec.hit_testable != 0 || spec.focusable != 0) {
+            return CanvasError.invalid_semantics;
+        }
+    } else if (spec.name.len == 0) {
+        return CanvasError.invalid_semantics;
+    }
+    return CanvasError.none;
+}
+
+fn canvas_owned_spec(canvas: Canvas) CanvasSpec {
+    return CanvasSpec{
+        .key = canvas.key,
+        .semantic_parent = canvas.semantic_parent,
+        .hit_parent = canvas.hit_parent,
+        .bounds = canvas.bounds,
+        .clip = canvas.clip,
+        .has_clip = canvas.has_clip,
+        .transform = canvas.transform,
+        .semantics_policy = canvas.semantics_policy,
+        .name = canvas.name.data[0..canvas.name.len],
+        .description = canvas.description.data[0..canvas.description.len],
+        .hit_testable = canvas.hit_testable,
+        .focusable = canvas.focusable,
+        .focus_order = canvas.focus_order,
+        .enabled = canvas.enabled,
+        .z_order = canvas.z_order,
+    };
+}
+
+fn canvas_clear_error(canvas: *Canvas) void {
+    canvas.*.last_error = CanvasError.none;
+    canvas.*.display_error = DisplayError.none;
+    canvas.*.resource_error = RenderResourceError.none;
+    canvas.*.semantics_error = SemanticsError.none;
+    canvas.*.hit_error = HitTreeError.none;
+    canvas.*.error_index = 0 - 1;
+    canvas.*.error_resource_id = 0;
+}
+
+fn canvas_fail(canvas: *Canvas, error: CanvasError) CanvasError {
+    canvas.*.last_error = error;
+    return error;
+}
+
+fn canvas_fail_display(canvas: *Canvas, error: DisplayError) CanvasError {
+    canvas.*.display_error = error;
+    canvas.*.error_index = canvas.*.display.error_index;
+    return canvas_fail(canvas, CanvasError.display_failure);
+}
+
+fn canvas_fail_resource(canvas: *Canvas, error: RenderResourceError,
+    resource_id: i64) CanvasError {
+    canvas.*.resource_error = error;
+    canvas.*.error_resource_id = resource_id;
+    return canvas_fail(canvas, CanvasError.resource_failure);
+}
+
+fn canvas_make(spec: CanvasSpec, limits: CanvasLimits) Canvas {
+    // Validate borrowed inputs before copying them. Invalid semantic metadata or
+    // limits must not turn a fail-closed constructor into an attacker-sized
+    // allocation.
+    let construction_error: CanvasError = CanvasError.none;
+    if (canvas_limits_valid(limits) == 0) {
+        construction_error = CanvasError.invalid_limits;
+    } else {
+        construction_error = canvas_spec_validation(spec);
+    }
+    let owned_name: ArrayList[u8] = canvas_text_copy("");
+    let owned_description: ArrayList[u8] = canvas_text_copy("");
+    if (construction_error == CanvasError.none) {
+        free[u8](&owned_name);
+        free[u8](&owned_description);
+        owned_name = canvas_text_copy(spec.name);
+        owned_description = canvas_text_copy(spec.description);
+    }
+    let canvas: Canvas = Canvas{
+        .key = spec.key,
+        .semantic_parent = spec.semantic_parent,
+        .hit_parent = spec.hit_parent,
+        .bounds = spec.bounds,
+        .clip = spec.clip,
+        .has_clip = spec.has_clip,
+        .transform = spec.transform,
+        .semantics_policy = spec.semantics_policy,
+        .name = owned_name,
+        .description = owned_description,
+        .hit_testable = spec.hit_testable,
+        .focusable = spec.focusable,
+        .focus_order = spec.focus_order,
+        .enabled = spec.enabled,
+        .z_order = spec.z_order,
+        .limits = limits,
+        .display = display_list_make_with_resource_limits(limits.max_resources,
+            limits.max_total_resource_bytes, limits.max_resource_bytes),
+        .sealed = 0,
+        .released = 0,
+        .revision = 0,
+        .content_hash = 0,
+        .last_error = CanvasError.none,
+        .display_error = DisplayError.none,
+        .resource_error = RenderResourceError.none,
+        .semantics_error = SemanticsError.none,
+        .hit_error = HitTreeError.none,
+        .error_index = 0 - 1,
+        .error_resource_id = 0,
+    };
+    canvas.last_error = construction_error;
+    return canvas;
+}
+
+fn canvas_configuration_error(canvas: Canvas) CanvasError {
+    if (canvas.released != 0) { return CanvasError.released; }
+    if (canvas_limits_valid(canvas.limits) == 0) { return CanvasError.invalid_limits; }
+    return canvas_spec_validation(canvas_owned_spec(canvas));
+}
+
+fn canvas_resource_id(key: NodeKey, local_id: i64) i64 {
+    if (canvas_key_valid(key) == 0 || local_id <= 0 ||
+        local_id > canvas_local_resource_id_limit()) { return 0; }
+    let hash: i64 = canvas_mix(17, key.value);
+    hash = canvas_mix(hash, key.generation);
+    hash = canvas_mix(hash, local_id);
+    return (hash % 2147483646) + 1;
+}
+
+fn canvas_add_resource(canvas: *Canvas, source: CanvasResourceSpec) CanvasError {
+    let configuration: CanvasError = canvas_configuration_error(canvas.*);
+    if (configuration != CanvasError.none) { return canvas_fail(canvas, configuration); }
+    if (canvas.*.sealed != 0 || canvas.*.display.sealed != 0) {
+        return canvas_fail(canvas, CanvasError.sealed);
+    }
+    let resource_id: i64 = canvas_resource_id(canvas.*.key, source.local_id);
+    if (resource_id <= 0) {
+        return canvas_fail(canvas, CanvasError.invalid_resource_id);
+    }
+    let spec: RenderResourceSpec = render_resource_spec(resource_id,
+        source.kind, source.payload, source.format_tag);
+    spec.width = source.width;
+    spec.height = source.height;
+    spec.color_space = source.color_space;
+    let error: RenderResourceError = display_list_add_resource(&canvas.*.display, spec);
+    if (error != RenderResourceError.none) {
+        return canvas_fail_resource(canvas, error, resource_id);
+    }
+    canvas_clear_error(canvas);
+    return CanvasError.none;
+}
+
+fn canvas_op(canvas: Canvas, kind: DisplayOpKind) DisplayOp {
+    return display_op(kind, canvas.key);
+}
+
+fn canvas_resource_op(canvas: Canvas, kind: DisplayOpKind,
+    local_resource_id: i64) DisplayOp {
+    let op: DisplayOp = canvas_op(canvas, kind);
+    op.resource_id = canvas_resource_id(canvas.key, local_resource_id);
+    return op;
+}
+
+fn canvas_push(canvas: *Canvas, op: DisplayOp) CanvasError {
+    let configuration: CanvasError = canvas_configuration_error(canvas.*);
+    if (configuration != CanvasError.none) { return canvas_fail(canvas, configuration); }
+    if (canvas.*.sealed != 0 || canvas.*.display.sealed != 0) {
+        return canvas_fail(canvas, CanvasError.sealed);
+    }
+    if (canvas.*.display.ops.len >= canvas.*.limits.max_operations) {
+        canvas.*.error_index = canvas.*.display.ops.len;
+        return canvas_fail(canvas, CanvasError.too_many_operations);
+    }
+    if (node_key_equal(op.owner, canvas.*.key) == 0) {
+        canvas.*.error_index = canvas.*.display.ops.len;
+        return canvas_fail(canvas, CanvasError.invalid_owner);
+    }
+    let error: DisplayError = display_list_push(&canvas.*.display, op);
+    if (error != DisplayError.none) { return canvas_fail_display(canvas, error); }
+    canvas_clear_error(canvas);
+    return CanvasError.none;
+}
+
+fn canvas_calculate_hash(canvas: Canvas) i64 {
+    let hash: i64 = canvas_mix(17, canvas.key.value);
+    hash = canvas_mix(hash, canvas.key.generation);
+    hash = canvas_mix(hash, canvas.semantic_parent.value);
+    hash = canvas_mix(hash, canvas.semantic_parent.generation);
+    hash = canvas_mix(hash, canvas.hit_parent.value);
+    hash = canvas_mix(hash, canvas.hit_parent.generation);
+    hash = canvas_mix(hash, canvas.bounds.x);
+    hash = canvas_mix(hash, canvas.bounds.y);
+    hash = canvas_mix(hash, canvas.bounds.width);
+    hash = canvas_mix(hash, canvas.bounds.height);
+    hash = canvas_mix(hash, canvas.clip.x);
+    hash = canvas_mix(hash, canvas.clip.y);
+    hash = canvas_mix(hash, canvas.clip.width);
+    hash = canvas_mix(hash, canvas.clip.height);
+    hash = canvas_mix(hash, canvas.has_clip as i64);
+    hash = canvas_mix(hash, canvas.transform.scale_x);
+    hash = canvas_mix(hash, canvas.transform.skew_x);
+    hash = canvas_mix(hash, canvas.transform.skew_y);
+    hash = canvas_mix(hash, canvas.transform.scale_y);
+    hash = canvas_mix(hash, canvas.transform.translate_x);
+    hash = canvas_mix(hash, canvas.transform.translate_y);
+    hash = canvas_mix(hash, canvas.semantics_policy as i64);
+    hash = canvas_text_hash(hash, canvas.name);
+    hash = canvas_text_hash(hash, canvas.description);
+    hash = canvas_mix(hash, canvas.hit_testable as i64);
+    hash = canvas_mix(hash, canvas.focusable as i64);
+    hash = canvas_mix(hash, canvas.focus_order);
+    hash = canvas_mix(hash, canvas.enabled as i64);
+    hash = canvas_mix(hash, canvas.z_order);
+    hash = canvas_mix(hash, canvas.limits.max_operations as i64);
+    hash = canvas_mix(hash, canvas.limits.max_resources as i64);
+    hash = canvas_mix(hash, canvas.limits.max_total_resource_bytes);
+    hash = canvas_mix(hash, canvas.limits.max_resource_bytes);
+    hash = canvas_mix(hash, canvas.limits.max_destination_operations as i64);
+    hash = canvas_mix(hash, canvas.display.content_hash);
+    return canvas_mix(hash, canvas.revision);
+}
+
+fn canvas_seal(canvas: *Canvas) CanvasError {
+    let configuration: CanvasError = canvas_configuration_error(canvas.*);
+    if (configuration != CanvasError.none) { return canvas_fail(canvas, configuration); }
+    if (canvas.*.sealed != 0) {
+        if (canvas_verify(canvas) == CanvasError.none) { return CanvasError.none; }
+        return canvas.*.last_error;
+    }
+    let error: DisplayError = display_list_seal(&canvas.*.display);
+    if (error != DisplayError.none) { return canvas_fail_display(canvas, error); }
+    canvas.*.sealed = 1;
+    canvas.*.revision = canvas.*.display.revision + 1;
+    canvas.*.content_hash = canvas_calculate_hash(canvas.*);
+    canvas_clear_error(canvas);
+    return CanvasError.none;
+}
+
+fn canvas_verify(canvas: *Canvas) CanvasError {
+    let configuration: CanvasError = canvas_configuration_error(canvas.*);
+    if (configuration != CanvasError.none) { return canvas_fail(canvas, configuration); }
+    if (canvas.*.sealed == 0 || canvas.*.display.sealed == 0) {
+        return canvas_fail(canvas, CanvasError.not_sealed);
+    }
+    if (canvas.*.display.ops.len > canvas.*.limits.max_operations ||
+        canvas.*.display.resources.resources.len > canvas.*.limits.max_resources ||
+        canvas.*.display.resources.total_bytes > canvas.*.limits.max_total_resource_bytes ||
+        canvas.*.revision != canvas.*.display.revision + 1) {
+        return canvas_fail(canvas, CanvasError.content_mutated);
+    }
+    let display_error: DisplayError = display_list_verify(canvas.*.display);
+    if (display_error != DisplayError.none) {
+        canvas.*.display_error = display_error;
+        return canvas_fail(canvas, CanvasError.content_mutated);
+    }
+    let i: i32 = 0;
+    while (i < canvas.*.display.ops.len) {
+        if (node_key_equal(canvas.*.display.ops.data[i].owner, canvas.*.key) == 0) {
+            canvas.*.error_index = i;
+            return canvas_fail(canvas, CanvasError.content_mutated);
+        }
+        i = i + 1;
+    }
+    if (canvas.*.content_hash != canvas_calculate_hash(canvas.*)) {
+        return canvas_fail(canvas, CanvasError.content_mutated);
+    }
+    canvas_clear_error(canvas);
+    return CanvasError.none;
+}
+
+fn canvas_replay_hash(canvas: *Canvas) i64 {
+    if (canvas_verify(canvas) != CanvasError.none) { return 0; }
+    return canvas.*.content_hash;
+}
+
+fn canvas_retained_spec(canvas: *Canvas) CanvasRetainedResult {
+    let fallback: ViewSpec = view_spec(canvas.*.key, canvas_render_kind(), 0);
+    let error: CanvasError = canvas_verify(canvas);
+    if (error != CanvasError.none) {
+        return CanvasRetainedResult{ .spec = fallback, .error = error };
+    }
+    return CanvasRetainedResult{
+        .spec = view_spec(canvas.*.key, canvas_render_kind(), canvas.*.content_hash),
+        .error = CanvasError.none,
+    };
+}
+
+fn canvas_effective_clip(canvas: Canvas) Rect {
+    if (canvas.has_clip != 0) { return canvas.clip; }
+    return canvas.bounds;
+}
+
+fn canvas_destination_preflight(canvas: Canvas,
+    destination: DisplayList) CanvasError {
+    if (destination.sealed != 0 || destination.resources.sealed != 0) {
+        return CanvasError.destination_sealed;
+    }
+    if (render_resource_store_configuration_valid(destination.resources) == 0 ||
+        destination.stack_depth < 0 || destination.layer_depth < 0) {
+        return CanvasError.destination_limit;
+    }
+    let contribution_operations: i32 = canvas.display.ops.len + 4;
+    if (destination.ops.len > canvas.limits.max_destination_operations -
+        contribution_operations) {
+        return CanvasError.destination_limit;
+    }
+    if (destination.resources.resources.len >
+        destination.resources.max_resources - canvas.display.resources.resources.len ||
+        canvas.display.resources.total_bytes >
+        destination.resources.max_total_bytes - destination.resources.total_bytes) {
+        return CanvasError.destination_limit;
+    }
+    let i: i32 = 0;
+    while (i < canvas.display.resources.resources.len) {
+        let resource: RenderResource = canvas.display.resources.resources.data[i];
+        if (render_resource_find_index(destination.resources, resource.id) >= 0) {
+            return CanvasError.resource_collision;
+        }
+        if (resource.payload.len as i64 > destination.resources.max_payload_bytes) {
+            return CanvasError.destination_limit;
+        }
+        i = i + 1;
+    }
+    return CanvasError.none;
+}
+
+fn canvas_copy_resource_to_display(resource: RenderResource,
+    destination: *DisplayList) RenderResourceError {
+    let spec: RenderResourceSpec = render_resource_spec(resource.id,
+        resource.kind, resource.payload.data[0..resource.payload.len],
+        resource.format_tag);
+    spec.width = resource.width;
+    spec.height = resource.height;
+    spec.color_space = resource.color_space;
+    return display_list_add_resource(destination, spec);
+}
+
+fn canvas_push_destination(canvas: *Canvas, destination: *DisplayList,
+    op: DisplayOp) CanvasError {
+    let error: DisplayError = display_list_push(destination, op);
+    if (error != DisplayError.none) {
+        canvas.*.display_error = error;
+        canvas.*.error_index = destination.*.error_index;
+        return canvas_fail(canvas, CanvasError.display_failure);
+    }
+    return CanvasError.none;
+}
+
+fn canvas_contribute_display(canvas: *Canvas,
+    destination: *DisplayList) CanvasError {
+    let verified: CanvasError = canvas_verify(canvas);
+    if (verified != CanvasError.none) { return verified; }
+    let preflight: CanvasError = canvas_destination_preflight(canvas.*, destination.*);
+    if (preflight != CanvasError.none) {
+        if (preflight == CanvasError.resource_collision) {
+            let i: i32 = 0;
+            while (i < canvas.*.display.resources.resources.len) {
+                let id: i64 = canvas.*.display.resources.resources.data[i].id;
+                if (render_resource_find_index(destination.*.resources, id) >= 0) {
+                    canvas.*.error_resource_id = id;
+                    break;
+                }
+                i = i + 1;
+            }
+        }
+        return canvas_fail(canvas, preflight);
+    }
+
+    let resource_index: i32 = 0;
+    while (resource_index < canvas.*.display.resources.resources.len) {
+        let resource: RenderResource =
+            canvas.*.display.resources.resources.data[resource_index];
+        let resource_error: RenderResourceError =
+            canvas_copy_resource_to_display(resource, destination);
+        if (resource_error != RenderResourceError.none) {
+            return canvas_fail_resource(canvas, resource_error, resource.id);
+        }
+        resource_index = resource_index + 1;
+    }
+
+    let save: DisplayOp = display_op(DisplayOpKind.save, canvas.*.key);
+    let result: CanvasError = canvas_push_destination(canvas, destination, save);
+    if (result != CanvasError.none) { return result; }
+    let transform: DisplayOp = display_op(DisplayOpKind.concat_transform, canvas.*.key);
+    transform.transform = canvas.*.transform;
+    result = canvas_push_destination(canvas, destination, transform);
+    if (result != CanvasError.none) { return result; }
+    let clip: DisplayOp = display_op(DisplayOpKind.clip_rect, canvas.*.key);
+    clip.bounds = canvas_effective_clip(canvas.*);
+    result = canvas_push_destination(canvas, destination, clip);
+    if (result != CanvasError.none) { return result; }
+
+    let operation_index: i32 = 0;
+    while (operation_index < canvas.*.display.ops.len) {
+        result = canvas_push_destination(canvas, destination,
+            canvas.*.display.ops.data[operation_index]);
+        if (result != CanvasError.none) { return result; }
+        operation_index = operation_index + 1;
+    }
+    let restore: DisplayOp = display_op(DisplayOpKind.restore, canvas.*.key);
+    result = canvas_push_destination(canvas, destination, restore);
+    if (result != CanvasError.none) { return result; }
+    canvas_clear_error(canvas);
+    return CanvasError.none;
+}
+
+fn canvas_semantic_role(policy: CanvasSemanticsPolicy) SemanticRole {
+    return switch (policy) {
+        .named_image => SemanticRole.image,
+        .named_group => SemanticRole.group,
+        .decorative => SemanticRole.group,
+    };
+}
+
+fn canvas_contribute_semantics(canvas: *Canvas,
+    tree: *SemanticsTree) CanvasError {
+    let verified: CanvasError = canvas_verify(canvas);
+    if (verified != CanvasError.none) { return verified; }
+    let spec: SemanticsSpec = semantics_spec(canvas.*.key,
+        canvas.*.semantic_parent, canvas_semantic_role(canvas.*.semantics_policy),
+        canvas.*.name.data[0..canvas.*.name.len]);
+    spec.description = canvas.*.description.data[0..canvas.*.description.len];
+    spec.has_bounds = 1;
+    spec.bounds = canvas_transformed_rect(canvas.*.transform,
+        canvas_effective_clip(canvas.*));
+    spec.disabled = (canvas.*.enabled == 0) as i32;
+    if (canvas.*.semantics_policy == CanvasSemanticsPolicy.decorative) {
+        spec.hidden = 1;
+    }
+    if (canvas.*.focusable != 0) {
+        spec.focus_order = canvas.*.focus_order;
+        if (canvas.*.enabled != 0) {
+            spec.action_mask = semantic_actions(SemanticAction.focus);
+        }
+    }
+    let error: SemanticsError = semantics_add(tree, spec);
+    if (error != SemanticsError.none) {
+        canvas.*.semantics_error = error;
+        return canvas_fail(canvas, CanvasError.semantics_failure);
+    }
+    canvas_clear_error(canvas);
+    return CanvasError.none;
+}
+
+fn canvas_hit_node(canvas: Canvas) HitNode {
+    let node: HitNode = hit_node(canvas.key, canvas.hit_parent, canvas.bounds);
+    node.has_clip = 1;
+    node.clip = canvas_effective_clip(canvas);
+    node.transform = canvas.transform;
+    node.z_order = canvas.z_order;
+    node.enabled = canvas.enabled;
+    node.focusable = canvas.focusable;
+    return node;
+}
+
+fn canvas_local_from_world(canvas: *Canvas, world_x: i64,
+    world_y: i64) CanvasLocalResult {
+    let verified: CanvasError = canvas_verify(canvas);
+    if (verified != CanvasError.none) {
+        return CanvasLocalResult{ .found = 0, .x = 0, .y = 0, .error = verified };
+    }
+    if (canvas.*.hit_testable == 0 || canvas.*.enabled == 0) {
+        canvas_fail(canvas, CanvasError.not_interactive);
+        return CanvasLocalResult{ .found = 0, .x = 0, .y = 0,
+            .error = CanvasError.not_interactive };
+    }
+    let node: HitNode = canvas_hit_node(canvas.*);
+    let hit: HitResult = hit_node_local(node, world_x, world_y);
+    if (hit.found == 0 || rect_contains(node.bounds, hit.local_x, hit.local_y) == 0 ||
+        rect_contains(node.clip, hit.local_x, hit.local_y) == 0) {
+        canvas_clear_error(canvas);
+        return CanvasLocalResult{ .found = 0, .x = 0, .y = 0,
+            .error = CanvasError.none };
+    }
+    canvas_clear_error(canvas);
+    return CanvasLocalResult{ .found = 1, .x = hit.local_x,
+        .y = hit.local_y, .error = CanvasError.none };
+}
+
+fn canvas_contribute_hit(canvas: *Canvas, tree: *HitTree) CanvasError {
+    let verified: CanvasError = canvas_verify(canvas);
+    if (verified != CanvasError.none) { return verified; }
+    if (canvas.*.hit_testable == 0) {
+        return canvas_fail(canvas, CanvasError.not_interactive);
+    }
+    let error: HitTreeError = hit_tree_add(tree, canvas_hit_node(canvas.*));
+    if (error != HitTreeError.none) {
+        canvas.*.hit_error = error;
+        return canvas_fail(canvas, CanvasError.hit_failure);
+    }
+    canvas_clear_error(canvas);
+    return CanvasError.none;
+}
+
+fn canvas_free(canvas: *Canvas) CanvasError {
+    if (canvas.*.released != 0) {
+        canvas.*.last_error = CanvasError.released;
+        return CanvasError.released;
+    }
+    display_list_free(&canvas.*.display);
+    free[u8](&canvas.*.name);
+    free[u8](&canvas.*.description);
+    canvas.*.released = 1;
+    canvas.*.sealed = 0;
+    canvas.*.content_hash = 0;
+    canvas.*.last_error = CanvasError.none;
+    return CanvasError.none;
+}

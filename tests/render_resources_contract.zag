@@ -1,0 +1,142 @@
+@import("../src/render/resources.zag")
+
+struct TestState { passed: i32, failed: i32 }
+
+fn expect(state: *TestState, condition: i32, name: []u8) void {
+    if (condition != 0) {
+        state.*.passed = state.*.passed + 1;
+        _zag_print("ok  "); _zag_println(name);
+    } else {
+        state.*.failed = state.*.failed + 1;
+        _zag_print("FAIL "); _zag_println(name);
+    }
+}
+
+fn ownership_contract(state: *TestState) void {
+    let store: RenderResourceStore = render_resource_store_make(8, 128, 64);
+    let path: RenderResourceSpec = render_resource_spec(20, RenderResourceKind.path, "PATH-A", 1);
+    let image: RenderResourceSpec = render_resource_spec(10, RenderResourceKind.image, "RGBA", 2);
+    image.width = 1; image.height = 1; image.color_space = RenderColorSpace.srgb;
+    expect(state, render_resource_add(&store, path) == RenderResourceError.none &&
+        render_resource_add(&store, image) == RenderResourceError.none,
+        "resource store accepts valid typed payloads with explicit metadata");
+    expect(state, store.resources.len == 2 && store.resources.data[0].id == 10 &&
+        store.resources.data[1].id == 20 && store.total_bytes == 10,
+        "owned resources are kept in canonical stable-ID order with exact byte accounting");
+    expect(state, store.resources.data[1].payload.len == 6 &&
+        store.resources.data[1].payload.data[5] == 65,
+        "resource payload bytes are copied into store ownership");
+    expect(state, render_resource_find_index(store, 10) == 0 &&
+        render_resource_find_index(store, 20) == 1 &&
+        render_resource_find_index(store, 99) < 0,
+        "binary lookup resolves exact IDs without fabricating missing resources");
+
+    let before_hash: i64 = store.content_hash;
+    let replacement: RenderResourceSpec = render_resource_spec(20, RenderResourceKind.path, "PATH-BB", 1);
+    replacement.revision = 1;
+    expect(state, render_resource_replace(&store, replacement) == RenderResourceError.none &&
+        store.resources.data[1].revision == 1 && store.total_bytes == 11 &&
+        store.content_hash != before_hash,
+        "revisioned replacement preserves identity and updates owned bytes and content truth");
+    let stale: RenderResourceSpec = replacement; stale.revision = 1;
+    expect(state, render_resource_replace(&store, stale) == RenderResourceError.revision_conflict &&
+        store.resources.data[1].payload.len == 7,
+        "stale replacement fails before payload mutation");
+    let wrong_kind: RenderResourceSpec = render_resource_spec(20, RenderResourceKind.svg_source, "<svg/>", 3);
+    wrong_kind.revision = 2;
+    expect(state, render_resource_replace(&store, wrong_kind) == RenderResourceError.kind_mismatch,
+        "resource identity cannot silently change kind during replacement");
+
+    expect(state, render_resource_store_seal(&store) == RenderResourceError.none &&
+        render_resource_store_verify(store) == RenderResourceError.none,
+        "sealed resource stores verify complete owned content identity");
+    expect(state, render_resource_add(&store, render_resource_spec(30,
+        RenderResourceKind.effect, "FX", 1)) == RenderResourceError.sealed,
+        "sealed resource stores reject further mutation");
+    store.resources.data[0].payload.data[0] = store.resources.data[0].payload.data[0] + 1;
+    expect(state, render_resource_store_verify(store) == RenderResourceError.content_mutated,
+        "out-of-contract payload mutation is detected before rendering");
+    render_resource_store_free(&store);
+}
+
+fn canonical_contract(state: *TestState) void {
+    let forward: RenderResourceStore = render_resource_store_make(4, 64, 32);
+    let reverse: RenderResourceStore = render_resource_store_make(4, 64, 32);
+    let one: RenderResourceSpec = render_resource_spec(1, RenderResourceKind.svg_source, "<svg/>", 10);
+    let two: RenderResourceSpec = render_resource_spec(2, RenderResourceKind.png_source, "PNG", 11);
+    _ = render_resource_add(&forward, one); _ = render_resource_add(&forward, two);
+    _ = render_resource_add(&reverse, two); _ = render_resource_add(&reverse, one);
+    expect(state, forward.content_hash == reverse.content_hash &&
+        forward.resources.data[0].id == reverse.resources.data[0].id,
+        "insertion order cannot change canonical resource identity");
+    _ = render_resource_store_seal(&forward); _ = render_resource_store_seal(&reverse);
+    expect(state, render_resource_store_verify(forward) == RenderResourceError.none &&
+        render_resource_store_verify(reverse) == RenderResourceError.none,
+        "canonical stores remain independently verifiable after sealing");
+    render_resource_store_free(&reverse); render_resource_store_free(&forward);
+}
+
+fn failure_contract(state: *TestState) void {
+    let invalid: RenderResourceStore = render_resource_store_make(0, 8, 8);
+    expect(state, render_resource_add(&invalid, render_resource_spec(1,
+        RenderResourceKind.path, "A", 1)) == RenderResourceError.invalid_configuration,
+        "invalid allocation policy fails before payload ownership");
+    render_resource_store_free(&invalid);
+
+    let store: RenderResourceStore = render_resource_store_make(2, 7, 4);
+    expect(state, render_resource_add(&store, render_resource_spec(0,
+        RenderResourceKind.path, "A", 1)) == RenderResourceError.invalid_id,
+        "nonpositive resource IDs fail visibly");
+    expect(state, render_resource_add(&store, render_resource_spec(1,
+        RenderResourceKind.path, "", 1)) == RenderResourceError.invalid_payload,
+        "empty resource payloads cannot claim an asset");
+    let late_revision: RenderResourceSpec = render_resource_spec(1,
+        RenderResourceKind.path, "A", 1);
+    late_revision.revision = 4;
+    expect(state, render_resource_add(&store, late_revision) == RenderResourceError.revision_conflict,
+        "new resource IDs must begin at canonical revision zero");
+    let bad_image: RenderResourceSpec = render_resource_spec(1,
+        RenderResourceKind.image, "RGBA", 2);
+    expect(state, render_resource_add(&store, bad_image) == RenderResourceError.invalid_metadata,
+        "decoded images require dimensions and color-space truth");
+    expect(state, render_resource_add(&store, render_resource_spec(1,
+        RenderResourceKind.path, "12345", 1)) == RenderResourceError.payload_limit,
+        "per-resource byte ceilings fail before copying payloads");
+    _ = render_resource_add(&store, render_resource_spec(1,
+        RenderResourceKind.path, "1234", 1));
+    expect(state, render_resource_add(&store, render_resource_spec(1,
+        RenderResourceKind.path, "12", 1)) == RenderResourceError.duplicate_id,
+        "duplicate stable resource IDs fail before ownership changes");
+    expect(state, render_resource_add(&store, render_resource_spec(2,
+        RenderResourceKind.effect, "1234", 1)) == RenderResourceError.total_limit &&
+        store.resources.len == 1 && store.total_bytes == 4,
+        "total byte ceilings are transactional and preserve prior resources");
+    expect(state, render_resource_replace(&store, render_resource_spec(9,
+        RenderResourceKind.path, "A", 1)) == RenderResourceError.missing_resource,
+        "replacement of a missing ID fails without becoming insertion");
+    expect(state, render_resource_store_verify(store) == RenderResourceError.not_sealed,
+        "unsealed stores cannot masquerade as immutable render evidence");
+    render_resource_store_free(&store);
+
+    let count_limited: RenderResourceStore = render_resource_store_make(1, 8, 4);
+    _ = render_resource_add(&count_limited, render_resource_spec(1,
+        RenderResourceKind.path, "A", 1));
+    expect(state, render_resource_add(&count_limited, render_resource_spec(2,
+        RenderResourceKind.effect, "B", 1)) == RenderResourceError.too_many_resources,
+        "resource-count ceilings fail before allocating a second payload");
+    render_resource_store_free(&count_limited);
+}
+
+fn main() i32 {
+    let state: TestState = TestState{ .passed = 0, .failed = 0 };
+    ownership_contract(&state);
+    canonical_contract(&state);
+    failure_contract(&state);
+    let passed_text: []u8 = _zag_i64_to_str(state.passed as i64);
+    let failed_text: []u8 = _zag_i64_to_str(state.failed as i64);
+    _zag_print("Render resources contract: pass="); _zag_print(passed_text);
+    _zag_print(" fail="); _zag_println(failed_text);
+    _zag_str_free(passed_text); _zag_str_free(failed_text);
+    if (state.failed == 0) { return 0; }
+    return 1;
+}

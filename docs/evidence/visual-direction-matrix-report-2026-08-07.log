@@ -1,0 +1,5 @@
+No artifact existence check requested.
+expected_total_artifacts=100800
+artifact_root=artifacts/visual-direction
+direction_count=3 scene_count=10 locale_count=7
+visual direction comparison matrix document exists and includes recommendation placeholder

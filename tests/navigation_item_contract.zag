@@ -1,0 +1,354 @@
+@import("../src/components/navigation_item.zag")
+@import("../src/automation/talkback.zag")
+
+struct TestState { passed: i32, failed: i32 }
+
+fn expect(state: *TestState, condition: i32, name: []u8) void {
+    if (condition != 0) {
+        state.*.passed = state.*.passed + 1;
+        _zag_print("ok  "); _zag_println(name);
+    } else {
+        state.*.failed = state.*.failed + 1;
+        _zag_print("FAIL "); _zag_println(name);
+    }
+}
+
+fn make_navigation_item(id: i64,
+    canonical: ButtonCanonicalState) NavigationItemSpec {
+    let spec: NavigationItemSpec = navigation_item_spec(node_key(id),
+        hit_root_key(), rect(20 * unit_scale(),
+            (20 + (id - 100) * 52) * unit_scale(),
+            188 * unit_scale(), 44 * unit_scale()), "Components");
+    spec.description = "Opens the component catalog";
+    spec.focus_order = id - 99;
+    spec.z_order = id;
+    spec.set_size = 8;
+    spec.position_in_set = ((id - 100) % 8) + 1;
+    spec.interaction = navigation_item_canonical_state(canonical);
+    return spec;
+}
+
+fn reducer_contract(state: *TestState) void {
+    let initial: ButtonInteraction = button_interaction();
+    let entered: ButtonTransition = navigation_item_reduce(initial,
+        ButtonEvent.pointer_enter);
+    let pressed: ButtonTransition = navigation_item_reduce(entered.interaction,
+        ButtonEvent.pointer_down);
+    let activated: ButtonTransition = navigation_item_reduce(pressed.interaction,
+        ButtonEvent.pointer_up_inside);
+    let direct: ButtonTransition = button_reduce(pressed.interaction,
+        ButtonEvent.pointer_up_inside);
+    expect(state, entered.interaction.hovered == 1 &&
+        pressed.interaction.pressed == 1 && activated.activate == 1 &&
+        button_interaction_equal(activated.interaction, direct.interaction) != 0,
+        "NavigationItem delegates interaction and activation to the canonical Button reducer");
+    let loading: ButtonTransition = navigation_item_reduce(pressed.interaction,
+        ButtonEvent.begin_loading);
+    let ignored: ButtonTransition = navigation_item_reduce(loading.interaction,
+        ButtonEvent.pointer_down);
+    expect(state, loading.interaction.loading == 1 &&
+        loading.interaction.pressed == 0 && ignored.interaction.pressed == 0,
+        "loading precedence remains identical to Button and rejects new presses");
+}
+
+fn minimum_and_content_contract(state: *TestState) void {
+    let exact: NavigationItemSpec = navigation_item_spec(node_key(80),
+        hit_root_key(), rect(0, 0, 44 * unit_scale(), 44 * unit_scale()), "A");
+    expect(state, navigation_item_minimum_target() == 44 * unit_scale() &&
+        navigation_item_spec_valid(exact) != 0,
+        "NavigationItem retains an exact 44 logical-pixel minimum target");
+    let too_short: NavigationItemSpec = exact;
+    too_short.bounds.height = 43 * unit_scale();
+    expect(state, navigation_item_spec_valid(too_short) == 0,
+        "sub-44-pixel targets fail before retained tree mutation");
+    let standard: NavigationItemSpec = make_navigation_item(100,
+        ButtonCanonicalState.rest);
+    let content: Rect = navigation_item_label_bounds(standard);
+    let loading: NavigationItemSpec = make_navigation_item(100,
+        ButtonCanonicalState.loading);
+    let loading_content: Rect = navigation_item_label_bounds(loading);
+    let style: NavigationItemResolvedStyle = navigation_item_style(standard);
+    expect(state, content.x == standard.bounds.x + 16 * unit_scale() &&
+        content.y == standard.bounds.y + 8 * unit_scale() &&
+        content.width == standard.bounds.width - 32 * unit_scale() &&
+        loading_content.width == standard.bounds.width - 56 * unit_scale() &&
+        loading_content.x + loading_content.width + 8 * unit_scale() ==
+            standard.bounds.x + standard.bounds.width - 32 * unit_scale() &&
+        style.label_color_token == SemanticColorToken.text_primary,
+        "label content exposes exact Flex spacing and a semantic Text color token");
+}
+
+fn state_matrix_contract(state: *TestState) void {
+    let display: DisplayList = display_list_make();
+    let hits: HitTree = hit_tree_make();
+    let semantics: SemanticsTree = semantics_tree_make();
+    let aggregate_hash: i64 = 17;
+    let previous_hash: i64 = 0;
+    let index: i32 = 0;
+    while (index < 8) {
+        let spec: NavigationItemSpec = make_navigation_item(100 + index,
+            index as ButtonCanonicalState);
+        let built: NavigationItemBuildResult = navigation_item_emit(spec,
+            &display, &hits, &semantics);
+        expect(state, built.error == NavigationItemBuildError.none &&
+            built.artifact.id.value == 100 + index &&
+            built.artifact.hit_node_index == index &&
+            built.artifact.semantics_node_index == index,
+            "each canonical NavigationItem fixture shares one stable retained identity");
+        let op_index: i32 = built.artifact.display_op_start;
+        let owners_match: i32 = 1;
+        while (op_index < built.artifact.display_op_end) {
+            if (node_key_equal(display.ops.data[op_index].owner, spec.id) == 0) {
+                owners_match = 0;
+            }
+            op_index = op_index + 1;
+        }
+        expect(state, owners_match != 0 &&
+            node_key_equal(hits.nodes.data[index].id, spec.id) != 0 &&
+            node_key_equal(semantics.nodes.data[index].id, spec.id) != 0,
+            "display hit and semantic artifacts use the exact same NodeKey");
+        expect(state, semantics.nodes.data[index].role == SemanticRole.tab &&
+            semantics.nodes.data[index].set_size == 8 &&
+            semantics.nodes.data[index].position_in_set == index + 1 &&
+            semantics.nodes.data[index].focus_order == index + 1,
+            "tab role focus order and set position are executable semantic truth");
+        expect(state, built.artifact.evidence_hash != 0 &&
+            (index == 0 || built.artifact.evidence_hash != previous_hash),
+            "each canonical state contributes distinct deterministic component evidence");
+        previous_hash = built.artifact.evidence_hash;
+        aggregate_hash = navigation_item_hash_mix(aggregate_hash,
+            built.artifact.evidence_hash);
+        index = index + 1;
+    }
+    expect(state, display.ops.len > 8 && hits.nodes.len == 8 &&
+        semantics.nodes.len == 8 && aggregate_hash != 0,
+        "all eight state fixtures contribute complete deterministic retained evidence");
+
+    let focus: SemanticsNode = semantics.nodes.data[2];
+    let selected: SemanticsNode = semantics.nodes.data[4];
+    let disabled: SemanticsNode = semantics.nodes.data[5];
+    let loading: SemanticsNode = semantics.nodes.data[6];
+    let error: SemanticsNode = semantics.nodes.data[7];
+    expect(state, semantic_actions_has(focus.action_mask,
+            SemanticAction.activate) != 0 &&
+        semantic_actions_has(focus.action_mask, SemanticAction.select) != 0 &&
+        semantic_actions_has(focus.action_mask, SemanticAction.focus) != 0,
+        "enabled tabs expose activate select and focus actions");
+    expect(state, selected.selected == 1 &&
+        semantic_text_equal(selected.value, "Selected") != 0,
+        "selected NavigationItem state is semantic and textual, not fill color alone");
+    expect(state, disabled.disabled == 1 && disabled.action_mask == 0 &&
+        hits.nodes.data[5].enabled == 0 && hits.nodes.data[5].focusable == 0,
+        "disabled state agrees across semantics actions focus and hit testing");
+    expect(state, loading.disabled == 1 && loading.action_mask == 0 &&
+        semantic_text_equal(loading.value, "Loading") != 0,
+        "loading stays discoverable while its navigation action fails closed");
+    expect(state, error.disabled == 0 &&
+        semantic_actions_has(error.action_mask, SemanticAction.activate) != 0,
+        "error state remains actionable");
+    expect(state, semantic_text_equal(error.value, "Error") != 0,
+        "error state exposes a non-color semantic value");
+
+    let focus_style: NavigationItemResolvedStyle = navigation_item_style(
+        make_navigation_item(120, ButtonCanonicalState.focus));
+    let selected_style: NavigationItemResolvedStyle = navigation_item_style(
+        make_navigation_item(121, ButtonCanonicalState.selected));
+    let error_style: NavigationItemResolvedStyle = navigation_item_style(
+        make_navigation_item(122, ButtonCanonicalState.error));
+    expect(state, focus_style.focus_token == SemanticColorToken.focus &&
+        selected_style.marker_token == SemanticColorToken.accent &&
+        error_style.status_token == SemanticColorToken.status_error,
+        "state visuals route through named focus marker and error tokens");
+
+    let found: HitResult = hit_test(hits, 30 * unit_scale(),
+        30 * unit_scale());
+    expect(state, found.found != 0 && found.id.value == 100,
+        "pointer routing resolves the same stable tab ID");
+    expect(state, display_list_seal(&display) == DisplayError.none &&
+        display_list_verify(display) == DisplayError.none,
+        "NavigationItem chrome seals as an immutable verified DisplayList");
+
+    let session: TalkbackSession = talkback_session_make(talkback_capabilities());
+    let viewport: Rect = rect(0, 0, 400 * unit_scale(), 500 * unit_scale());
+    let query: TalkbackResponse = talkback_dispatch(&session, semantics,
+        viewport, talkback_request(1, TalkbackCommand.query, node_key(104),
+            semantics.revision));
+    let click: TalkbackResponse = talkback_dispatch(&session, semantics,
+        viewport, talkback_request(2, TalkbackCommand.click, node_key(100),
+            semantics.revision));
+    let disabled_query: TalkbackResponse = talkback_dispatch(&session, semantics,
+        viewport, talkback_request(3, TalkbackCommand.query, node_key(105),
+            semantics.revision));
+    let disabled_click: TalkbackResponse = talkback_dispatch(&session, semantics,
+        viewport, talkback_request(4, TalkbackCommand.click, node_key(105),
+            semantics.revision));
+    expect(state, query.status == TalkbackStatus.accepted &&
+        query.resolved_role == SemanticRole.tab && (query.state_flags & 2) != 0,
+        "Talkback queries selected tab truth by stable ID without pixels");
+    expect(state, click.status == TalkbackStatus.accepted &&
+        click.emitted_action == 1,
+        "Talkback activates an enabled NavigationItem through its semantic ID");
+    expect(state, disabled_query.status == TalkbackStatus.accepted &&
+        (disabled_query.state_flags & 1) != 0 &&
+        disabled_click.status == TalkbackStatus.action_unavailable &&
+        disabled_click.emitted_action == 0,
+        "Talkback discovers disabled tabs while observing fail-closed action truth");
+
+    talkback_session_free(&session);
+    semantics_tree_free(&semantics);
+    hit_tree_free(&hits);
+    display_list_free(&display);
+}
+
+fn visible_treatment_contract(state: *TestState) void {
+    let display: DisplayList = display_list_make();
+    let hits: HitTree = hit_tree_make();
+    let semantics: SemanticsTree = semantics_tree_make();
+    let focus: NavigationItemBuildResult = navigation_item_emit(
+        make_navigation_item(140, ButtonCanonicalState.focus),
+        &display, &hits, &semantics);
+    let selected: NavigationItemBuildResult = navigation_item_emit(
+        make_navigation_item(141, ButtonCanonicalState.selected),
+        &display, &hits, &semantics);
+    let loading: NavigationItemBuildResult = navigation_item_emit(
+        make_navigation_item(142, ButtonCanonicalState.loading),
+        &display, &hits, &semantics);
+    let error: NavigationItemBuildResult = navigation_item_emit(
+        make_navigation_item(143, ButtonCanonicalState.error),
+        &display, &hits, &semantics);
+    expect(state, focus.artifact.focus_ring_visible == 1 &&
+        focus.artifact.display_op_end > focus.artifact.display_op_start &&
+        display.ops.data[focus.artifact.display_op_start].bounds.width ==
+            focus.artifact.bounds.width + 6 * unit_scale(),
+        "focus produces a retained ring outside the fill treatment");
+    expect(state, selected.artifact.selected_marker_visible == 1 &&
+        selected.artifact.display_op_end - selected.artifact.display_op_start >= 3 &&
+        display.ops.data[selected.artifact.display_op_end - 1].bounds.width ==
+            4 * unit_scale() &&
+        display.ops.data[selected.artifact.display_op_end - 1].bounds.height ==
+            24 * unit_scale(),
+        "selection produces a persistent geometric marker");
+    expect(state, loading.artifact.loading_treatment_visible == 1 &&
+        loading.artifact.display_op_end - loading.artifact.display_op_start >= 4 &&
+        display.ops.data[loading.artifact.display_op_end - 2].bounds.width ==
+            16 * unit_scale() &&
+        display.ops.data[loading.artifact.display_op_end - 1].bounds.width ==
+            8 * unit_scale(),
+        "loading produces a two-part progress rail rather than a color-only fill");
+    expect(state, error.artifact.error_treatment_visible == 1 &&
+        error.artifact.display_op_end - error.artifact.display_op_start >= 5 &&
+        display.ops.data[error.artifact.display_op_end - 3].bounds.width ==
+            14 * unit_scale() &&
+        display.ops.data[error.artifact.display_op_end - 2].bounds.width ==
+            2 * unit_scale(),
+        "error produces a shaped exclamation badge in addition to the error color");
+    expect(state, focus.artifact.label_type_token == SemanticTypeToken.label &&
+        focus.artifact.label_color_token == SemanticColorToken.text_primary &&
+        focus.artifact.label_content_bounds.width > 0,
+        "artifacts return exact type color and bounds for first-party Text composition");
+    semantics_tree_free(&semantics);
+    hit_tree_free(&hits);
+    display_list_free(&display);
+}
+
+fn deterministic_hash_contract(state: *TestState) void {
+    let display_a: DisplayList = display_list_make();
+    let hits_a: HitTree = hit_tree_make();
+    let semantics_a: SemanticsTree = semantics_tree_make();
+    let display_b: DisplayList = display_list_make();
+    let hits_b: HitTree = hit_tree_make();
+    let semantics_b: SemanticsTree = semantics_tree_make();
+    let spec: NavigationItemSpec = make_navigation_item(160,
+        ButtonCanonicalState.selected);
+    let first: NavigationItemBuildResult = navigation_item_emit(spec,
+        &display_a, &hits_a, &semantics_a);
+    let second: NavigationItemBuildResult = navigation_item_emit(spec,
+        &display_b, &hits_b, &semantics_b);
+    expect(state, first.error == NavigationItemBuildError.none &&
+        second.error == NavigationItemBuildError.none &&
+        first.artifact.evidence_hash != 0 &&
+        first.artifact.evidence_hash == -3727622835224814674 &&
+        first.artifact.evidence_hash == second.artifact.evidence_hash &&
+        display_a.content_hash == display_b.content_hash &&
+        talkback_tree_hash(semantics_a) == talkback_tree_hash(semantics_b),
+        "identical NavigationItem inputs produce identical component display and semantic evidence");
+    semantics_tree_free(&semantics_b); hit_tree_free(&hits_b);
+    display_list_free(&display_b);
+    semantics_tree_free(&semantics_a); hit_tree_free(&hits_a);
+    display_list_free(&display_a);
+}
+
+fn atomicity_contract(state: *TestState) void {
+    let display: DisplayList = display_list_make();
+    let hits: HitTree = hit_tree_make();
+    let semantics: SemanticsTree = semantics_tree_make();
+    let first: NavigationItemBuildResult = navigation_item_emit(
+        make_navigation_item(180, ButtonCanonicalState.rest),
+        &display, &hits, &semantics);
+    let op_count: i32 = display.ops.len;
+    let display_hash: i64 = display.content_hash;
+    let hit_count: i32 = hits.nodes.len;
+    let semantic_count: i32 = semantics.nodes.len;
+    let duplicate: NavigationItemBuildResult = navigation_item_emit(
+        make_navigation_item(180, ButtonCanonicalState.hover),
+        &display, &hits, &semantics);
+    expect(state, first.error == NavigationItemBuildError.none &&
+        duplicate.error == NavigationItemBuildError.hit_error &&
+        duplicate.hit_error == HitTreeError.duplicate_id,
+        "duplicate stable IDs fail visibly at the retained hit tree");
+    expect(state, display.ops.len == op_count &&
+        display.content_hash == display_hash && hits.nodes.len == hit_count &&
+        semantics.nodes.len == semantic_count,
+        "hit failure atomically restores display hit and semantic builders");
+
+    let colliding: NavigationItemSpec = make_navigation_item(181,
+        ButtonCanonicalState.selected);
+    colliding.focus_order = 81;
+    colliding.position_in_set = 2;
+    let collision: NavigationItemBuildResult = navigation_item_emit(colliding,
+        &display, &hits, &semantics);
+    expect(state, collision.error == NavigationItemBuildError.semantics_error &&
+        collision.semantics_error == SemanticsError.duplicate_focus_order,
+        "semantic focus collisions remain structured component errors");
+    expect(state, display.ops.len == op_count && hits.nodes.len == hit_count &&
+        semantics.nodes.len == semantic_count,
+        "semantic failure also restores all retained builders");
+
+    let invalid: NavigationItemSpec = make_navigation_item(182,
+        ButtonCanonicalState.rest);
+    invalid.set_size = 0;
+    invalid.position_in_set = 0;
+    expect(state, navigation_item_emit(invalid, &display, &hits,
+            &semantics).error == NavigationItemBuildError.invalid_spec &&
+        display.ops.len == op_count,
+        "invalid set metadata fails before any retained mutation");
+
+    _ = display_list_seal(&display);
+    let sealed: NavigationItemBuildResult = navigation_item_emit(
+        make_navigation_item(183, ButtonCanonicalState.rest),
+        &display, &hits, &semantics);
+    expect(state, sealed.error == NavigationItemBuildError.display_error &&
+        sealed.display_error == DisplayError.sealed &&
+        display.ops.len == op_count && hits.nodes.len == hit_count &&
+        semantics.nodes.len == semantic_count,
+        "sealed display failure leaves every destination unchanged");
+    semantics_tree_free(&semantics);
+    hit_tree_free(&hits);
+    display_list_free(&display);
+}
+
+fn main() i32 {
+    let state: TestState = TestState{ .passed = 0, .failed = 0 };
+    reducer_contract(&state);
+    minimum_and_content_contract(&state);
+    state_matrix_contract(&state);
+    visible_treatment_contract(&state);
+    deterministic_hash_contract(&state);
+    atomicity_contract(&state);
+    _zag_print("NavigationItem contract: pass=");
+    _zag_print_i64(state.passed as i64);
+    _zag_print(" fail="); _zag_print_i64(state.failed as i64);
+    _zag_println("");
+    if (state.failed == 0) { return 0; }
+    return 1;
+}

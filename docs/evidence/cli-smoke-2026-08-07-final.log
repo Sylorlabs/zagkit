@@ -1,0 +1,10 @@
+zagkit-cli-smoke: using temporary workspace /tmp/zagkit-cli-smoke.aKESiy
+zagkit-cli-smoke: scaffolding a sample project
+zagkit: initialized project scaffold at /tmp/zagkit-cli-smoke.aKESiy/project
+zagkit: use `./zagkit build` from that project root for current headless reference tooling
+zagkit-cli-smoke: checking command help output
+zagkit-cli-smoke: building headless reference binary
+zagkit-cli-smoke: running headless reference command
+zagkit-cli-smoke: building sample project
+zagkit-cli-smoke: running sample project with project path
+zagkit-cli-smoke: PASS (build, run, run output)

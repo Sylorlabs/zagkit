@@ -1,0 +1,146 @@
+@import("../src/showcase/linux_preview_layout.zag")
+
+struct TestState { passed: i32, failed: i32 }
+
+fn expect(state: *TestState, condition: i32, name: []u8) void {
+    if (condition != 0) {
+        state.*.passed = state.*.passed + 1;
+        _zag_print("ok  "); _zag_println(name);
+    } else {
+        state.*.failed = state.*.failed + 1;
+        _zag_print("FAIL  "); _zag_println(name);
+    }
+}
+
+fn inside(outer: Rect, inner: Rect) i32 {
+    return (inner.width > 0 && inner.height > 0 &&
+        inner.x >= outer.x && inner.y >= outer.y &&
+        inner.x + inner.width <= outer.x + outer.width &&
+        inner.y + inner.height <= outer.y + outer.height) as i32;
+}
+
+fn target_is_accessible(bounds: Rect) i32 {
+    return (bounds.width >= 44 * unit_scale() &&
+        bounds.height >= 44 * unit_scale()) as i32;
+}
+
+fn main() i32 {
+    let state: TestState = TestState{ .passed = 0, .failed = 0 };
+    let expanded: LinuxPreviewLayout = linux_preview_layout(1360, 900);
+    expect(&state, expanded.error == LinuxPreviewLayoutError.none &&
+        expanded.mode == LinuxPreviewLayoutMode.expanded &&
+        expanded.status_visible == 1 && expanded.navigation_is_column == 1,
+        "expanded placement has one navigation column and a status-only rail");
+    expect(&state, expanded.chart_visible == 1 &&
+        expanded.segmented_control_visible == 1 &&
+        expanded.segmented_control.height >= 48 * unit_scale() &&
+        expanded.chart.width >= 640 * unit_scale() &&
+        expanded.chart.height >= 420 * unit_scale(),
+        "expanded placement honors the chart component minimum");
+    expect(&state, inside(expanded.viewport, expanded.header) != 0 &&
+        inside(expanded.viewport, expanded.navigation) != 0 &&
+        inside(expanded.viewport, expanded.main) != 0 &&
+        inside(expanded.viewport, expanded.status) != 0 &&
+        inside(expanded.main, expanded.chart) != 0,
+        "expanded regions remain inside their declared containers");
+    expect(&state, expanded.navigation.x + expanded.navigation.width +
+        expanded.content_gap == expanded.main.x &&
+        expanded.main.x + expanded.main.width + expanded.content_gap ==
+            expanded.status.x,
+        "expanded columns use the public Flex spacing gap exactly");
+    expect(&state, rect_intersects(expanded.navigation, expanded.main) == 0 &&
+        rect_intersects(expanded.main, expanded.status) == 0 &&
+        rect_intersects(expanded.header, expanded.main) == 0,
+        "expanded macro regions do not overlap");
+
+    let medium: LinuxPreviewLayout = linux_preview_layout(1120, 720);
+    expect(&state, medium.error == LinuxPreviewLayoutError.none &&
+        medium.mode == LinuxPreviewLayoutMode.medium &&
+        medium.status_visible == 0 && medium.status.width == 0 &&
+        medium.navigation_is_column == 1,
+        "medium placement removes the competing rail without hiding navigation");
+    expect(&state, medium.chart_visible == 1 &&
+        medium.chart.width >= 640 * unit_scale() &&
+        medium.chart.height >= 420 * unit_scale(),
+        "the 1120 by 720 native default fits the real chart contract");
+    expect(&state, medium.main.x + medium.main.width ==
+        medium.viewport.width - medium.outer_spacing,
+        "medium main content consumes the released status-rail width");
+    let medium_first_nav: Rect = linux_preview_navigation_item_bounds(
+        medium, 0, 6);
+    let medium_last_nav: Rect = linux_preview_navigation_item_bounds(
+        medium, 5, 6);
+    let medium_inspect: Rect = linux_preview_inspect_bounds(medium);
+    let medium_last_segment: Rect = linux_preview_segment_bounds(
+        medium, 3, 4);
+    expect(&state, inside(medium.navigation, medium_first_nav) != 0 &&
+        inside(medium.navigation, medium_last_nav) != 0 &&
+        target_is_accessible(medium_first_nav) != 0 &&
+        target_is_accessible(medium_last_nav) != 0,
+        "medium navigation targets share accessible placement bounds");
+    expect(&state, inside(medium.page_heading, medium_inspect) != 0 &&
+        target_is_accessible(medium_inspect) != 0 &&
+        inside(medium.segmented_control, medium_last_segment) != 0 &&
+        target_is_accessible(medium_last_segment) != 0,
+        "Inspect and every segment have at least a 44 pixel target");
+
+    let tight: LinuxPreviewLayout = linux_preview_layout(960, 720);
+    expect(&state, tight.error == LinuxPreviewLayoutError.none &&
+        tight.mode == LinuxPreviewLayoutMode.medium &&
+        tight.chart.width == 656 * unit_scale() &&
+        tight.chart.height == 432 * unit_scale(),
+        "tight medium placement preserves the chart contract without clipping");
+
+    let compact: LinuxPreviewLayout = linux_preview_layout(800, 600);
+    expect(&state, compact.error == LinuxPreviewLayoutError.none &&
+        compact.mode == LinuxPreviewLayoutMode.compact &&
+        compact.navigation_is_column == 0 && compact.status_visible == 0,
+        "compact placement changes navigation structure instead of scaling it down");
+    expect(&state, compact.chart_visible == 0 &&
+        compact.segmented_control_visible == 0 &&
+        inside(compact.main, compact.compact_summary) != 0,
+        "compact placement uses an honest summary when the chart cannot fit");
+    let compact_first_nav: Rect = linux_preview_navigation_item_bounds(
+        compact, 0, 6);
+    let compact_last_nav: Rect = linux_preview_navigation_item_bounds(
+        compact, 5, 6);
+    expect(&state, inside(compact.navigation, compact_first_nav) != 0 &&
+        inside(compact.navigation, compact_last_nav) != 0 &&
+        target_is_accessible(compact_first_nav) != 0 &&
+        target_is_accessible(compact_last_nav) != 0 &&
+        rect_intersects(compact_first_nav, compact_last_nav) == 0,
+        "compact route strip preserves six distinct accessible targets");
+    expect(&state, compact.outer_spacing == flex_spacing(
+        FlexSpacingToken.large, FlexDensity.standard) &&
+        medium.outer_spacing == flex_spacing(
+            FlexSpacingToken.xlarge, FlexDensity.standard) &&
+        medium.section_gap == flex_spacing(
+            FlexSpacingToken.small, FlexDensity.standard),
+        "responsive placement derives outer rhythm from named Flex tokens");
+
+    let threshold: LinuxPreviewLayout = linux_preview_layout(1280, 800);
+    expect(&state, threshold.error == LinuxPreviewLayoutError.none &&
+        threshold.mode == LinuxPreviewLayoutMode.expanded &&
+        threshold.chart_visible == 1,
+        "expanded threshold is component-capacity based and executable");
+    let minimum: LinuxPreviewLayout = linux_preview_layout(480, 360);
+    expect(&state, minimum.error == LinuxPreviewLayoutError.none &&
+        minimum.mode == LinuxPreviewLayoutMode.compact &&
+        inside(minimum.main, minimum.compact_summary) != 0,
+        "minimum desktop viewport retains a useful compact summary");
+    let invalid: LinuxPreviewLayout = linux_preview_layout(479, 360);
+    expect(&state, invalid.error == LinuxPreviewLayoutError.invalid_viewport,
+        "invalid native viewports fail closed");
+    let legacy_tiny: LinuxPreviewLayout = linux_preview_layout(320, 240);
+    expect(&state, legacy_tiny.error ==
+        LinuxPreviewLayoutError.invalid_viewport &&
+        legacy_tiny.viewport.width == 0 && legacy_tiny.main.width == 0,
+        "legacy 320 by 240 desktop geometry cannot masquerade as adaptive UI");
+
+    _zag_print("Linux preview layout: pass=");
+    _zag_print_i64(state.passed as i64);
+    _zag_print(" fail="); _zag_print_i64(state.failed as i64);
+    _zag_println("");
+    if (state.failed != 0) { return 1; }
+    return 0;
+}

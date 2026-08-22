@@ -1,0 +1,112 @@
+@import("../src/text/unicode.zag")
+@import("../src/text/glyph_run.zag")
+
+fn main() i32 {
+    if (_zag_argc() != 2) {
+        _zag_eprintln("usage: test-system-font <font.ttf-or-otf>");
+        return 2;
+    }
+    let bytes: []u8 = _zag_read_file(_zag_arg(1));
+    if (bytes.len <= 0) {
+        if (bytes.len >= 0) { _zag_free(_zag_slice_ptr(bytes)); }
+        _zag_eprintln("system font smoke: font bytes unavailable");
+        return 3;
+    }
+    let face: OpenTypeFace = opentype_parse(bytes);
+    _zag_free(_zag_slice_ptr(bytes));
+    if (face.error != OpenTypeError.none) {
+        opentype_face_free(&face);
+        _zag_eprintln("system font smoke: OpenType parse failed");
+        return 4;
+    }
+    let text: Utf8DecodeResult = utf8_decode("Zagkit");
+    if (text.error != Utf8Error.none) {
+        utf8_decode_free(&text); opentype_face_free(&face);
+        return 5;
+    }
+    let index: i32 = 0;
+    let outline_points: i32 = 0;
+    let path_commands: i32 = 0;
+    while (index < text.scalars.len) {
+        let glyph: GlyphLookup = opentype_glyph_for_scalar(
+            face, text.scalars.data[index].value);
+        if (glyph.error != OpenTypeError.none || glyph.glyph_id == 0) {
+            utf8_decode_free(&text); opentype_face_free(&face);
+            _zag_eprintln("system font smoke: required Latin glyph is unavailable");
+            return 6;
+        }
+        if (index == 0) {
+            let outline: GlyphOutline = opentype_glyph_outline(face, glyph.glyph_id);
+            if (outline.error != OpenTypeError.none || outline.points.len == 0) {
+                opentype_glyph_outline_free(&outline);
+                utf8_decode_free(&text); opentype_face_free(&face);
+                _zag_eprintln("system font smoke: first Latin outline is unavailable");
+                return 7;
+            }
+            outline_points = outline.points.len;
+            let glyph_path: GlyphPathResult = glyph_outline_to_path(
+                outline, face.units_per_em, 24 * unit_scale(), 0, 24 * unit_scale());
+            if (glyph_path.error != GlyphPathError.none ||
+                path_verify(glyph_path.path) != PathError.none) {
+                glyph_path_result_free(&glyph_path);
+                opentype_glyph_outline_free(&outline);
+                utf8_decode_free(&text); opentype_face_free(&face);
+                _zag_eprintln("system font smoke: first Latin path conversion failed");
+                return 8;
+            }
+            path_commands = glyph_path.path.commands.len;
+            glyph_path_result_free(&glyph_path);
+            opentype_glyph_outline_free(&outline);
+        }
+        index = index + 1;
+    }
+    let accented_lookup: GlyphLookup = opentype_glyph_for_scalar(face, 233);
+    if (accented_lookup.error != OpenTypeError.none || accented_lookup.glyph_id == 0) {
+        utf8_decode_free(&text); opentype_face_free(&face);
+        _zag_eprintln("system font smoke: accented Latin glyph is unavailable");
+        return 9;
+    }
+    let accented_outline: GlyphOutline = opentype_glyph_outline(
+        face, accented_lookup.glyph_id);
+    if (accented_outline.error != OpenTypeError.none || accented_outline.points.len == 0) {
+        opentype_glyph_outline_free(&accented_outline);
+        utf8_decode_free(&text); opentype_face_free(&face);
+        _zag_eprintln("system font smoke: accented Latin outline failed");
+        return 10;
+    }
+    let accented_points: i32 = accented_outline.points.len;
+    opentype_glyph_outline_free(&accented_outline);
+    let nominal_run: NominalGlyphRun = nominal_glyph_run_ltr(
+        face, "Zagkit", 24 * unit_scale(), 0, 24 * unit_scale());
+    let nominal_path: GlyphRunPathResult = nominal_glyph_run_path(face, nominal_run);
+    if (nominal_run.error != GlyphRunError.none ||
+        nominal_path.error != GlyphRunError.none ||
+        path_verify(nominal_path.path) != PathError.none) {
+        glyph_run_path_result_free(&nominal_path); nominal_glyph_run_free(&nominal_run);
+        utf8_decode_free(&text); opentype_face_free(&face);
+        _zag_eprintln("system font smoke: nominal Latin run failed");
+        return 11;
+    }
+    let nominal_commands: i32 = nominal_path.path.commands.len;
+    let nominal_advance: i64 = nominal_run.total_advance;
+    glyph_run_path_result_free(&nominal_path); nominal_glyph_run_free(&nominal_run);
+    _zag_print("system font smoke: unitsPerEm=");
+    _zag_print_i64(face.units_per_em as i64);
+    _zag_print(" glyphs=");
+    _zag_print_i64(face.glyph_count as i64);
+    _zag_print(" mapped_scalars=");
+    _zag_print_i64(text.scalars.len as i64);
+    _zag_print(" first_outline_points=");
+    _zag_print_i64(outline_points as i64);
+    _zag_print(" first_path_commands=");
+    _zag_print_i64(path_commands as i64);
+    _zag_print(" accented_outline_points=");
+    _zag_print_i64(accented_points as i64);
+    _zag_print(" nominal_run_commands=");
+    _zag_print_i64(nominal_commands as i64);
+    _zag_print(" nominal_advance_fixed=");
+    _zag_print_i64(nominal_advance);
+    _zag_println("");
+    utf8_decode_free(&text); opentype_face_free(&face);
+    return 0;
+}

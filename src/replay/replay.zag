@@ -1,0 +1,840 @@
+@import("std:list")
+@import("../core/state.zag")
+@import("../input/router.zag")
+@import("../layout/flex.zag")
+@import("../layout/flex_wrap.zag")
+@import("../layout/grid.zag")
+@import("../layout/overlay.zag")
+@import("../layout/scroll.zag")
+@import("../layout/virtual_list.zag")
+@import("../layout/virtual_table.zag")
+@import("../layout/virtual_tree.zag")
+@import("../core/virtual_lifecycle.zag")
+@import("../semantics/semantics.zag")
+@import("../render/cpu_raster.zag")
+@import("../motion/motion.zag")
+
+enum ReplayEventKind {
+    state_i64,
+    pointer,
+    clock,
+    backend_activate,
+    backend_loss,
+    backend_recover,
+}
+
+enum ReplayBackendState { unavailable, active, lost }
+
+enum ReplayError {
+    none,
+    sealed,
+    not_sealed,
+    content_mutated,
+    invalid_event,
+    stale_state_revision,
+    clock_regression,
+    backend_transition,
+    input_rejected,
+    motion_error,
+    scene_error,
+}
+
+struct ReplayEvent {
+    sequence: i64,
+    kind: ReplayEventKind,
+    a: i64,
+    b: i64,
+    c: i64,
+    d: i64,
+    e: i64,
+    f: i64,
+}
+
+struct ReplayTape {
+    events: ArrayList[ReplayEvent],
+    sealed: i32,
+    revision: i64,
+    content_hash: i64,
+    last_error: ReplayError,
+    error_index: i32,
+}
+
+struct ReplayResult {
+    error: ReplayError,
+    error_event: i32,
+    events_applied: i64,
+    state_value: i64,
+    state_revision: i64,
+    clock: i64,
+    backend_id: i64,
+    backend_generation: i64,
+    backend_state: ReplayBackendState,
+    input_hash: i64,
+    motion_hash: i64,
+    motion_value: i64,
+    motion_velocity: i64,
+    motion_status: MotionStatus,
+    semantics_hash: i64,
+    measure_hash: i64,
+    layout_hash: i64,
+    layout_lines: i32,
+    display_hash: i64,
+    cpu_hash: i64,
+    output_hash: i64,
+}
+
+fn replay_event(kind: ReplayEventKind) ReplayEvent {
+    return ReplayEvent{
+        .sequence = 0,
+        .kind = kind,
+        .a = 0,
+        .b = 0,
+        .c = 0,
+        .d = 0,
+        .e = 0,
+        .f = 0,
+    };
+}
+
+fn replay_state_event(state_id: i64, expected_revision: i64, value: i64) ReplayEvent {
+    let event: ReplayEvent = replay_event(ReplayEventKind.state_i64);
+    event.a = state_id;
+    event.b = expected_revision;
+    event.c = value;
+    return event;
+}
+
+fn replay_pointer_event(pointer_id: i64, phase: PointerPhase, x: i64, y: i64) ReplayEvent {
+    let event: ReplayEvent = replay_event(ReplayEventKind.pointer);
+    event.a = pointer_id;
+    event.b = phase as i64;
+    event.c = x;
+    event.d = y;
+    return event;
+}
+
+fn replay_clock_event(time: i64) ReplayEvent {
+    let event: ReplayEvent = replay_event(ReplayEventKind.clock);
+    event.a = time;
+    return event;
+}
+
+fn replay_backend_activate_event(backend_id: i64) ReplayEvent {
+    let event: ReplayEvent = replay_event(ReplayEventKind.backend_activate);
+    event.a = backend_id;
+    return event;
+}
+
+fn replay_backend_loss_event(backend_id: i64) ReplayEvent {
+    let event: ReplayEvent = replay_event(ReplayEventKind.backend_loss);
+    event.a = backend_id;
+    return event;
+}
+
+fn replay_backend_recover_event(backend_id: i64) ReplayEvent {
+    let event: ReplayEvent = replay_event(ReplayEventKind.backend_recover);
+    event.a = backend_id;
+    return event;
+}
+
+fn replay_tape_make() ReplayTape {
+    return ReplayTape{
+        .events = make[ReplayEvent](32),
+        .sealed = 0,
+        .revision = 0,
+        .content_hash = 17,
+        .last_error = ReplayError.none,
+        .error_index = 0 - 1,
+    };
+}
+
+fn replay_tape_free(tape: *ReplayTape) void {
+    free[ReplayEvent](&tape.*.events);
+}
+
+fn replay_hash_event(hash: i64, event: ReplayEvent) i64 {
+    let result: i64 = display_mix(hash, event.sequence);
+    result = display_mix(result, event.kind as i64);
+    result = display_mix(result, event.a);
+    result = display_mix(result, event.b);
+    result = display_mix(result, event.c);
+    result = display_mix(result, event.d);
+    result = display_mix(result, event.e);
+    return display_mix(result, event.f);
+}
+
+fn replay_event_valid(event: ReplayEvent) i32 {
+    if (event.kind == ReplayEventKind.state_i64) {
+        return (event.a > 0 && event.b >= 0 && event.c >= -1000000 && event.c <= 1000000 &&
+            event.d == 0 && event.e == 0 && event.f == 0) as i32;
+    }
+    if (event.kind == ReplayEventKind.pointer) {
+        return (event.a >= 0 && event.b >= PointerPhase.down as i64 && event.b <= PointerPhase.wheel as i64 &&
+            event.c >= -1000000000 && event.c <= 1000000000 &&
+            event.d >= -1000000000 && event.d <= 1000000000 && event.e == 0 && event.f == 0) as i32;
+    }
+    if (event.kind == ReplayEventKind.clock) {
+        return (event.a >= 0 && event.b == 0 && event.c == 0 && event.d == 0 &&
+            event.e == 0 && event.f == 0) as i32;
+    }
+    if (event.kind == ReplayEventKind.backend_activate ||
+        event.kind == ReplayEventKind.backend_loss ||
+        event.kind == ReplayEventKind.backend_recover) {
+        return (event.a > 0 && event.b == 0 && event.c == 0 && event.d == 0 &&
+            event.e == 0 && event.f == 0) as i32;
+    }
+    return 0;
+}
+
+fn replay_tape_fail(tape: *ReplayTape, error: ReplayError) ReplayError {
+    tape.*.last_error = error;
+    tape.*.error_index = tape.*.events.len;
+    return error;
+}
+
+fn replay_tape_push(tape: *ReplayTape, raw_event: ReplayEvent) ReplayError {
+    if (tape.*.sealed != 0) { return replay_tape_fail(tape, ReplayError.sealed); }
+    if (tape.*.events.len >= 1000000 || replay_event_valid(raw_event) == 0) {
+        return replay_tape_fail(tape, ReplayError.invalid_event);
+    }
+    let event: ReplayEvent = raw_event;
+    event.sequence = tape.*.revision + 1;
+    push[ReplayEvent](&tape.*.events, event);
+    tape.*.revision = tape.*.revision + 1;
+    tape.*.content_hash = replay_hash_event(tape.*.content_hash, event);
+    tape.*.last_error = ReplayError.none;
+    tape.*.error_index = 0 - 1;
+    return ReplayError.none;
+}
+
+fn replay_tape_seal(tape: *ReplayTape) ReplayError {
+    if (tape.*.sealed != 0) { return ReplayError.none; }
+    tape.*.sealed = 1;
+    tape.*.last_error = ReplayError.none;
+    tape.*.error_index = 0 - 1;
+    return ReplayError.none;
+}
+
+fn replay_tape_verify(tape: ReplayTape) ReplayError {
+    if (tape.sealed == 0) { return ReplayError.not_sealed; }
+    if (tape.revision != tape.events.len as i64) { return ReplayError.content_mutated; }
+    let hash: i64 = 17;
+    let i: i32 = 0;
+    while (i < tape.events.len) {
+        let event: ReplayEvent = tape.events.data[i];
+        if (event.sequence != (i as i64) + 1 || replay_event_valid(event) == 0) {
+            return ReplayError.content_mutated;
+        }
+        hash = replay_hash_event(hash, event);
+        i = i + 1;
+    }
+    if (hash != tape.content_hash) { return ReplayError.content_mutated; }
+    return ReplayError.none;
+}
+
+fn replay_result_error(error: ReplayError, event_index: i32, applied: i64) ReplayResult {
+    return ReplayResult{
+        .error = error,
+        .error_event = event_index,
+        .events_applied = applied,
+        .state_value = 0,
+        .state_revision = 0,
+        .clock = 0,
+        .backend_id = 0,
+        .backend_generation = 0,
+        .backend_state = ReplayBackendState.unavailable,
+        .input_hash = 0,
+        .motion_hash = 0,
+        .motion_value = 0,
+        .motion_velocity = 0,
+        .motion_status = MotionStatus.settled,
+        .semantics_hash = 0,
+        .measure_hash = 0,
+        .layout_hash = 0,
+        .layout_lines = 0,
+        .display_hash = 0,
+        .cpu_hash = 0,
+        .output_hash = 0,
+    };
+}
+
+fn replay_hit_tree() HitTree {
+    let tree: HitTree = hit_tree_make();
+    let root: HitNode = hit_node(node_key(100), hit_root_key(), rect(0, 0, 8 * unit_scale(), 4 * unit_scale()));
+    root.z_order = 0;
+    _ = hit_tree_add(&tree, root);
+    let button: HitNode = hit_node(node_key(101), node_key(100), rect(0, 0, 4 * unit_scale(), 4 * unit_scale()));
+    button.z_order = 1;
+    button.focusable = 1;
+    _ = hit_tree_add(&tree, button);
+    return tree;
+}
+
+fn replay_hash_text(hash: i64, text: ArrayList[u8]) i64 {
+    let result: i64 = display_mix(hash, text.len as i64);
+    let i: i32 = 0;
+    while (i < text.len) {
+        result = display_mix(result, text.data[i] as i64);
+        i = i + 1;
+    }
+    return result;
+}
+
+fn replay_semantics_hash(tree: SemanticsTree) i64 {
+    let hash: i64 = display_mix(17, tree.revision);
+    let i: i32 = 0;
+    while (i < tree.nodes.len) {
+        let node: SemanticsNode = tree.nodes.data[i];
+        hash = display_mix(hash, node.id.value);
+        hash = display_mix(hash, node.id.generation);
+        hash = display_mix(hash, node.parent.value);
+        hash = display_mix(hash, node.parent.generation);
+        hash = display_mix(hash, node.role as i64);
+        hash = replay_hash_text(hash, node.name);
+        hash = replay_hash_text(hash, node.description);
+        hash = replay_hash_text(hash, node.value);
+        hash = display_mix(hash, node.action_mask);
+        hash = display_mix(hash, node.focus_order);
+        hash = display_mix(hash, node.disabled as i64);
+        hash = display_mix(hash, node.selected as i64);
+        hash = display_mix(hash, node.hidden as i64);
+        hash = display_mix(hash, node.live_region as i64);
+        hash = display_mix(hash, node.has_range as i64);
+        hash = display_mix(hash, node.range_min);
+        hash = display_mix(hash, node.range_max);
+        hash = display_mix(hash, node.range_value);
+        hash = display_mix(hash, node.range_step);
+        hash = display_mix(hash, node.text_length);
+        hash = display_mix(hash, node.selection_start);
+        hash = display_mix(hash, node.selection_end);
+        hash = display_mix(hash, node.has_bounds as i64);
+        hash = display_mix(hash, node.bounds.x);
+        hash = display_mix(hash, node.bounds.y);
+        hash = display_mix(hash, node.bounds.width);
+        hash = display_mix(hash, node.bounds.height);
+        hash = display_mix(hash, node.labelled_by.value);
+        hash = display_mix(hash, node.labelled_by.generation);
+        hash = display_mix(hash, node.described_by.value);
+        hash = display_mix(hash, node.described_by.generation);
+        hash = display_mix(hash, node.controls.value);
+        hash = display_mix(hash, node.controls.generation);
+        hash = display_mix(hash, node.row_count);
+        hash = display_mix(hash, node.column_count);
+        hash = display_mix(hash, node.row_index);
+        hash = display_mix(hash, node.column_index);
+        hash = display_mix(hash, node.row_span);
+        hash = display_mix(hash, node.column_span);
+        hash = display_mix(hash, node.level);
+        hash = display_mix(hash, node.set_size);
+        hash = display_mix(hash, node.position_in_set);
+        hash = display_mix(hash, node.expanded as i64);
+        i = i + 1;
+    }
+    return hash;
+}
+
+fn replay_input_hash(router: InputRouter) i64 {
+    let hash: i64 = display_mix(17, router.events.len as i64);
+    let i: i32 = 0;
+    while (i < router.events.len) {
+        let event: RoutedEvent = router.events.data[i];
+        hash = display_mix(hash, event.sequence);
+        hash = display_mix(hash, event.pointer_id);
+        hash = display_mix(hash, event.phase as i64);
+        hash = display_mix(hash, event.target.value);
+        hash = display_mix(hash, event.target.generation);
+        hash = display_mix(hash, event.local_x);
+        hash = display_mix(hash, event.local_y);
+        hash = display_mix(hash, event.captured as i64);
+        hash = display_mix(hash, event.status as i64);
+        i = i + 1;
+    }
+    hash = display_mix(hash, router.focus.value);
+    return display_mix(hash, router.focus.generation);
+}
+
+fn replay_runtime_free(router: *InputRouter, tree: *HitTree, motion: *MotionScheduler) void {
+    input_router_free(router);
+    hit_tree_free(tree);
+    motion_scheduler_free(motion);
+}
+
+fn replay_virtual_collections_hash(magnitude: i64) i64 {
+    let overrides: ArrayList[VirtualExtentOverride] = make[VirtualExtentOverride](1);
+    let rows: VirtualListModel = virtual_model(100, 3000, unit_scale(), 0, magnitude, overrides);
+    let columns: ArrayList[VirtualTableColumn] = make[VirtualTableColumn](2);
+    let pinned: VirtualTableColumn = virtual_table_column(
+        1, 3 * unit_scale(), 2 * unit_scale(), 4 * unit_scale()
+    );
+    pinned.pinned = 1;
+    push[VirtualTableColumn](&columns, pinned);
+    push[VirtualTableColumn](&columns, virtual_table_column(
+        2, 3 * unit_scale(), 2 * unit_scale(), 4 * unit_scale()
+    ));
+    let table: VirtualTableResult = virtual_table_layout(
+        virtual_table_model(77, rows, columns, magnitude),
+        size(8 * unit_scale(), 6 * unit_scale()), magnitude * unit_scale(), 0,
+        virtual_table_style(unit_scale(), unit_scale(), insets_all(0))
+    );
+    free[VirtualTableColumn](&columns); free[VirtualExtentOverride](&overrides);
+    if (table.error != VirtualTableError.none) {
+        virtual_table_free(&table);
+        return 0;
+    }
+
+    let source: ArrayList[VirtualTreeNode] = make[VirtualTreeNode](2);
+    push[VirtualTreeNode](&source, virtual_tree_node(
+        4000, 0, 0, 1, (magnitude != 0) as i32, unit_scale(), magnitude
+    ));
+    push[VirtualTreeNode](&source, virtual_tree_node(
+        4001, 4000, 1, 0, 0, unit_scale(), magnitude
+    ));
+    let projection: VirtualTreeProjection = virtual_tree_project(source, magnitude);
+    free[VirtualTreeNode](&source);
+    if (projection.error != VirtualTreeError.none) {
+        virtual_tree_projection_free(&projection); virtual_table_free(&table);
+        return 0;
+    }
+    let tree: VirtualTreeResult = virtual_tree_layout(
+        projection, size(8 * unit_scale(), 6 * unit_scale()), 0,
+        virtual_tree_style(unit_scale(), 0, unit_scale(), insets_all(0))
+    );
+    if (tree.error != VirtualTreeError.none) {
+        virtual_tree_free(&tree); virtual_tree_projection_free(&projection);
+        virtual_table_free(&table); return 0;
+    }
+    let live_ids: ArrayList[i64] = make[i64](tree.placements.len);
+    let i: i32 = 0;
+    while (i < tree.placements.len) {
+        push[i64](&live_ids, tree.placements.data[i].id);
+        i = i + 1;
+    }
+    let store: VirtualRetainedStore = virtual_store_make(8);
+    let lifecycle: VirtualLifecycleResult = virtual_store_reconcile(&store, live_ids);
+    free[i64](&live_ids);
+    let hash: i64 = 0;
+    if (lifecycle.error == VirtualLifecycleError.none) {
+        hash = display_mix(display_mix(table.layout_hash, tree.layout_hash), lifecycle.lifecycle_hash);
+    }
+    virtual_store_free(&store); virtual_tree_free(&tree);
+    virtual_tree_projection_free(&projection); virtual_table_free(&table);
+    return hash;
+}
+
+fn replay_build_scene(state_value: i64, backend_generation: i64) ReplayResult {
+    let result: ReplayResult = replay_result_error(ReplayError.none, 0 - 1, 0);
+
+    let semantics: SemanticsTree = semantics_tree_make();
+    let root_spec: SemanticsSpec = semantics_spec(node_key(100), semantic_root_key(), SemanticRole.application, "Replay scene");
+    if (semantics_add(&semantics, root_spec) != SemanticsError.none) {
+        semantics_tree_free(&semantics);
+        return replay_result_error(ReplayError.scene_error, 0 - 1, 0);
+    }
+    let value_text: []u8 = "even";
+    if (state_value % 2 != 0) { value_text = "odd"; }
+    let button_spec: SemanticsSpec = semantics_spec(node_key(101), node_key(100), SemanticRole.button, "Counter");
+    button_spec.value = value_text;
+    button_spec.action_mask = semantic_actions(SemanticAction.activate);
+    button_spec.focus_order = 1;
+    button_spec.selected = ((state_value % 2) != 0) as i32;
+    if (semantics_add(&semantics, button_spec) != SemanticsError.none) {
+        semantics_tree_free(&semantics);
+        return replay_result_error(ReplayError.scene_error, 0 - 1, 0);
+    }
+    result.semantics_hash = replay_semantics_hash(semantics);
+
+    let magnitude: i64 = state_value % 3;
+    if (magnitude < 0) { magnitude = 0 - magnitude; }
+    let first_metrics: IntrinsicMetrics = intrinsic_metrics(
+        (2 + magnitude) * unit_scale(), 4 * unit_scale(),
+        (2 + magnitude) * unit_scale(), 4 * unit_scale(),
+        (2 + magnitude) * unit_scale(), 4 * unit_scale(),
+        4 * unit_scale()
+    );
+    let second_metrics: IntrinsicMetrics = intrinsic_metrics(
+        2 * unit_scale(), 4 * unit_scale(),
+        2 * unit_scale(), 4 * unit_scale(),
+        2 * unit_scale(), 4 * unit_scale(),
+        4 * unit_scale()
+    );
+    let third_metrics: IntrinsicMetrics = intrinsic_metrics(
+        2 * unit_scale(), 2 * unit_scale(),
+        2 * unit_scale(), 2 * unit_scale(),
+        2 * unit_scale(), 2 * unit_scale(),
+        2 * unit_scale()
+    );
+    let measurement: IntrinsicTree = intrinsic_tree_make();
+    intrinsic_tree_add_node(
+        &measurement, intrinsic_group(1000, IntrinsicKind.row, unit_scale(), insets_all(0))
+    );
+    intrinsic_tree_add_node(&measurement, intrinsic_leaf(101, first_metrics, magnitude));
+    intrinsic_tree_add_node(&measurement, intrinsic_leaf(102, second_metrics, 0));
+    intrinsic_tree_add_node(&measurement, intrinsic_leaf(103, third_metrics, 0));
+    intrinsic_tree_add_child(&measurement, 1000, 101);
+    intrinsic_tree_add_child(&measurement, 1000, 102);
+    intrinsic_tree_add_child(&measurement, 1000, 103);
+    let measured: MeasureResult = intrinsic_tree_measure(
+        measurement, 1000,
+        Constraints{
+            .min_width = 0, .max_width = unbounded_extent(),
+            .min_height = 0, .max_height = unbounded_extent(),
+        }
+    );
+    intrinsic_tree_free(&measurement);
+    if (measured.error != IntrinsicError.none || measured.visited_nodes != 4) {
+        semantics_tree_free(&semantics);
+        return replay_result_error(ReplayError.scene_error, 0 - 1, 0);
+    }
+    result.measure_hash = measured.measure_hash;
+
+    let items: ArrayList[FlexItem] = make[FlexItem](3);
+    let first: FlexItem = flex_item_intrinsic(101, first_metrics, FlexAxis.row, FlexPriority.required);
+    push[FlexItem](&items, first);
+    let second: FlexItem = flex_item_intrinsic(102, second_metrics, FlexAxis.row, FlexPriority.required);
+    push[FlexItem](&items, second);
+    let third: FlexItem = flex_item_intrinsic(103, third_metrics, FlexAxis.row, FlexPriority.required);
+    push[FlexItem](&items, third);
+    let style: FlexStyle = flex_style(FlexAxis.row, unit_scale(), insets_all(0));
+    let wrap_style: FlexWrapStyle = flex_wrap_style(style, unit_scale());
+    let layout: FlexWrapResult = flex_wrap_layout(
+        items, tight_constraints(8 * unit_scale(), 6 * unit_scale()), wrap_style
+    );
+    free[FlexItem](&items);
+    if (layout.error != FlexWrapError.none || layout.duplicate_ids != 0 || layout.placements.len != 3) {
+        flex_wrap_free(&layout);
+        semantics_tree_free(&semantics);
+        return replay_result_error(ReplayError.scene_error, 0 - 1, 0);
+    }
+    let overlay_items: ArrayList[OverlayItem] = make[OverlayItem](2);
+    let overlay_first: OverlayItem = overlay_item(101, first_metrics);
+    overlay_first.horizontal = PlacementAlignment.start;
+    overlay_first.vertical = PlacementAlignment.start;
+    push[OverlayItem](&overlay_items, overlay_first);
+    let overlay_second: OverlayItem = overlay_item(102, second_metrics);
+    overlay_second.horizontal = PlacementAlignment.end;
+    overlay_second.vertical = PlacementAlignment.end;
+    push[OverlayItem](&overlay_items, overlay_second);
+    let overlay_layout_result: OverlayResult = overlay_layout(
+        overlay_items, tight_constraints(8 * unit_scale(), 6 * unit_scale()),
+        overlay_style(insets_all(0), LayoutDirection.ltr)
+    );
+    free[OverlayItem](&overlay_items);
+    if (overlay_layout_result.error != OverlayError.none) {
+        overlay_free(&overlay_layout_result);
+        flex_wrap_free(&layout);
+        semantics_tree_free(&semantics);
+        return replay_result_error(ReplayError.scene_error, 0 - 1, 0);
+    }
+
+    let grid_columns: ArrayList[GridTrack] = make[GridTrack](2);
+    push[GridTrack](&grid_columns, grid_fraction(1, unit_scale(), unbounded_extent()));
+    push[GridTrack](&grid_columns, grid_fraction(1, unit_scale(), unbounded_extent()));
+    let grid_rows: ArrayList[GridTrack] = make[GridTrack](1);
+    push[GridTrack](&grid_rows, grid_intrinsic(unit_scale(), 4 * unit_scale(), 6 * unit_scale()));
+    let grid_items: ArrayList[GridItem] = make[GridItem](2);
+    push[GridItem](&grid_items, grid_item_at(101, 0, 0, first_metrics));
+    push[GridItem](&grid_items, grid_item_at(102, 0, 1, second_metrics));
+    let grid_layout_result: GridResult = grid_layout(
+        grid_items, grid_columns, grid_rows,
+        tight_constraints(8 * unit_scale(), 6 * unit_scale()),
+        grid_style(unit_scale(), 0, insets_all(0))
+    );
+    free[GridItem](&grid_items); free[GridTrack](&grid_columns); free[GridTrack](&grid_rows);
+    if (grid_layout_result.error != GridError.none) {
+        grid_free(&grid_layout_result);
+        overlay_free(&overlay_layout_result);
+        flex_wrap_free(&layout);
+        semantics_tree_free(&semantics);
+        return replay_result_error(ReplayError.scene_error, 0 - 1, 0);
+    }
+    let virtual_overrides: ArrayList[VirtualExtentOverride] = make[VirtualExtentOverride](1);
+    let virtual_model_value: VirtualListModel = virtual_model(
+        1000, 2000, unit_scale(), 0, magnitude, virtual_overrides
+    );
+    let virtual_style_value: VirtualListStyle = virtual_style(
+        VirtualAxis.vertical, insets_all(0)
+    );
+    let virtual_result: VirtualListResult = virtual_list_layout(
+        virtual_model_value, size(8 * unit_scale(), 6 * unit_scale()),
+        magnitude * unit_scale(), virtual_style_value
+    );
+    free[VirtualExtentOverride](&virtual_overrides);
+    if (virtual_result.error != VirtualListError.none) {
+        virtual_free(&virtual_result);
+        grid_free(&grid_layout_result);
+        overlay_free(&overlay_layout_result);
+        flex_wrap_free(&layout);
+        semantics_tree_free(&semantics);
+        return replay_result_error(ReplayError.scene_error, 0 - 1, 0);
+    }
+    let replay_scroll: ScrollState = scroll_state(virtual_result.viewport, virtual_result.content);
+    let replay_scroll_mutation: ScrollMutation = scroll_to(
+        &replay_scroll, 0, virtual_result.scroll_offset
+    );
+    if (replay_scroll_mutation.error != ScrollError.none) {
+        virtual_free(&virtual_result);
+        grid_free(&grid_layout_result);
+        overlay_free(&overlay_layout_result);
+        flex_wrap_free(&layout);
+        semantics_tree_free(&semantics);
+        return replay_result_error(ReplayError.scene_error, 0 - 1, 0);
+    }
+    let collections_hash: i64 = replay_virtual_collections_hash(magnitude);
+    if (collections_hash == 0) {
+        virtual_free(&virtual_result);
+        grid_free(&grid_layout_result);
+        overlay_free(&overlay_layout_result);
+        flex_wrap_free(&layout);
+        semantics_tree_free(&semantics);
+        return replay_result_error(ReplayError.scene_error, 0 - 1, 0);
+    }
+    result.layout_hash = display_mix(
+        display_mix(
+            display_mix(layout.layout_hash, overlay_layout_result.layout_hash),
+            grid_layout_result.layout_hash
+        ),
+        display_mix(
+            display_mix(virtual_result.layout_hash, scroll_state_hash(replay_scroll)),
+            collections_hash
+        )
+    );
+    result.layout_lines = layout.lines.len;
+    virtual_free(&virtual_result);
+    grid_free(&grid_layout_result);
+    overlay_free(&overlay_layout_result);
+
+    let list: DisplayList = display_list_make();
+    let replay_payload: []u8 = "REPLAY-RESOURCE-0";
+    if (magnitude != 0) { replay_payload = "REPLAY-RESOURCE-1"; }
+    if (display_list_add_resource(&list, render_resource_spec(
+        900, RenderResourceKind.effect, replay_payload, 1
+    )) != RenderResourceError.none) {
+        display_list_free(&list);
+        flex_wrap_free(&layout);
+        semantics_tree_free(&semantics);
+        return replay_result_error(ReplayError.scene_error, 0 - 1, 0);
+    }
+    let replay_path: PathData = path_make(PathFillRule.non_zero);
+    _ = path_move_to(&replay_path, path_point(unit_scale(), unit_scale()));
+    _ = path_line_to(&replay_path,
+        path_point((5 + magnitude) * unit_scale(), unit_scale()));
+    _ = path_quad_to(&replay_path, path_point(3 * unit_scale(), 5 * unit_scale()),
+        path_point(unit_scale(), unit_scale()));
+    _ = path_close(&replay_path);
+    if (path_seal(&replay_path) != PathError.none) {
+        path_free(&replay_path);
+        display_list_free(&list);
+        flex_wrap_free(&layout);
+        semantics_tree_free(&semantics);
+        return replay_result_error(ReplayError.scene_error, 0 - 1, 0);
+    }
+    let replay_path_payload: PathEncodeResult = path_encode(replay_path);
+    path_free(&replay_path);
+    let replay_path_error: RenderResourceError = display_list_add_resource(&list,
+        render_resource_spec(901, RenderResourceKind.path,
+            replay_path_payload.bytes.data[0..replay_path_payload.bytes.len],
+            path_resource_format_tag())
+    );
+    path_encode_free(&replay_path_payload);
+    if (replay_path_error != RenderResourceError.none) {
+        display_list_free(&list);
+        flex_wrap_free(&layout);
+        semantics_tree_free(&semantics);
+        return replay_result_error(ReplayError.scene_error, 0 - 1, 0);
+    }
+    let replay_image_payload: []u8 = "RGBA";
+    if (magnitude != 0) { replay_image_payload = "ZKUI"; }
+    let replay_image_spec: RenderResourceSpec = render_resource_spec(
+        902, RenderResourceKind.image, replay_image_payload,
+        image_resource_format_tag()
+    );
+    replay_image_spec.width = 1;
+    replay_image_spec.height = 1;
+    replay_image_spec.color_space = RenderColorSpace.srgb;
+    if (display_list_add_resource(&list, replay_image_spec) !=
+        RenderResourceError.none) {
+        display_list_free(&list);
+        flex_wrap_free(&layout);
+        semantics_tree_free(&semantics);
+        return replay_result_error(ReplayError.scene_error, 0 - 1, 0);
+    }
+    let first_op: DisplayOp = display_op(DisplayOpKind.fill_rect, node_key(101));
+    first_op.bounds = layout.placements.data[0].frame;
+    let blue: i64 = (backend_generation % 8) * 4096;
+    first_op.paint = paint_rgba16(8192 + magnitude * 8192, 24576, 32768 + blue, 65535);
+    if (display_list_push(&list, first_op) != DisplayError.none) {
+        display_list_free(&list);
+        flex_wrap_free(&layout);
+        semantics_tree_free(&semantics);
+        return replay_result_error(ReplayError.scene_error, 0 - 1, 0);
+    }
+    let second_op: DisplayOp = display_op(DisplayOpKind.fill_rect, node_key(102));
+    second_op.bounds = layout.placements.data[1].frame;
+    second_op.paint = paint_rgba16(49152, 16384 + magnitude * 4096, 12288, 65535);
+    if (display_list_push(&list, second_op) != DisplayError.none) {
+        display_list_free(&list);
+        flex_wrap_free(&layout);
+        semantics_tree_free(&semantics);
+        return replay_result_error(ReplayError.scene_error, 0 - 1, 0);
+    }
+    let third_op: DisplayOp = display_op(DisplayOpKind.fill_rect, node_key(103));
+    third_op.bounds = layout.placements.data[2].frame;
+    third_op.paint = paint_rgba16(12288, 40960, 24576 + magnitude * 4096, 65535);
+    if (display_list_push(&list, third_op) != DisplayError.none) {
+        display_list_free(&list);
+        flex_wrap_free(&layout);
+        semantics_tree_free(&semantics);
+        return replay_result_error(ReplayError.scene_error, 0 - 1, 0);
+    }
+    let path_op: DisplayOp = display_op(DisplayOpKind.draw_path, node_key(104));
+    path_op.resource_id = 901;
+    path_op.paint = paint_rgba16(57344, 49152, 8192, 32768);
+    if (display_list_push(&list, path_op) != DisplayError.none) {
+        display_list_free(&list);
+        flex_wrap_free(&layout);
+        semantics_tree_free(&semantics);
+        return replay_result_error(ReplayError.scene_error, 0 - 1, 0);
+    }
+    let image_op: DisplayOp = display_op(DisplayOpKind.draw_image, node_key(105));
+    image_op.resource_id = 902;
+    image_op.bounds = rect(5 * unit_scale(), 0, 2 * unit_scale(), 2 * unit_scale());
+    image_op.paint.alpha = 50000;
+    if (display_list_push(&list, image_op) != DisplayError.none ||
+        display_list_seal(&list) != DisplayError.none) {
+        display_list_free(&list);
+        flex_wrap_free(&layout);
+        semantics_tree_free(&semantics);
+        return replay_result_error(ReplayError.scene_error, 0 - 1, 0);
+    }
+    result.display_hash = list.content_hash;
+
+    let raster: CpuRasterResult = cpu_rasterize(list, 8, 6);
+    if (raster.error != CpuRasterError.none) {
+        cpu_raster_free(&raster);
+        display_list_free(&list);
+        flex_wrap_free(&layout);
+        semantics_tree_free(&semantics);
+        return replay_result_error(ReplayError.scene_error, 0 - 1, 0);
+    }
+    result.cpu_hash = cpu_surface_hash(raster.surface);
+
+    cpu_raster_free(&raster);
+    display_list_free(&list);
+    flex_wrap_free(&layout);
+    semantics_tree_free(&semantics);
+    return result;
+}
+
+fn replay_execute(tape: ReplayTape) ReplayResult {
+    let verified: ReplayError = replay_tape_verify(tape);
+    if (verified != ReplayError.none) { return replay_result_error(verified, 0 - 1, 0); }
+
+    let state: State[i64] = state_make[i64](1, 0);
+    let tree: HitTree = replay_hit_tree();
+    let router: InputRouter = input_router_make();
+    let motion: MotionScheduler = motion_scheduler_make(120);
+    _ = motion_set_clock(&motion, 0);
+    _ = motion_start_spring(
+        &motion, 900, 0, 0, spring_spec(220, 28),
+        MotionPreference.full, MotionReducedSubstitution.snap_to_end
+    );
+    let clock: i64 = 0;
+    let backend_id: i64 = 0;
+    let backend_generation: i64 = 0;
+    let backend_state: ReplayBackendState = ReplayBackendState.unavailable;
+    let i: i32 = 0;
+    while (i < tape.events.len) {
+        let event: ReplayEvent = tape.events.data[i];
+        if (event.kind == ReplayEventKind.state_i64) {
+            if (event.a != state.id || event.b != state.revision) {
+                replay_runtime_free(&router, &tree, &motion);
+                return replay_result_error(ReplayError.stale_state_revision, i, i as i64);
+            }
+            _ = state_set[i64](&state, event.c);
+            if (motion_retarget(
+                &motion, 900, event.c * unit_scale(), MotionFrameReason.interrupt,
+                MotionPreference.full, MotionReducedSubstitution.snap_to_end
+            ) != MotionError.none) {
+                replay_runtime_free(&router, &tree, &motion);
+                return replay_result_error(ReplayError.motion_error, i, i as i64);
+            }
+        } else if (event.kind == ReplayEventKind.pointer) {
+            let phase: PointerPhase = event.b as PointerPhase;
+            let routed: RouteResult = input_route_pointer(&router, tree, pointer_event(event.a, phase, event.c, event.d));
+            if (routed.status != RouteStatus.accepted) {
+                replay_runtime_free(&router, &tree, &motion);
+                return replay_result_error(ReplayError.input_rejected, i, i as i64);
+            }
+        } else if (event.kind == ReplayEventKind.clock) {
+            if (event.a < clock) {
+                replay_runtime_free(&router, &tree, &motion);
+                return replay_result_error(ReplayError.clock_regression, i, i as i64);
+            }
+            if (motion_tick(&motion, event.a).error != MotionError.none) {
+                replay_runtime_free(&router, &tree, &motion);
+                return replay_result_error(ReplayError.motion_error, i, i as i64);
+            }
+            clock = event.a;
+        } else if (event.kind == ReplayEventKind.backend_activate) {
+            if (backend_state != ReplayBackendState.unavailable) {
+                replay_runtime_free(&router, &tree, &motion);
+                return replay_result_error(ReplayError.backend_transition, i, i as i64);
+            }
+            backend_id = event.a;
+            backend_generation = backend_generation + 1;
+            backend_state = ReplayBackendState.active;
+        } else if (event.kind == ReplayEventKind.backend_loss) {
+            if (backend_state != ReplayBackendState.active || event.a != backend_id) {
+                replay_runtime_free(&router, &tree, &motion);
+                return replay_result_error(ReplayError.backend_transition, i, i as i64);
+            }
+            backend_state = ReplayBackendState.lost;
+        } else if (event.kind == ReplayEventKind.backend_recover) {
+            if (backend_state != ReplayBackendState.lost || event.a != backend_id) {
+                replay_runtime_free(&router, &tree, &motion);
+                return replay_result_error(ReplayError.backend_transition, i, i as i64);
+            }
+            backend_generation = backend_generation + 1;
+            backend_state = ReplayBackendState.active;
+        }
+        i = i + 1;
+    }
+
+    let scene: ReplayResult = replay_build_scene(state.value, backend_generation);
+    if (scene.error != ReplayError.none) {
+        replay_runtime_free(&router, &tree, &motion);
+        return scene;
+    }
+    let result: ReplayResult = scene;
+    result.error = ReplayError.none;
+    result.error_event = 0 - 1;
+    result.events_applied = tape.events.len as i64;
+    result.state_value = state.value;
+    result.state_revision = state.revision;
+    result.clock = clock;
+    result.backend_id = backend_id;
+    result.backend_generation = backend_generation;
+    result.backend_state = backend_state;
+    result.input_hash = replay_input_hash(router);
+    result.motion_hash = motion_scheduler_hash(motion);
+    let motion_output: MotionSample = motion_sample(motion, 900);
+    result.motion_value = motion_output.value;
+    result.motion_velocity = motion_output.velocity;
+    result.motion_status = motion_output.status;
+    let hash: i64 = display_mix(17, result.state_value);
+    hash = display_mix(hash, result.state_revision);
+    hash = display_mix(hash, result.clock);
+    hash = display_mix(hash, result.backend_id);
+    hash = display_mix(hash, result.backend_generation);
+    hash = display_mix(hash, result.backend_state as i64);
+    hash = display_mix(hash, result.input_hash);
+    hash = display_mix(hash, result.motion_hash);
+    hash = display_mix(hash, result.semantics_hash);
+    hash = display_mix(hash, result.measure_hash);
+    hash = display_mix(hash, result.layout_hash);
+    hash = display_mix(hash, result.display_hash);
+    result.output_hash = display_mix(hash, result.cpu_hash);
+
+    replay_runtime_free(&router, &tree, &motion);
+    return result;
+}
