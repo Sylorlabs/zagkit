@@ -65,12 +65,17 @@ if (canvas_seal(&canvas) == CanvasError.none) {
     _ = canvas_contribute_hit(&canvas, &hit_tree);
 }
 
-_ = canvas_free(&canvas);
+canvas_free(&canvas);
 ```
 
 Production code must inspect every returned `CanvasError`. `last_error` plus
 `display_error`, `resource_error`, `semantics_error`, `hit_error`,
 `error_index`, and `error_resource_id` preserve the exact failing boundary.
+`canvas_free` is different: it is a `void` destructor whose parameter is
+`@consumes *Canvas`. The compiler rejects a repeated release or later use of
+the consumed frame; cleanup is not an ordinary fallible mutation.
+[`tests/negative/canvas_double_free.zag`](../../tests/negative/canvas_double_free.zag)
+keeps that affine boundary executable.
 
 ## Bounds, clip, and transform
 

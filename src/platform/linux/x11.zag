@@ -4,43 +4,43 @@
 // Xlib is used only as the public Linux window-system transport. Layout,
 // rendering, resources, state, semantics, and pixels remain owned by Zagkit.
 // This fallback never promotes itself to Wayland or accessibility support.
-extern fn XOpenDisplay(name: *u8) *u8;
-extern fn XDefaultScreen(display: *u8) i32;
-extern fn XRootWindow(display: *u8, screen: i32) i64;
-extern fn XDefaultVisual(display: *u8, screen: i32) *u8;
-extern fn XDefaultDepth(display: *u8, screen: i32) i32;
-extern fn XCreateSimpleWindow(display: *u8, parent: i64, x: i32, y: i32,
+@cabi extern fn XOpenDisplay(name: *u8) *u8;
+@cabi extern fn XDefaultScreen(display: *u8) i32;
+@cabi extern fn XRootWindow(display: *u8, screen: i32) i64;
+@cabi extern fn XDefaultVisual(display: *u8, screen: i32) *u8;
+@cabi extern fn XDefaultDepth(display: *u8, screen: i32) i32;
+@cabi extern fn XCreateSimpleWindow(display: *u8, parent: i64, x: i32, y: i32,
     width: i32, height: i32, border_width: i32, border: i64,
     background: i64) i64;
-extern fn XCreateGC(display: *u8, drawable: i64, value_mask: i64,
+@cabi extern fn XCreateGC(display: *u8, drawable: i64, value_mask: i64,
     values: *u8) *u8;
-extern fn XSelectInput(display: *u8, window: i64, event_mask: i64) i32;
-extern fn XStoreName(display: *u8, window: i64, name: *u8) i32;
-extern fn XChangeProperty(display: *u8, window: i64, property: i64,
+@cabi extern fn XSelectInput(display: *u8, window: i64, event_mask: i64) i32;
+@cabi extern fn XStoreName(display: *u8, window: i64, name: *u8) i32;
+@cabi extern fn XChangeProperty(display: *u8, window: i64, property: i64,
     property_type: i64, format: i32, mode: i32, data: *u8,
     element_count: i32) i32;
-extern fn XInternAtom(display: *u8, name: *u8, only_if_exists: i32) i64;
-extern fn XSetWMProtocols(display: *u8, window: i64, protocols: *i64,
+@cabi extern fn XInternAtom(display: *u8, name: *u8, only_if_exists: i32) i64;
+@cabi extern fn XSetWMProtocols(display: *u8, window: i64, protocols: *i64,
     count: i32) i32;
-extern fn XMapWindow(display: *u8, window: i64) i32;
-extern fn XCreateImage(display: *u8, visual: *u8, depth: i32, format: i32,
+@cabi extern fn XMapWindow(display: *u8, window: i64) i32;
+@cabi extern fn XCreateImage(display: *u8, visual: *u8, depth: i32, format: i32,
     offset: i32, data: *u8, width: i32, height: i32, bitmap_pad: i32,
     bytes_per_line: i32) *u8;
-extern fn XPutImage(display: *u8, drawable: i64, gc: *u8, image: *u8,
+@cabi extern fn XPutImage(display: *u8, drawable: i64, gc: *u8, image: *u8,
     src_x: i32, src_y: i32, dest_x: i32, dest_y: i32,
     width: i32, height: i32) i32;
-extern fn XPending(display: *u8) i32;
-extern fn XNextEvent(display: *u8, event: *u8) i32;
-extern fn XGetGeometry(display: *u8, drawable: i64, root_return: *i64,
+@cabi extern fn XPending(display: *u8) i32;
+@cabi extern fn XNextEvent(display: *u8, event: *u8) i32;
+@cabi extern fn XGetGeometry(display: *u8, drawable: i64, root_return: *i64,
     x_return: *i32, y_return: *i32, width_return: *i32,
     height_return: *i32, border_width_return: *i32,
     depth_return: *i32) i32;
-extern fn XFlush(display: *u8) i32;
-extern fn XSync(display: *u8, discard: i32) i32;
-extern fn XDestroyImage(image: *u8) i32;
-extern fn XFreeGC(display: *u8, gc: *u8) i32;
-extern fn XDestroyWindow(display: *u8, window: i64) i32;
-extern fn XCloseDisplay(display: *u8) i32;
+@cabi extern fn XFlush(display: *u8) i32;
+@cabi extern fn XSync(display: *u8, discard: i32) i32;
+@cabi extern fn XDestroyImage(image: *u8) i32;
+@cabi extern fn XFreeGC(display: *u8, gc: *u8) i32;
+@cabi extern fn XDestroyWindow(display: *u8, window: i64) i32;
+@cabi extern fn XCloseDisplay(display: *u8) i32;
 
 enum LinuxX11Error {
     none,

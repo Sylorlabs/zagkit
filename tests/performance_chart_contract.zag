@@ -266,7 +266,7 @@ fn deterministic_contract(state: *TestState, spec: PerformanceChartSpec,
     first: *PerformanceChartArtifact) void {
     let second: PerformanceChartArtifact = performance_chart_build(spec);
     expect(state, second.error == PerformanceChartError.none &&
-        first.*.evidence_hash == 1042463816 &&
+        first.*.evidence_hash == 767263707 &&
         second.evidence_hash == first.*.evidence_hash &&
         second.canvas.display.content_hash ==
             first.*.canvas.display.content_hash,
@@ -286,7 +286,7 @@ fn deterministic_contract(state: *TestState, spec: PerformanceChartSpec,
     expect(state, first_raster.error == CpuRasterError.none &&
         second_raster.error == CpuRasterError.none &&
         first_raster.pixels_touched > 0 &&
-        first_hash == 1813314353 && first_hash == second_hash,
+        first_hash == 426609686 && first_hash == second_hash,
         "CPU oracle renders the chart pixel-identically across two builds");
     _zag_print("performance chart evidence hash: ");
     _zag_print_i64(first.*.evidence_hash); _zag_println("");

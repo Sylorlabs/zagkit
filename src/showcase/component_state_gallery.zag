@@ -1,0 +1,2572 @@
+@import("../components/surface.zag")
+@import("../components/button.zag")
+@import("../components/navigation_item.zag")
+@import("../components/segmented_control.zag")
+@import("../components/text.zag")
+@import("../automation/talkback.zag")
+
+// Experimental reusable conformance artifact for the canonical component state
+// language. Every fixture is emitted through its first-party component. Flex is
+// the sole placement authority, Text owns every visible label, and the retained
+// display, hit, semantics, and Talkback identities are deliberately inspectable.
+
+enum ComponentStateGallerySection {
+    surface_tiers,
+    surface_states,
+    button_states,
+    navigation_states,
+    segmented_control,
+}
+
+enum ComponentStateGalleryError {
+    none,
+    invalid_spec,
+    invalid_runtime_state,
+    missing_font,
+    layout_error,
+    layout_overflow,
+    root_semantics_error,
+    surface_error,
+    button_error,
+    navigation_error,
+    segmented_error,
+    text_error,
+    text_contribution_error,
+    merge_error,
+    display_error,
+}
+
+enum ComponentStateGalleryMergeError {
+    none,
+    invalid_source,
+    display_error,
+    hit_error,
+    semantics_error,
+}
+
+enum ComponentStateGalleryEventKind {
+    pointer_enter,
+    pointer_leave,
+    pointer_down,
+    pointer_up_inside,
+    pointer_cancel,
+    focus_gained_pointer,
+    focus_gained_keyboard,
+    focus_lost,
+    activate_target,
+    segmented,
+}
+
+struct ComponentStateGallerySpec {
+    id: NodeKey,
+    bounds: Rect,
+    name: []u8,
+    density: FlexDensity,
+    direction: LayoutDirection,
+}
+
+struct ComponentStateGalleryRuntimeState {
+    hovered: NodeKey,
+    pressed: NodeKey,
+    focused: NodeKey,
+    focus_visible: i32,
+    segmented: SegmentedControlModel,
+    last_activated: NodeKey,
+    activation_count: i64,
+    revision: i64,
+}
+
+struct ComponentStateGalleryEvent {
+    kind: ComponentStateGalleryEventKind,
+    target: NodeKey,
+    segmented_kind: SegmentedControlEventKind,
+    segmented_target_index: i32,
+}
+
+struct ComponentStateGalleryTransition {
+    state: ComponentStateGalleryRuntimeState,
+    state_changed: i32,
+    focus_changed: i32,
+    activation_changed: i32,
+    selection_changed: i32,
+    rejected: i32,
+}
+
+struct ComponentStateGalleryPlacement {
+    id: NodeKey,
+    caption_id: NodeKey,
+    cell_bounds: Rect,
+    caption_bounds: Rect,
+    control_bounds: Rect,
+}
+
+struct ComponentStateGalleryLayout {
+    bounds: Rect,
+    title_bounds: Rect,
+    section_heading_bounds: ArrayList[Rect],
+    tier_placements: ArrayList[ComponentStateGalleryPlacement],
+    surface_placements: ArrayList[ComponentStateGalleryPlacement],
+    button_placements: ArrayList[ComponentStateGalleryPlacement],
+    navigation_placements: ArrayList[ComponentStateGalleryPlacement],
+    segmented_bounds: Rect,
+    required_height: i64,
+    minimum_width: i64,
+    flex_error: FlexError,
+    overflow: i32,
+}
+
+struct ComponentStateGalleryCheckpoint {
+    display_length: i32,
+    display_revision: i64,
+    display_hash: i64,
+    display_last_error: DisplayError,
+    display_error_index: i32,
+    display_resource_length: i32,
+    display_resource_total_bytes: i64,
+    display_resource_revision: i64,
+    display_resource_hash: i64,
+    display_resource_last_error: RenderResourceError,
+    display_resource_error_id: i64,
+    hit_length: i32,
+    hit_revision: i64,
+    hit_last_error: HitTreeError,
+    hit_error_node: NodeKey,
+    semantics: SemanticsCheckpoint,
+    text_artifact_count: i32,
+    text_semantic_count: i32,
+    focus_snapshot_count: i32,
+    live_focus_id: NodeKey,
+    segmented: SegmentedControlArtifact,
+}
+
+struct ComponentStateGalleryMergeResult {
+    error: ComponentStateGalleryMergeError,
+    display_error: DisplayError,
+    hit_error: HitTreeError,
+    semantics_error: SemanticsError,
+    display_start: i32,
+    display_end: i32,
+    hit_start: i32,
+    hit_end: i32,
+    semantics_start: i32,
+    semantics_end: i32,
+}
+
+struct ComponentStateGalleryArtifact {
+    display: DisplayList,
+    hits: HitTree,
+    semantics: SemanticsTree,
+    layout: ComponentStateGalleryLayout,
+    tier_surfaces: ArrayList[SurfaceArtifact],
+    state_surfaces: ArrayList[SurfaceArtifact],
+    buttons: ArrayList[ButtonArtifact],
+    navigation_items: ArrayList[NavigationItemArtifact],
+    segmented: SegmentedControlArtifact,
+    id: NodeKey,
+    bounds: Rect,
+    density: FlexDensity,
+    direction: LayoutDirection,
+    text_artifact_count: i32,
+    text_semantic_count: i32,
+    read_only_surface_hit_count: i32,
+    focus_snapshot_count: i32,
+    live_focus_id: NodeKey,
+    runtime_state: ComponentStateGalleryRuntimeState,
+    runtime_hash: i64,
+    frozen_conformance: i32,
+    display_hash: i64,
+    hit_hash: i64,
+    talkback_hash: i64,
+    evidence_hash: i64,
+    error: ComponentStateGalleryError,
+    error_section: i32,
+    error_index: i32,
+    flex_error: FlexError,
+    surface_error: SurfaceBuildError,
+    button_error: ButtonBuildError,
+    navigation_error: NavigationItemBuildError,
+    segmented_error: SegmentedControlBuildError,
+    text_error: TextError,
+    text_contribution_error: TextContributionError,
+    merge_error: ComponentStateGalleryMergeError,
+    display_error: DisplayError,
+    hit_error: HitTreeError,
+    semantics_error: SemanticsError,
+}
+
+fn component_state_gallery_section_count() i32 { return 5; }
+fn component_state_gallery_tier_count() i32 { return 4; }
+fn component_state_gallery_surface_state_count() i32 { return 8; }
+fn component_state_gallery_button_state_count() i32 { return 8; }
+fn component_state_gallery_navigation_state_count() i32 { return 6; }
+fn component_state_gallery_segment_count() i32 { return 4; }
+fn component_state_gallery_expected_text_count() i32 { return 61; }
+fn component_state_gallery_expected_text_semantics() i32 { return 32; }
+// Display operation count = 415.
+// The elevation token struct separates ambient and contact shadow passes.
+// Each shadowed surface emits one ambient + one contact rounded-rect op
+// instead of a single shadow op.  The 8-op delta from the previous 407
+// breaks down as follows:
+//   Tier surfaces (SurfaceMode.group, shadows drawn when pressed==0):
+//     panel  tier: +1 contact shadow
+//     raised tier: +1 contact shadow
+//     overlay tier: +1 contact shadow
+//     base   tier: +0 (all shadow alphas are zero)
+//   State surfaces (SurfaceMode.actionable, shadows drawn when
+//     effectively_enabled and pressed==0):
+//     rest:     +1   hover:     +1   focus:     +1   pressed:   +0
+//     selected: +1   disabled:  +0   loading:   +0   error:     +1
+//   loading is effectively disabled (button_effectively_enabled==0 when
+//   loading==1), so it draws no shadow.  pressed and disabled also
+//   suppress shadows.  Total: 3 + 5 = 8 additional contact-shadow ops.
+fn component_state_gallery_expected_display_operations() i32 { return 415; }
+fn component_state_gallery_expected_display_resources() i32 { return 61; }
+fn component_state_gallery_expected_hit_nodes() i32 { return 27; }
+fn component_state_gallery_expected_semantic_nodes() i32 { return 64; }
+fn component_state_gallery_max_root_id() i64 { return 1000000000; }
+
+fn component_state_gallery_spec(id: NodeKey, bounds: Rect)
+    ComponentStateGallerySpec {
+    return ComponentStateGallerySpec{
+        .id = id,
+        .bounds = bounds,
+        .name = "Component state gallery",
+        .density = FlexDensity.standard,
+        .direction = LayoutDirection.ltr,
+    };
+}
+
+fn component_state_gallery_density_valid(density: FlexDensity) i32 {
+    let value: i64 = density as i64;
+    return (value >= FlexDensity.compact as i64 &&
+        value <= FlexDensity.touch as i64) as i32;
+}
+
+fn component_state_gallery_direction_valid(direction: LayoutDirection) i32 {
+    let value: i64 = direction as i64;
+    return (value >= LayoutDirection.ltr as i64 &&
+        value <= LayoutDirection.rtl as i64) as i32;
+}
+
+fn component_state_gallery_spec_valid(
+    spec:  ComponentStateGallerySpec) i32 {
+    return (canvas_key_valid(spec.id) != 0 &&
+        spec.id.value <= component_state_gallery_max_root_id() &&
+        hit_geometry_valid(spec.bounds) != 0 &&
+        spec.name.len > 0 && spec.name.len <= text_byte_limit() &&
+        semantic_text_input_valid(spec.name) != 0 &&
+        component_state_gallery_density_valid(spec.density) != 0 &&
+        component_state_gallery_direction_valid(spec.direction) != 0) as i32;
+}
+
+fn component_state_gallery_id(root: NodeKey, offset: i64) NodeKey {
+    return node_key_scoped(root.value * 10000 + offset, root.generation);
+}
+
+fn component_state_gallery_title_id(root: NodeKey) NodeKey {
+    return component_state_gallery_id(root, 100);
+}
+
+fn component_state_gallery_heading_id(root: NodeKey, index: i32) NodeKey {
+    return component_state_gallery_id(root, 200 + index as i64);
+}
+
+fn component_state_gallery_tier_id(root: NodeKey, index: i32) NodeKey {
+    return component_state_gallery_id(root, 1000 + index as i64 * 10);
+}
+
+fn component_state_gallery_tier_caption_id(root: NodeKey, index: i32) NodeKey {
+    return component_state_gallery_id(root, 1001 + index as i64 * 10);
+}
+
+fn component_state_gallery_surface_id(root: NodeKey, index: i32) NodeKey {
+    return component_state_gallery_id(root, 2000 + index as i64 * 10);
+}
+
+fn component_state_gallery_surface_caption_id(root: NodeKey, index: i32)
+    NodeKey {
+    return component_state_gallery_id(root, 2001 + index as i64 * 10);
+}
+
+fn component_state_gallery_button_id(root: NodeKey, index: i32) NodeKey {
+    return component_state_gallery_id(root, 3000 + index as i64 * 10);
+}
+
+fn component_state_gallery_button_caption_id(root: NodeKey, index: i32)
+    NodeKey {
+    return component_state_gallery_id(root, 3001 + index as i64 * 10);
+}
+
+fn component_state_gallery_navigation_id(root: NodeKey, index: i32) NodeKey {
+    return component_state_gallery_id(root, 4000 + index as i64 * 10);
+}
+
+fn component_state_gallery_navigation_caption_id(root: NodeKey, index: i32)
+    NodeKey {
+    return component_state_gallery_id(root, 4001 + index as i64 * 10);
+}
+
+fn component_state_gallery_segmented_id(root: NodeKey) NodeKey {
+    return component_state_gallery_id(root, 5000);
+}
+
+fn component_state_gallery_segment_id(root: NodeKey, index: i32) NodeKey {
+    return component_state_gallery_id(root, 5010 + index as i64);
+}
+
+fn component_state_gallery_section_name(index: i32) []u8 {
+    return switch (index) {
+        0 => "Surface elevation tiers",
+        1 => "Actionable Surface states",
+        2 => "Button states",
+        3 => "NavigationItem states",
+        else => "SegmentedControl behavior",
+    };
+}
+
+fn component_state_gallery_tier(index: i32) SurfaceTier {
+    return switch (index) {
+        1 => SurfaceTier.panel,
+        2 => SurfaceTier.raised,
+        3 => SurfaceTier.overlay,
+        else => SurfaceTier.base,
+    };
+}
+
+fn component_state_gallery_tier_name(index: i32) []u8 {
+    return switch (index) {
+        1 => "PANEL",
+        2 => "RAISED",
+        3 => "OVERLAY",
+        else => "BASE",
+    };
+}
+
+fn component_state_gallery_tier_semantic_name(index: i32) []u8 {
+    return switch (index) {
+        1 => "Panel Surface tier",
+        2 => "Raised Surface tier",
+        3 => "Overlay Surface tier",
+        else => "Base Surface tier",
+    };
+}
+
+fn component_state_gallery_state_name(index: i32) []u8 {
+    return switch (index) {
+        1 => "HOVER",
+        2 => "FOCUS",
+        3 => "PRESSED",
+        4 => "SELECTED",
+        5 => "DISABLED",
+        6 => "LOADING",
+        7 => "ERROR",
+        else => "REST",
+    };
+}
+
+fn component_state_gallery_state_value(index: i32) []u8 {
+    return switch (index) {
+        1 => "Hover fixture",
+        2 => "Focus fixture",
+        3 => "Pressed fixture",
+        4 => "Selected",
+        5 => "Disabled",
+        6 => "Loading",
+        7 => "Error",
+        else => "Rest fixture",
+    };
+}
+
+fn component_state_gallery_surface_state(index: i32)
+    SurfaceCanonicalState {
+    return switch (index) {
+        1 => SurfaceCanonicalState.hover,
+        2 => SurfaceCanonicalState.focus,
+        3 => SurfaceCanonicalState.pressed,
+        4 => SurfaceCanonicalState.selected,
+        5 => SurfaceCanonicalState.disabled,
+        6 => SurfaceCanonicalState.loading,
+        7 => SurfaceCanonicalState.error,
+        else => SurfaceCanonicalState.rest,
+    };
+}
+
+fn component_state_gallery_button_state(index: i32) ButtonCanonicalState {
+    return switch (index) {
+        1 => ButtonCanonicalState.hover,
+        2 => ButtonCanonicalState.focus,
+        3 => ButtonCanonicalState.pressed,
+        4 => ButtonCanonicalState.selected,
+        5 => ButtonCanonicalState.disabled,
+        6 => ButtonCanonicalState.loading,
+        7 => ButtonCanonicalState.error,
+        else => ButtonCanonicalState.rest,
+    };
+}
+
+fn component_state_gallery_navigation_state(index: i32)
+    ButtonCanonicalState {
+    return switch (index) {
+        1 => ButtonCanonicalState.hover,
+        2 => ButtonCanonicalState.focus,
+        3 => ButtonCanonicalState.pressed,
+        4 => ButtonCanonicalState.selected,
+        5 => ButtonCanonicalState.disabled,
+        else => ButtonCanonicalState.rest,
+    };
+}
+
+fn component_state_gallery_state_description(kind: i32, index: i32) []u8 {
+    if (kind == 0) {
+        return switch (index) {
+            1 => "Actionable Surface fixture: hover",
+            2 => "Actionable Surface fixture: focus styling snapshot",
+            3 => "Actionable Surface fixture: pressed",
+            4 => "Actionable Surface fixture: selected",
+            5 => "Actionable Surface fixture: disabled",
+            6 => "Actionable Surface fixture: loading",
+            7 => "Actionable Surface fixture: recoverable error",
+            else => "Actionable Surface fixture: rest",
+        };
+    }
+    if (kind == 1) {
+        return switch (index) {
+            1 => "Button fixture: hover",
+            2 => "Button fixture: focus styling snapshot",
+            3 => "Button fixture: pressed",
+            4 => "Button fixture: selected",
+            5 => "Button fixture: disabled",
+            6 => "Button fixture: loading",
+            7 => "Button fixture: recoverable error",
+            else => "Button fixture: rest",
+        };
+    }
+    return switch (index) {
+        1 => "NavigationItem fixture: hover",
+        2 => "NavigationItem fixture: focus styling snapshot",
+        3 => "NavigationItem fixture: pressed",
+        4 => "NavigationItem fixture: selected",
+        5 => "NavigationItem fixture: disabled",
+        else => "NavigationItem fixture: rest",
+    };
+}
+
+fn component_state_gallery_runtime_interaction(
+    base: ButtonInteraction, id: NodeKey,
+    runtime:  ComponentStateGalleryRuntimeState)
+    ButtonInteraction {
+    let value: ButtonInteraction = base;
+    if (button_effectively_enabled(value) == 0) { return value; }
+    if (node_key_equal(runtime.hovered, id) != 0) { value.hovered = 1; }
+    if (node_key_equal(runtime.pressed, id) != 0) { value.pressed = 1; }
+    if (node_key_equal(runtime.focused, id) != 0) {
+        value.focused = 1;
+        value.focus_visible = runtime.focus_visible;
+    }
+    return value;
+}
+
+fn component_state_gallery_segment_label(index: i32) []u8 {
+    return switch (index) {
+        1 => "Focus",
+        2 => "Disabled",
+        3 => "Rest",
+        else => "Selected",
+    };
+}
+
+fn component_state_gallery_segment_description(index: i32) []u8 {
+    return switch (index) {
+        1 => "Enabled keyboard focus target; focused only after a runtime event",
+        2 => "Disabled segment; discoverable but unavailable",
+        3 => "Enabled segment at rest",
+        else => "Selected segment with persistent marker",
+    };
+}
+
+fn component_state_gallery_title_height() i64 { return 48 * unit_scale(); }
+fn component_state_gallery_heading_height() i64 { return 30 * unit_scale(); }
+fn component_state_gallery_caption_height() i64 { return 20 * unit_scale(); }
+fn component_state_gallery_tier_cell_height() i64 { return 116 * unit_scale(); }
+fn component_state_gallery_surface_cell_height() i64 { return 116 * unit_scale(); }
+fn component_state_gallery_button_cell_height() i64 { return 76 * unit_scale(); }
+fn component_state_gallery_navigation_cell_height() i64 { return 76 * unit_scale(); }
+
+fn component_state_gallery_segmented_height(density: FlexDensity) i64 {
+    let height: i64 = 50 * unit_scale();
+    let minimum: i64 = segmented_control_minimum_height(density);
+    if (minimum > height) { height = minimum; }
+    return height;
+}
+
+fn component_state_gallery_minimum_width(density: FlexDensity) i64 {
+    let padding: i64 = flex_spacing(FlexSpacingToken.xxlarge, density) * 2;
+    let gaps: i64 = flex_spacing(FlexSpacingToken.large, density) * 3;
+    let content: i64 = 4 * 240 * unit_scale() + gaps;
+    return padding + content;
+}
+
+fn component_state_gallery_section_height(index: i32,
+    density: FlexDensity) i64 {
+    let heading: i64 = component_state_gallery_heading_height();
+    let section_gap: i64 = flex_spacing(FlexSpacingToken.medium, density);
+    let grid_gap: i64 = flex_spacing(FlexSpacingToken.large, density);
+    if (index == 0) {
+        return heading + section_gap +
+            component_state_gallery_tier_cell_height();
+    }
+    if (index == 1) {
+        return heading + section_gap +
+            component_state_gallery_surface_cell_height() * 2 + grid_gap;
+    }
+    if (index == 2) {
+        return heading + section_gap +
+            component_state_gallery_button_cell_height() * 2 + grid_gap;
+    }
+    if (index == 3) {
+        return heading + section_gap +
+            component_state_gallery_navigation_cell_height() * 2 + grid_gap;
+    }
+    return heading + section_gap +
+        component_state_gallery_segmented_height(density);
+}
+
+fn component_state_gallery_required_height(density: FlexDensity) i64 {
+    let total: i64 = flex_spacing(FlexSpacingToken.xxlarge, density) * 2 +
+        flex_spacing(FlexSpacingToken.xlarge, density) * 5 +
+        component_state_gallery_title_height();
+    let index: i32 = 0;
+    while (index < component_state_gallery_section_count()) {
+        total = total + component_state_gallery_section_height(index, density);
+        index = index + 1;
+    }
+    return total;
+}
+
+fn component_state_gallery_layout_empty(bounds: Rect,
+    density: FlexDensity) ComponentStateGalleryLayout {
+    return ComponentStateGalleryLayout{
+        .bounds = bounds,
+        .title_bounds = rect(0, 0, 0, 0),
+        .section_heading_bounds = make[Rect](
+            component_state_gallery_section_count()),
+        .tier_placements = make[ComponentStateGalleryPlacement](
+            component_state_gallery_tier_count()),
+        .surface_placements = make[ComponentStateGalleryPlacement](
+            component_state_gallery_surface_state_count()),
+        .button_placements = make[ComponentStateGalleryPlacement](
+            component_state_gallery_button_state_count()),
+        .navigation_placements = make[ComponentStateGalleryPlacement](
+            component_state_gallery_navigation_state_count()),
+        .segmented_bounds = rect(0, 0, 0, 0),
+        .required_height = component_state_gallery_required_height(density),
+        .minimum_width = component_state_gallery_minimum_width(density),
+        .flex_error = FlexError.none,
+        .overflow = 0,
+    };
+}
+
+fn component_state_gallery_layout_free(
+    layout:  *ComponentStateGalleryLayout) void {
+    free[Rect](&layout.*.section_heading_bounds);
+    free[ComponentStateGalleryPlacement](&layout.*.tier_placements);
+    free[ComponentStateGalleryPlacement](&layout.*.surface_placements);
+    free[ComponentStateGalleryPlacement](&layout.*.button_placements);
+    free[ComponentStateGalleryPlacement](&layout.*.navigation_placements);
+}
+
+fn component_state_gallery_absolute(parent: Rect, child: Rect) Rect {
+    return rect(parent.x + child.x, parent.y + child.y,
+        child.width, child.height);
+}
+
+fn component_state_gallery_flex_ok(result:  *FlexResult,
+    expected: i32) i32 {
+    return (result.*.error == FlexError.none && result.*.overflow == 0 &&
+        result.*.duplicate_ids == 0 &&
+        result.*.placements.len == expected) as i32;
+}
+
+fn component_state_gallery_record_layout_error(
+    layout:  *ComponentStateGalleryLayout,
+    result:  *FlexResult) void {
+    layout.*.flex_error = result.*.error;
+    if (result.*.error == FlexError.none) { layout.*.overflow = 1; }
+}
+
+fn component_state_gallery_placement(root: NodeKey, kind: i32,
+    index: i32, cell: Rect, density: FlexDensity,
+    direction: LayoutDirection,
+    layout:  *ComponentStateGalleryLayout)
+    ComponentStateGalleryPlacement {
+    let id: NodeKey = component_state_gallery_tier_id(root, index);
+    let caption_id: NodeKey = component_state_gallery_tier_caption_id(
+        root, index);
+    if (kind == 1) {
+        id = component_state_gallery_surface_id(root, index);
+        caption_id = component_state_gallery_surface_caption_id(root, index);
+    }
+    if (kind == 2) {
+        id = component_state_gallery_button_id(root, index);
+        caption_id = component_state_gallery_button_caption_id(root, index);
+    }
+    if (kind == 3) {
+        id = component_state_gallery_navigation_id(root, index);
+        caption_id = component_state_gallery_navigation_caption_id(root, index);
+    }
+    let items: ArrayList[FlexItem] = make[FlexItem](2);
+    let caption: FlexItem = flex_item(1,
+        component_state_gallery_caption_height(), cell.width);
+    caption.min_main = component_state_gallery_caption_height();
+    caption.max_main = component_state_gallery_caption_height();
+    caption.shrink = 0;
+    let control: FlexItem = flex_item(2, 0, cell.width);
+    control.grow = 1;
+    control.shrink = 0;
+    control.min_main = 44 * unit_scale();
+    push[FlexItem](&items, caption);
+    push[FlexItem](&items, control);
+    let style: FlexStyle = flex_style(FlexAxis.column,
+        flex_spacing(FlexSpacingToken.small, density), insets_all(0));
+    style.direction = direction;
+    style.cross_alignment = CrossAlignment.stretch;
+    let result: FlexResult = flex_layout(items,
+        tight_constraints(cell.width, cell.height), style);
+    free[FlexItem](&items);
+    let placement: ComponentStateGalleryPlacement =
+        ComponentStateGalleryPlacement{
+            .id = id,
+            .caption_id = caption_id,
+            .cell_bounds = cell,
+            .caption_bounds = rect(0, 0, 0, 0),
+            .control_bounds = rect(0, 0, 0, 0),
+        };
+    if (component_state_gallery_flex_ok(&result, 2) == 0) {
+        component_state_gallery_record_layout_error(layout, &result);
+        flex_free(&result);
+        return placement;
+    }
+    placement.caption_bounds = component_state_gallery_absolute(cell,
+        result.placements.data[0].frame);
+    placement.control_bounds = component_state_gallery_absolute(cell,
+        result.placements.data[1].frame);
+    flex_free(&result);
+    return placement;
+}
+
+fn component_state_gallery_fill_row(
+    layout:  *ComponentStateGalleryLayout,
+    target:  *ArrayList[ComponentStateGalleryPlacement],
+    root: NodeKey, kind: i32, start_index: i32, count: i32,
+    bounds: Rect, density: FlexDensity, direction: LayoutDirection) i32 {
+    let items: ArrayList[FlexItem] = make[FlexItem](count);
+    let index: i32 = 0;
+    while (index < count) {
+        let item: FlexItem = flex_item(1 + index as i64, 0, bounds.height);
+        item.grow = 1;
+        item.shrink = 1;
+        item.min_main = 240 * unit_scale();
+        push[FlexItem](&items, item);
+        index = index + 1;
+    }
+    let style: FlexStyle = flex_style(FlexAxis.row,
+        flex_spacing(FlexSpacingToken.large, density), insets_all(0));
+    style.direction = direction;
+    style.cross_alignment = CrossAlignment.stretch;
+    let result: FlexResult = flex_layout(items,
+        tight_constraints(bounds.width, bounds.height), style);
+    free[FlexItem](&items);
+    if (component_state_gallery_flex_ok(&result, count) == 0) {
+        component_state_gallery_record_layout_error(layout, &result);
+        flex_free(&result);
+        return 0;
+    }
+    index = 0;
+    while (index < count) {
+        let cell: Rect = component_state_gallery_absolute(bounds,
+            result.placements.data[index].frame);
+        let placement: ComponentStateGalleryPlacement =
+            component_state_gallery_placement(root, kind,
+                start_index + index, cell, density, direction, layout);
+        if (layout.*.flex_error != FlexError.none ||
+            layout.*.overflow != 0) {
+            flex_free(&result);
+            return 0;
+        }
+        push[ComponentStateGalleryPlacement](target, placement);
+        index = index + 1;
+    }
+    flex_free(&result);
+    return 1;
+}
+
+fn component_state_gallery_fill_grid(
+    layout:  *ComponentStateGalleryLayout,
+    target:  *ArrayList[ComponentStateGalleryPlacement],
+    root: NodeKey, kind: i32, columns: i32, bounds: Rect,
+    density: FlexDensity, direction: LayoutDirection) i32 {
+    let items: ArrayList[FlexItem] = make[FlexItem](2);
+    let first: FlexItem = flex_item(1, 0, bounds.width);
+    first.grow = 1; first.shrink = 1; first.min_main = 44 * unit_scale();
+    let second: FlexItem = flex_item(2, 0, bounds.width);
+    second.grow = 1; second.shrink = 1; second.min_main = 44 * unit_scale();
+    push[FlexItem](&items, first); push[FlexItem](&items, second);
+    let style: FlexStyle = flex_style(FlexAxis.column,
+        flex_spacing(FlexSpacingToken.large, density), insets_all(0));
+    style.direction = direction;
+    style.cross_alignment = CrossAlignment.stretch;
+    let rows: FlexResult = flex_layout(items,
+        tight_constraints(bounds.width, bounds.height), style);
+    free[FlexItem](&items);
+    if (component_state_gallery_flex_ok(&rows, 2) == 0) {
+        component_state_gallery_record_layout_error(layout, &rows);
+        flex_free(&rows);
+        return 0;
+    }
+    let row0: Rect = component_state_gallery_absolute(bounds,
+        rows.placements.data[0].frame);
+    let row1: Rect = component_state_gallery_absolute(bounds,
+        rows.placements.data[1].frame);
+    let ok0: i32 = component_state_gallery_fill_row(layout, target,
+        root, kind, 0, columns, row0, density, direction);
+    let ok1: i32 = 0;
+    if (ok0 != 0) {
+        ok1 = component_state_gallery_fill_row(layout, target,
+            root, kind, columns, columns, row1, density, direction);
+    }
+    flex_free(&rows);
+    return (ok0 != 0 && ok1 != 0) as i32;
+}
+
+fn component_state_gallery_section_content(
+    layout:  *ComponentStateGalleryLayout,
+    section: Rect, density: FlexDensity, direction: LayoutDirection,
+    heading_index: i32) Rect {
+    let items: ArrayList[FlexItem] = make[FlexItem](2);
+    let heading: FlexItem = flex_item(1,
+        component_state_gallery_heading_height(), section.width);
+    heading.min_main = component_state_gallery_heading_height();
+    heading.max_main = component_state_gallery_heading_height();
+    heading.shrink = 0;
+    let content: FlexItem = flex_item(2, 0, section.width);
+    content.grow = 1; content.shrink = 0; content.min_main = unit_scale();
+    push[FlexItem](&items, heading); push[FlexItem](&items, content);
+    let style: FlexStyle = flex_style(FlexAxis.column,
+        flex_spacing(FlexSpacingToken.medium, density), insets_all(0));
+    style.direction = direction;
+    style.cross_alignment = CrossAlignment.stretch;
+    let result: FlexResult = flex_layout(items,
+        tight_constraints(section.width, section.height), style);
+    free[FlexItem](&items);
+    if (component_state_gallery_flex_ok(&result, 2) == 0) {
+        component_state_gallery_record_layout_error(layout, &result);
+        flex_free(&result);
+        return rect(0, 0, 0, 0);
+    }
+    push[Rect](&layout.*.section_heading_bounds,
+        component_state_gallery_absolute(section,
+            result.placements.data[0].frame));
+    let output: Rect = component_state_gallery_absolute(section,
+        result.placements.data[1].frame);
+    flex_free(&result);
+    return output;
+}
+
+fn component_state_gallery_layout(spec:  ComponentStateGallerySpec)
+    ComponentStateGalleryLayout {
+    let layout: ComponentStateGalleryLayout =
+        component_state_gallery_layout_empty(spec.bounds, spec.density);
+    if (spec.bounds.width < layout.minimum_width ||
+        spec.bounds.height < layout.required_height) {
+        layout.overflow = 1;
+        return layout;
+    }
+    let items: ArrayList[FlexItem] = make[FlexItem](6);
+    let title: FlexItem = flex_item(1,
+        component_state_gallery_title_height(), spec.bounds.width);
+    title.min_main = component_state_gallery_title_height();
+    title.max_main = component_state_gallery_title_height();
+    title.shrink = 0;
+    push[FlexItem](&items, title);
+    let section_index: i32 = 0;
+    while (section_index < component_state_gallery_section_count()) {
+        let height: i64 = component_state_gallery_section_height(
+            section_index, spec.density);
+        let section_item: FlexItem = flex_item(2 + section_index as i64,
+            height, spec.bounds.width);
+        section_item.min_main = height;
+        section_item.max_main = height;
+        section_item.shrink = 0;
+        push[FlexItem](&items, section_item);
+        section_index = section_index + 1;
+    }
+    let style: FlexStyle = flex_style(FlexAxis.column,
+        flex_spacing(FlexSpacingToken.xlarge, spec.density),
+        insets_all(flex_spacing(FlexSpacingToken.xxlarge, spec.density)));
+    style.direction = spec.direction;
+    style.cross_alignment = CrossAlignment.stretch;
+    let outer: FlexResult = flex_layout(items,
+        tight_constraints(spec.bounds.width, spec.bounds.height), style);
+    free[FlexItem](&items);
+    if (component_state_gallery_flex_ok(&outer, 6) == 0) {
+        component_state_gallery_record_layout_error(&layout, &outer);
+        flex_free(&outer);
+        return layout;
+    }
+    layout.title_bounds = component_state_gallery_absolute(spec.bounds,
+        outer.placements.data[0].frame);
+
+    let tier_section: Rect = component_state_gallery_absolute(spec.bounds,
+        outer.placements.data[1].frame);
+    let tier_content: Rect = component_state_gallery_section_content(&layout,
+        tier_section, spec.density, spec.direction, 0);
+    if (layout.overflow == 0 && layout.flex_error == FlexError.none) {
+        _ = component_state_gallery_fill_row(&layout,
+            &layout.tier_placements, spec.id, 0, 0,
+            component_state_gallery_tier_count(), tier_content,
+            spec.density, spec.direction);
+    }
+
+    let surface_section: Rect = component_state_gallery_absolute(spec.bounds,
+        outer.placements.data[2].frame);
+    let surface_content: Rect = component_state_gallery_section_content(&layout,
+        surface_section, spec.density, spec.direction, 1);
+    if (layout.overflow == 0 && layout.flex_error == FlexError.none) {
+        _ = component_state_gallery_fill_grid(&layout,
+            &layout.surface_placements, spec.id, 1, 4, surface_content,
+            spec.density, spec.direction);
+    }
+
+    let button_section: Rect = component_state_gallery_absolute(spec.bounds,
+        outer.placements.data[3].frame);
+    let button_content: Rect = component_state_gallery_section_content(&layout,
+        button_section, spec.density, spec.direction, 2);
+    if (layout.overflow == 0 && layout.flex_error == FlexError.none) {
+        _ = component_state_gallery_fill_grid(&layout,
+            &layout.button_placements, spec.id, 2, 4, button_content,
+            spec.density, spec.direction);
+    }
+
+    let navigation_section: Rect = component_state_gallery_absolute(spec.bounds,
+        outer.placements.data[4].frame);
+    let navigation_content: Rect = component_state_gallery_section_content(
+        &layout, navigation_section, spec.density, spec.direction, 3);
+    if (layout.overflow == 0 && layout.flex_error == FlexError.none) {
+        _ = component_state_gallery_fill_grid(&layout,
+            &layout.navigation_placements, spec.id, 3, 3,
+            navigation_content, spec.density, spec.direction);
+    }
+
+    let segmented_section: Rect = component_state_gallery_absolute(spec.bounds,
+        outer.placements.data[5].frame);
+    let segmented_content: Rect = component_state_gallery_section_content(
+        &layout, segmented_section, spec.density, spec.direction, 4);
+    if (layout.overflow == 0 && layout.flex_error == FlexError.none) {
+        let segment_items: ArrayList[FlexItem] = make[FlexItem](1);
+        let segment_item: FlexItem = flex_item(1, 720 * unit_scale(),
+            segmented_content.height);
+        segment_item.min_main = segmented_control_minimum_width(
+            segmented_control_model(component_state_gallery_segment_count(), 0),
+            spec.density);
+        segment_item.max_main = 720 * unit_scale();
+        segment_item.shrink = 1;
+        push[FlexItem](&segment_items, segment_item);
+        let segment_style: FlexStyle = flex_style(FlexAxis.row, 0,
+            insets_all(0));
+        segment_style.direction = spec.direction;
+        segment_style.main_alignment = MainAlignment.center;
+        segment_style.cross_alignment = CrossAlignment.stretch;
+        let segment_result: FlexResult = flex_layout(segment_items,
+            tight_constraints(segmented_content.width,
+                segmented_content.height), segment_style);
+        free[FlexItem](&segment_items);
+        if (component_state_gallery_flex_ok(&segment_result, 1) == 0) {
+            component_state_gallery_record_layout_error(&layout,
+                &segment_result);
+        } else {
+            layout.segmented_bounds = component_state_gallery_absolute(
+                segmented_content, segment_result.placements.data[0].frame);
+        }
+        flex_free(&segment_result);
+    }
+    flex_free(&outer);
+    return layout;
+}
+
+fn component_state_gallery_empty_segmented(root: NodeKey)
+    SegmentedControlArtifact {
+    let model: SegmentedControlModel = segmented_control_model(
+        component_state_gallery_segment_count(), 0);
+    let spec: SegmentedControlSpec = segmented_control_spec(
+        component_state_gallery_segmented_id(root), semantic_root_key(),
+        rect(0, 0, 720 * unit_scale(), 50 * unit_scale()),
+        "Component state segments", model);
+    return segmented_control_empty_artifact(spec);
+}
+
+fn component_state_gallery_empty(
+    spec:  ComponentStateGallerySpec)
+    ComponentStateGalleryArtifact {
+    return ComponentStateGalleryArtifact{
+        .display = display_list_make(),
+        .hits = hit_tree_make(),
+        .semantics = semantics_tree_make(),
+        .layout = component_state_gallery_layout_empty(
+            spec.bounds, spec.density),
+        .tier_surfaces = make[SurfaceArtifact](
+            component_state_gallery_tier_count()),
+        .state_surfaces = make[SurfaceArtifact](
+            component_state_gallery_surface_state_count()),
+        .buttons = make[ButtonArtifact](
+            component_state_gallery_button_state_count()),
+        .navigation_items = make[NavigationItemArtifact](
+            component_state_gallery_navigation_state_count()),
+        .segmented = component_state_gallery_empty_segmented(spec.id),
+        .id = spec.id,
+        .bounds = spec.bounds,
+        .density = spec.density,
+        .direction = spec.direction,
+        .text_artifact_count = 0,
+        .text_semantic_count = 0,
+        .read_only_surface_hit_count = 0,
+        .focus_snapshot_count = 0,
+        .live_focus_id = semantic_none_key(),
+        .runtime_state = component_state_gallery_runtime_state_default(),
+        .runtime_hash = 0,
+        .frozen_conformance = 0,
+        .display_hash = 0,
+        .hit_hash = 0,
+        .talkback_hash = 0,
+        .evidence_hash = 0,
+        .error = ComponentStateGalleryError.none,
+        .error_section = 0 - 1,
+        .error_index = 0 - 1,
+        .flex_error = FlexError.none,
+        .surface_error = SurfaceBuildError.none,
+        .button_error = ButtonBuildError.none,
+        .navigation_error = NavigationItemBuildError.none,
+        .segmented_error = SegmentedControlBuildError.none,
+        .text_error = TextError.none,
+        .text_contribution_error = TextContributionError.none,
+        .merge_error = ComponentStateGalleryMergeError.none,
+        .display_error = DisplayError.none,
+        .hit_error = HitTreeError.none,
+        .semantics_error = SemanticsError.none,
+    };
+}
+
+fn component_state_gallery_checkpoint(
+    artifact:  *ComponentStateGalleryArtifact)
+    ComponentStateGalleryCheckpoint {
+    return ComponentStateGalleryCheckpoint{
+        .display_length = artifact.*.display.ops.len,
+        .display_revision = artifact.*.display.revision,
+        .display_hash = artifact.*.display.content_hash,
+        .display_last_error = artifact.*.display.last_error,
+        .display_error_index = artifact.*.display.error_index,
+        .display_resource_length =
+            artifact.*.display.resources.resources.len,
+        .display_resource_total_bytes =
+            artifact.*.display.resources.total_bytes,
+        .display_resource_revision = artifact.*.display.resources.revision,
+        .display_resource_hash = artifact.*.display.resources.content_hash,
+        .display_resource_last_error =
+            artifact.*.display.resources.last_error,
+        .display_resource_error_id = artifact.*.display.resources.error_id,
+        .hit_length = artifact.*.hits.nodes.len,
+        .hit_revision = artifact.*.hits.revision,
+        .hit_last_error = artifact.*.hits.last_error,
+        .hit_error_node = artifact.*.hits.error_node,
+        .semantics = semantics_tree_checkpoint(&artifact.*.semantics),
+        .text_artifact_count = artifact.*.text_artifact_count,
+        .text_semantic_count = artifact.*.text_semantic_count,
+        .focus_snapshot_count = artifact.*.focus_snapshot_count,
+        .live_focus_id = artifact.*.live_focus_id,
+        .segmented = artifact.*.segmented,
+    };
+}
+
+// Component scratch emissions add no resources. The generic checkpoint
+// restores component display operations plus hit/semantic state. Multi-Text
+// transactions additionally record their exact hashed resource IDs and use
+// component_state_gallery_rollback_text_resources below.
+fn component_state_gallery_rollback(
+    artifact:  *ComponentStateGalleryArtifact,
+    checkpoint: ComponentStateGalleryCheckpoint) void {
+    artifact.*.display.ops.len = checkpoint.display_length;
+    artifact.*.display.revision = checkpoint.display_revision;
+    artifact.*.display.content_hash = checkpoint.display_hash;
+    artifact.*.display.last_error = checkpoint.display_last_error;
+    artifact.*.display.error_index = checkpoint.display_error_index;
+    artifact.*.hits.nodes.len = checkpoint.hit_length;
+    artifact.*.hits.revision = checkpoint.hit_revision;
+    artifact.*.hits.last_error = checkpoint.hit_last_error;
+    artifact.*.hits.error_node = checkpoint.hit_error_node;
+    _ = semantics_tree_rollback(&artifact.*.semantics,
+        checkpoint.semantics);
+    artifact.*.text_artifact_count = checkpoint.text_artifact_count;
+    artifact.*.text_semantic_count = checkpoint.text_semantic_count;
+    artifact.*.focus_snapshot_count = checkpoint.focus_snapshot_count;
+    artifact.*.live_focus_id = checkpoint.live_focus_id;
+    artifact.*.segmented = checkpoint.segmented;
+}
+
+fn component_state_gallery_remove_resource(
+    store:  *RenderResourceStore, id: i64) i32 {
+    let found: i32 = 0 - 1;
+    let index: i32 = 0;
+    while (index < store.*.resources.len) {
+        if (store.*.resources.data[index].id == id) {
+            found = index;
+            break;
+        }
+        index = index + 1;
+    }
+    if (found < 0) { return 0; }
+    free[u8](&store.*.resources.data[found].payload);
+    index = found;
+    while (index + 1 < store.*.resources.len) {
+        store.*.resources.data[index] = store.*.resources.data[index + 1];
+        index = index + 1;
+    }
+    store.*.resources.len = store.*.resources.len - 1;
+    return 1;
+}
+
+fn component_state_gallery_rollback_text_resources(
+    artifact:  *ComponentStateGalleryArtifact,
+    checkpoint: ComponentStateGalleryCheckpoint,
+    resource_ids:  *ArrayList[i64]) i32 {
+    let exact: i32 = 1;
+    let index: i32 = resource_ids.*.len - 1;
+    while (index >= 0) {
+        if (component_state_gallery_remove_resource(
+            &artifact.*.display.resources,
+            resource_ids.*.data[index]) == 0) { exact = 0; }
+        index = index - 1;
+    }
+    if (artifact.*.display.resources.resources.len !=
+        checkpoint.display_resource_length) { exact = 0; }
+    artifact.*.display.resources.total_bytes =
+        checkpoint.display_resource_total_bytes;
+    artifact.*.display.resources.revision =
+        checkpoint.display_resource_revision;
+    artifact.*.display.resources.content_hash =
+        checkpoint.display_resource_hash;
+    artifact.*.display.resources.last_error =
+        checkpoint.display_resource_last_error;
+    artifact.*.display.resources.error_id =
+        checkpoint.display_resource_error_id;
+    component_state_gallery_rollback(artifact, checkpoint);
+    return exact;
+}
+
+fn component_state_gallery_merge_result()
+    ComponentStateGalleryMergeResult {
+    return ComponentStateGalleryMergeResult{
+        .error = ComponentStateGalleryMergeError.none,
+        .display_error = DisplayError.none,
+        .hit_error = HitTreeError.none,
+        .semantics_error = SemanticsError.none,
+        .display_start = 0 - 1,
+        .display_end = 0 - 1,
+        .hit_start = 0 - 1,
+        .hit_end = 0 - 1,
+        .semantics_start = 0 - 1,
+        .semantics_end = 0 - 1,
+    };
+}
+
+fn component_state_gallery_semantic_spec(
+    node: @retained_by_return SemanticsNode,
+    parent: NodeKey, fallback_value: @retained_by_return []u8,
+    clear_focus: i32) SemanticsSpec {
+    let spec: SemanticsSpec = SemanticsSpec{
+        .id = node.id,
+        .parent = parent,
+        .role = node.role,
+        .name = node.name.data[0..node.name.len],
+        .description = node.description.data[0..node.description.len],
+        .value = node.value.data[0..node.value.len],
+        .action_mask = node.action_mask,
+        .focus_order = node.focus_order,
+        .disabled = node.disabled,
+        .selected = node.selected,
+        .focused = node.focused,
+        .hidden = node.hidden,
+        .live_region = node.live_region,
+        .has_range = node.has_range,
+        .range_min = node.range_min,
+        .range_max = node.range_max,
+        .range_value = node.range_value,
+        .range_step = node.range_step,
+        .text_length = node.text_length,
+        .selection_start = node.selection_start,
+        .selection_end = node.selection_end,
+        .has_bounds = node.has_bounds,
+        .bounds = node.bounds,
+        .labelled_by = node.labelled_by,
+        .described_by = node.described_by,
+        .controls = node.controls,
+        .row_count = node.row_count,
+        .column_count = node.column_count,
+        .row_index = node.row_index,
+        .column_index = node.column_index,
+        .row_span = node.row_span,
+        .column_span = node.column_span,
+        .level = node.level,
+        .set_size = node.set_size,
+        .position_in_set = node.position_in_set,
+        .expanded = node.expanded,
+    };
+    if (spec.value.len == 0 && fallback_value.len > 0) {
+        spec.value = fallback_value;
+    }
+    if (clear_focus != 0) { spec.focused = 0; }
+    return spec;
+}
+
+fn component_state_gallery_merge_scratch(
+    artifact:  *ComponentStateGalleryArtifact,
+    scratch_display:  *DisplayList,
+    scratch_hits:  *HitTree,
+    scratch_semantics:  *SemanticsTree,
+    publish_hits: i32, semantic_parent: NodeKey,
+    clear_focus_id: NodeKey, fallback_value:  []u8,
+    expected_hits: i32, expected_semantics: i32)
+    ComponentStateGalleryMergeResult {
+    let result: ComponentStateGalleryMergeResult =
+        component_state_gallery_merge_result();
+    if ((publish_hits != 0 && publish_hits != 1) ||
+        scratch_display.*.sealed != 0 ||
+        scratch_display.*.resources.resources.len != 0 ||
+        scratch_display.*.last_error != DisplayError.none ||
+        scratch_hits.*.nodes.len != expected_hits ||
+        scratch_hits.*.last_error != HitTreeError.none ||
+        scratch_semantics.*.nodes.len != expected_semantics ||
+        scratch_semantics.*.last_error != SemanticsError.none ||
+        artifact.*.display.sealed != 0 ||
+        semantics_find_index_borrowed(&artifact.*.semantics,
+            semantic_parent) < 0) {
+        result.error = ComponentStateGalleryMergeError.invalid_source;
+        return result;
+    }
+    let checkpoint: ComponentStateGalleryCheckpoint =
+        component_state_gallery_checkpoint(artifact);
+    result.display_start = artifact.*.display.ops.len;
+    let index: i32 = 0;
+    while (index < scratch_display.*.ops.len) {
+        let error: DisplayError = display_list_push(&artifact.*.display,
+            scratch_display.*.ops.data[index]);
+        if (error != DisplayError.none) {
+            component_state_gallery_rollback(artifact, checkpoint);
+            result.error = ComponentStateGalleryMergeError.display_error;
+            result.display_error = error;
+            return result;
+        }
+        index = index + 1;
+    }
+    result.display_end = artifact.*.display.ops.len;
+
+    result.hit_start = artifact.*.hits.nodes.len;
+    if (publish_hits != 0) {
+        index = 0;
+        while (index < scratch_hits.*.nodes.len) {
+            let error: HitTreeError = hit_tree_add(&artifact.*.hits,
+                scratch_hits.*.nodes.data[index]);
+            if (error != HitTreeError.none) {
+                component_state_gallery_rollback(artifact, checkpoint);
+                result.error = ComponentStateGalleryMergeError.hit_error;
+                result.hit_error = error;
+                return result;
+            }
+            index = index + 1;
+        }
+    }
+    result.hit_end = artifact.*.hits.nodes.len;
+
+    result.semantics_start = artifact.*.semantics.nodes.len;
+    index = 0;
+    while (index < scratch_semantics.*.nodes.len) {
+        let source: SemanticsNode = scratch_semantics.*.nodes.data[index];
+        let parent: NodeKey = source.parent;
+        if (node_key_equal(parent, semantic_root_key()) != 0) {
+            parent = semantic_parent;
+        }
+        let clear_focus: i32 = node_key_equal(source.id,
+            clear_focus_id);
+        let value: []u8 = "";
+        if (scratch_semantics.*.nodes.len == 1) {
+            value = fallback_value;
+        }
+        let spec: SemanticsSpec = component_state_gallery_semantic_spec(
+            source, parent, value, clear_focus);
+        let error: SemanticsError = semantics_add(
+            &artifact.*.semantics, spec);
+        if (error != SemanticsError.none) {
+            component_state_gallery_rollback(artifact, checkpoint);
+            result.error = ComponentStateGalleryMergeError.semantics_error;
+            result.semantics_error = error;
+            return result;
+        }
+        index = index + 1;
+    }
+    result.semantics_end = artifact.*.semantics.nodes.len;
+    return result;
+}
+
+fn component_state_gallery_record_merge_error(
+    artifact:  *ComponentStateGalleryArtifact,
+    result: ComponentStateGalleryMergeResult,
+    section: i32, index: i32) void {
+    artifact.*.error = ComponentStateGalleryError.merge_error;
+    artifact.*.error_section = section;
+    artifact.*.error_index = index;
+    artifact.*.merge_error = result.error;
+    artifact.*.display_error = result.display_error;
+    artifact.*.hit_error = result.hit_error;
+    artifact.*.semantics_error = result.semantics_error;
+}
+
+fn component_state_gallery_root_semantics(
+    artifact:  *ComponentStateGalleryArtifact,
+    spec:  ComponentStateGallerySpec) i32 {
+    let root: SemanticsSpec = semantics_spec(spec.id, semantic_root_key(),
+        SemanticRole.group, spec.name);
+    root.description =
+        "Experimental canonical component state and elevation conformance gallery";
+    root.value =
+        "Read-only tier fixtures and explicit interactive component specimens";
+    root.has_bounds = 1;
+    root.bounds = spec.bounds;
+    let error: SemanticsError = semantics_add(&artifact.*.semantics, root);
+    if (error == SemanticsError.none) { return 1; }
+    artifact.*.error = ComponentStateGalleryError.root_semantics_error;
+    artifact.*.semantics_error = error;
+    return 0;
+}
+
+fn component_state_gallery_emit_text(
+    artifact:  *ComponentStateGalleryArtifact,
+    face:  *OpenTypeFace, id: NodeKey, parent: NodeKey,
+    bounds: Rect, value: []u8, type_token: SemanticTypeToken,
+    color_token: SemanticColorToken, own_semantics: i32,
+    disabled: i32, section: i32, index: i32) i32 {
+    let spec: TextSpec = text_spec(id, parent, bounds, value,
+        type_token, color_token);
+    if (own_semantics == 0) {
+        spec.semantics_mode = TextSemanticsMode.parent_owned;
+    }
+    spec.disabled = disabled;
+    let text: TextArtifact = text_build(face.*, spec);
+    if (text.error != TextError.none) {
+        artifact.*.error = ComponentStateGalleryError.text_error;
+        artifact.*.error_section = section;
+        artifact.*.error_index = index;
+        artifact.*.text_error = text.error;
+        text_free(&text);
+        return 0;
+    }
+    let contribution: TextContributionResult = text_contribute(&text,
+        &artifact.*.display, &artifact.*.semantics);
+    if (contribution.error != TextContributionError.none ||
+        contribution.display_operations_added != 5 ||
+        contribution.display_resources_added != 1 ||
+        contribution.semantic_nodes_added != own_semantics) {
+        artifact.*.error = ComponentStateGalleryError.text_contribution_error;
+        artifact.*.error_section = section;
+        artifact.*.error_index = index;
+        artifact.*.text_contribution_error = contribution.error;
+        artifact.*.display_error = contribution.display_error;
+        artifact.*.semantics_error = contribution.semantics_error;
+        text_free(&text);
+        return 0;
+    }
+    artifact.*.text_artifact_count = artifact.*.text_artifact_count + 1;
+    artifact.*.text_semantic_count = artifact.*.text_semantic_count +
+        own_semantics;
+    text_free(&text);
+    return 1;
+}
+
+fn component_state_gallery_emit_tier_surface(
+    artifact:  *ComponentStateGalleryArtifact,
+    face:  *OpenTypeFace,
+    placement: ComponentStateGalleryPlacement, index: i32) i32 {
+    let spec: SurfaceSpec = surface_spec(placement.id,
+        semantic_root_key(), placement.control_bounds,
+        component_state_gallery_tier_semantic_name(index),
+        component_state_gallery_tier(index));
+    spec.description = "Read-only Surface elevation tier fixture";
+    spec.density = artifact.*.density;
+    let scratch_display: DisplayList = display_list_make();
+    let scratch_hits: HitTree = hit_tree_make();
+    let scratch_semantics: SemanticsTree = semantics_tree_make();
+    let built: SurfaceBuildResult = surface_emit(spec,
+        &scratch_display, &scratch_hits, &scratch_semantics);
+    if (built.error != SurfaceBuildError.none) {
+        artifact.*.error = ComponentStateGalleryError.surface_error;
+        artifact.*.error_section = 0;
+        artifact.*.error_index = index;
+        artifact.*.surface_error = built.error;
+        artifact.*.display_error = built.display_error;
+        artifact.*.hit_error = built.hit_error;
+        artifact.*.semantics_error = built.semantics_error;
+        semantics_tree_free(&scratch_semantics);
+        hit_tree_free(&scratch_hits);
+        display_list_free(&scratch_display);
+        return 0;
+    }
+    let checkpoint: ComponentStateGalleryCheckpoint =
+        component_state_gallery_checkpoint(artifact);
+    let merged: ComponentStateGalleryMergeResult =
+        component_state_gallery_merge_scratch(artifact,
+            &scratch_display, &scratch_hits, &scratch_semantics,
+            0, artifact.*.id, semantic_none_key(), "", 1, 1);
+    semantics_tree_free(&scratch_semantics);
+    hit_tree_free(&scratch_hits);
+    display_list_free(&scratch_display);
+    if (merged.error != ComponentStateGalleryMergeError.none) {
+        component_state_gallery_record_merge_error(artifact, merged, 0, index);
+        return 0;
+    }
+    let surface: SurfaceArtifact = built.artifact;
+    surface.display_op_start = merged.display_start;
+    surface.display_op_end = merged.display_end;
+    surface.hit_node_index = 0 - 1;
+    surface.semantics_node_index = merged.semantics_start;
+    if (component_state_gallery_emit_text(artifact, face, placement.id,
+        placement.id, surface.content_bounds, "Content surface",
+        SemanticTypeToken.label, surface.style.content_color_token,
+        0, 0, 0, index) == 0) {
+        component_state_gallery_rollback(artifact, checkpoint);
+        return 0;
+    }
+    push[SurfaceArtifact](&artifact.*.tier_surfaces, surface);
+    return 1;
+}
+
+fn component_state_gallery_emit_state_surface(
+    artifact:  *ComponentStateGalleryArtifact,
+    face:  *OpenTypeFace,
+    placement: ComponentStateGalleryPlacement, index: i32) i32 {
+    let spec: SurfaceSpec = surface_action_spec(placement.id,
+        semantic_root_key(), placement.control_bounds, "Action card",
+        SurfaceTier.panel);
+    spec.description = component_state_gallery_state_description(0, index);
+    spec.focus_order = 100 + index as i64;
+    spec.z_order = 100 + index as i64;
+    spec.density = artifact.*.density;
+    spec.interaction = surface_canonical_state(
+        component_state_gallery_surface_state(index));
+    spec.interaction = component_state_gallery_runtime_interaction(
+        spec.interaction, placement.id, artifact.*.runtime_state);
+    let scratch_display: DisplayList = display_list_make();
+    let scratch_hits: HitTree = hit_tree_make();
+    let scratch_semantics: SemanticsTree = semantics_tree_make();
+    let built: SurfaceBuildResult = surface_emit(spec,
+        &scratch_display, &scratch_hits, &scratch_semantics);
+    if (built.error != SurfaceBuildError.none) {
+        artifact.*.error = ComponentStateGalleryError.surface_error;
+        artifact.*.error_section = 1;
+        artifact.*.error_index = index;
+        artifact.*.surface_error = built.error;
+        artifact.*.display_error = built.display_error;
+        artifact.*.hit_error = built.hit_error;
+        artifact.*.semantics_error = built.semantics_error;
+        semantics_tree_free(&scratch_semantics);
+        hit_tree_free(&scratch_hits);
+        display_list_free(&scratch_display);
+        return 0;
+    }
+    let checkpoint: ComponentStateGalleryCheckpoint =
+        component_state_gallery_checkpoint(artifact);
+    let clear_focus: NodeKey = semantic_none_key();
+    if (index == 2 && node_key_equal(artifact.*.runtime_state.focused,
+        placement.id) == 0) { clear_focus = placement.id; }
+    let merged: ComponentStateGalleryMergeResult =
+        component_state_gallery_merge_scratch(artifact,
+            &scratch_display, &scratch_hits, &scratch_semantics,
+            1, artifact.*.id, clear_focus,
+            component_state_gallery_state_value(index), 1, 1);
+    semantics_tree_free(&scratch_semantics);
+    hit_tree_free(&scratch_hits);
+    display_list_free(&scratch_display);
+    if (merged.error != ComponentStateGalleryMergeError.none) {
+        component_state_gallery_record_merge_error(artifact, merged, 1, index);
+        return 0;
+    }
+    let surface: SurfaceArtifact = built.artifact;
+    surface.display_op_start = merged.display_start;
+    surface.display_op_end = merged.display_end;
+    surface.hit_node_index = merged.hit_start;
+    surface.semantics_node_index = merged.semantics_start;
+    if (component_state_gallery_emit_text(artifact, face, placement.id,
+        placement.id, surface.content_bounds, "Action card",
+        SemanticTypeToken.label, surface.style.content_color_token,
+        0, (surface.effectively_enabled == 0) as i32, 1, index) == 0) {
+        component_state_gallery_rollback(artifact, checkpoint);
+        return 0;
+    }
+    if (index == 2) {
+        artifact.*.focus_snapshot_count =
+            artifact.*.focus_snapshot_count + 1;
+    }
+    push[SurfaceArtifact](&artifact.*.state_surfaces, surface);
+    return 1;
+}
+
+fn component_state_gallery_emit_button(
+    artifact:  *ComponentStateGalleryArtifact,
+    face:  *OpenTypeFace,
+    placement: ComponentStateGalleryPlacement, index: i32) i32 {
+    let spec: ButtonSpec = button_spec(placement.id, semantic_root_key(),
+        placement.control_bounds, "Run build");
+    spec.description = component_state_gallery_state_description(1, index);
+    spec.focus_order = 200 + index as i64;
+    spec.z_order = 200 + index as i64;
+    spec.density = artifact.*.density;
+    spec.variant = ButtonVariant.secondary;
+    spec.interaction = button_canonical_state(
+        component_state_gallery_button_state(index));
+    spec.interaction = component_state_gallery_runtime_interaction(
+        spec.interaction, placement.id, artifact.*.runtime_state);
+    let scratch_display: DisplayList = display_list_make();
+    let scratch_hits: HitTree = hit_tree_make();
+    let scratch_semantics: SemanticsTree = semantics_tree_make();
+    let built: ButtonBuildResult = button_emit(spec,
+        &scratch_display, &scratch_hits, &scratch_semantics);
+    if (built.error != ButtonBuildError.none) {
+        artifact.*.error = ComponentStateGalleryError.button_error;
+        artifact.*.error_section = 2;
+        artifact.*.error_index = index;
+        artifact.*.button_error = built.error;
+        artifact.*.display_error = built.display_error;
+        artifact.*.hit_error = built.hit_error;
+        artifact.*.semantics_error = built.semantics_error;
+        semantics_tree_free(&scratch_semantics);
+        hit_tree_free(&scratch_hits);
+        display_list_free(&scratch_display);
+        return 0;
+    }
+    let checkpoint: ComponentStateGalleryCheckpoint =
+        component_state_gallery_checkpoint(artifact);
+    let clear_focus: NodeKey = semantic_none_key();
+    if (index == 2 && node_key_equal(artifact.*.runtime_state.focused,
+        placement.id) == 0) { clear_focus = placement.id; }
+    let merged: ComponentStateGalleryMergeResult =
+        component_state_gallery_merge_scratch(artifact,
+            &scratch_display, &scratch_hits, &scratch_semantics,
+            1, artifact.*.id, clear_focus,
+            component_state_gallery_state_value(index), 1, 1);
+    semantics_tree_free(&scratch_semantics);
+    hit_tree_free(&scratch_hits);
+    display_list_free(&scratch_display);
+    if (merged.error != ComponentStateGalleryMergeError.none) {
+        component_state_gallery_record_merge_error(artifact, merged, 2, index);
+        return 0;
+    }
+    let button: ButtonArtifact = built.artifact;
+    button.display_op_start = merged.display_start;
+    button.display_op_end = merged.display_end;
+    button.hit_node_index = merged.hit_start;
+    button.semantics_node_index = merged.semantics_start;
+    if (button.content_visible != 0 &&
+        component_state_gallery_emit_text(artifact, face, placement.id,
+            placement.id, button.content_bounds, "Run build",
+            SemanticTypeToken.label, button.style.text_token,
+            0, (button.effectively_enabled == 0) as i32,
+            2, index) == 0) {
+        component_state_gallery_rollback(artifact, checkpoint);
+        return 0;
+    }
+    if (index == 2) {
+        artifact.*.focus_snapshot_count =
+            artifact.*.focus_snapshot_count + 1;
+    }
+    push[ButtonArtifact](&artifact.*.buttons, button);
+    return 1;
+}
+
+fn component_state_gallery_emit_navigation(
+    artifact:  *ComponentStateGalleryArtifact,
+    face:  *OpenTypeFace,
+    placement: ComponentStateGalleryPlacement, index: i32) i32 {
+    let spec: NavigationItemSpec = navigation_item_spec(placement.id,
+        semantic_root_key(), placement.control_bounds, "Project");
+    spec.description = component_state_gallery_state_description(2, index);
+    spec.focus_order = 300 + index as i64;
+    spec.z_order = 300 + index as i64;
+    spec.set_size = component_state_gallery_navigation_state_count() as i64;
+    spec.position_in_set = 1 + index as i64;
+    spec.density = artifact.*.density;
+    spec.interaction = navigation_item_canonical_state(
+        component_state_gallery_navigation_state(index));
+    spec.interaction = component_state_gallery_runtime_interaction(
+        spec.interaction, placement.id, artifact.*.runtime_state);
+    let scratch_display: DisplayList = display_list_make();
+    let scratch_hits: HitTree = hit_tree_make();
+    let scratch_semantics: SemanticsTree = semantics_tree_make();
+    let built: NavigationItemBuildResult = navigation_item_emit(spec,
+        &scratch_display, &scratch_hits, &scratch_semantics);
+    if (built.error != NavigationItemBuildError.none) {
+        artifact.*.error = ComponentStateGalleryError.navigation_error;
+        artifact.*.error_section = 3;
+        artifact.*.error_index = index;
+        artifact.*.navigation_error = built.error;
+        artifact.*.display_error = built.display_error;
+        artifact.*.hit_error = built.hit_error;
+        artifact.*.semantics_error = built.semantics_error;
+        semantics_tree_free(&scratch_semantics);
+        hit_tree_free(&scratch_hits);
+        display_list_free(&scratch_display);
+        return 0;
+    }
+    let checkpoint: ComponentStateGalleryCheckpoint =
+        component_state_gallery_checkpoint(artifact);
+    let clear_focus: NodeKey = semantic_none_key();
+    if (index == 2 && node_key_equal(artifact.*.runtime_state.focused,
+        placement.id) == 0) { clear_focus = placement.id; }
+    let merged: ComponentStateGalleryMergeResult =
+        component_state_gallery_merge_scratch(artifact,
+            &scratch_display, &scratch_hits, &scratch_semantics,
+            1, artifact.*.id, clear_focus,
+            component_state_gallery_state_value(index), 1, 1);
+    semantics_tree_free(&scratch_semantics);
+    hit_tree_free(&scratch_hits);
+    display_list_free(&scratch_display);
+    if (merged.error != ComponentStateGalleryMergeError.none) {
+        component_state_gallery_record_merge_error(artifact, merged, 3, index);
+        return 0;
+    }
+    let navigation: NavigationItemArtifact = built.artifact;
+    navigation.display_op_start = merged.display_start;
+    navigation.display_op_end = merged.display_end;
+    navigation.hit_node_index = merged.hit_start;
+    navigation.semantics_node_index = merged.semantics_start;
+    if (component_state_gallery_emit_text(artifact, face, placement.id,
+        placement.id, navigation.label_content_bounds, "Project",
+        navigation.label_type_token, navigation.label_color_token,
+        0, (navigation.effectively_enabled == 0) as i32,
+        3, index) == 0) {
+        component_state_gallery_rollback(artifact, checkpoint);
+        return 0;
+    }
+    if (index == 2) {
+        artifact.*.focus_snapshot_count =
+            artifact.*.focus_snapshot_count + 1;
+    }
+    push[NavigationItemArtifact](&artifact.*.navigation_items, navigation);
+    return 1;
+}
+
+fn component_state_gallery_segment_options(root: NodeKey)
+    ArrayList[SegmentedControlOption] {
+    let options: ArrayList[SegmentedControlOption] =
+        make[SegmentedControlOption](component_state_gallery_segment_count());
+    let index: i32 = 0;
+    while (index < component_state_gallery_segment_count()) {
+        push[SegmentedControlOption](&options, SegmentedControlOption{
+            .id = component_state_gallery_segment_id(root, index),
+            .label = component_state_gallery_segment_label(index),
+            .description = component_state_gallery_segment_description(index),
+        });
+        index = index + 1;
+    }
+    return options;
+}
+
+fn component_state_gallery_segment_model() SegmentedControlModel {
+    let model: SegmentedControlModel = segmented_control_model(
+        component_state_gallery_segment_count(), 0);
+    let disabled: SegmentedControlTransition = segmented_control_reduce(model,
+        segmented_control_event(SegmentedControlEventKind.disable_target, 2));
+    return disabled.model;
+}
+
+fn component_state_gallery_segment_index(root: NodeKey,
+    target: NodeKey) i32 {
+    let index: i32 = 0;
+    while (index < component_state_gallery_segment_count()) {
+        if (node_key_equal(target,
+            component_state_gallery_segment_id(root, index)) != 0) {
+            return index;
+        }
+        index = index + 1;
+    }
+    return segmented_control_no_index();
+}
+
+fn component_state_gallery_target_enabled(root: NodeKey,
+    target: NodeKey) i32 {
+    let index: i32 = 0;
+    while (index < component_state_gallery_surface_state_count()) {
+        if (node_key_equal(target,
+            component_state_gallery_surface_id(root, index)) != 0) {
+            return (index != 5 && index != 6) as i32;
+        }
+        index = index + 1;
+    }
+    index = 0;
+    while (index < component_state_gallery_button_state_count()) {
+        if (node_key_equal(target,
+            component_state_gallery_button_id(root, index)) != 0) {
+            return (index != 5 && index != 6) as i32;
+        }
+        index = index + 1;
+    }
+    index = 0;
+    while (index < component_state_gallery_navigation_state_count()) {
+        if (node_key_equal(target,
+            component_state_gallery_navigation_id(root, index)) != 0) {
+            return (index != 5) as i32;
+        }
+        index = index + 1;
+    }
+    let segment: i32 = component_state_gallery_segment_index(root, target);
+    return (segment >= 0 && segment != 2) as i32;
+}
+
+fn component_state_gallery_runtime_state_default()
+    ComponentStateGalleryRuntimeState {
+    return ComponentStateGalleryRuntimeState{
+        .hovered = semantic_none_key(),
+        .pressed = semantic_none_key(),
+        .focused = semantic_none_key(),
+        .focus_visible = 0,
+        .segmented = component_state_gallery_segment_model(),
+        .last_activated = semantic_none_key(),
+        .activation_count = 0,
+        .revision = 0,
+    };
+}
+
+fn component_state_gallery_frozen_runtime_state(root: NodeKey)
+    ComponentStateGalleryRuntimeState {
+    let state: ComponentStateGalleryRuntimeState =
+        component_state_gallery_runtime_state_default();
+    let focused: SegmentedControlTransition = segmented_control_reduce(
+        state.segmented,
+        segmented_control_event(SegmentedControlEventKind.focus_target, 1));
+    state.segmented = focused.model;
+    state.focused = component_state_gallery_segment_id(root, 1);
+    state.focus_visible = 1;
+    return state;
+}
+
+fn component_state_gallery_segmented_model_equal(
+    left: SegmentedControlModel, right: SegmentedControlModel) i32 {
+    return (left.segment_count == right.segment_count &&
+        left.selected_index == right.selected_index &&
+        left.roving_index == right.roving_index &&
+        left.has_focus == right.has_focus &&
+        left.focus_visible == right.focus_visible &&
+        left.hovered_index == right.hovered_index &&
+        left.pressed_index == right.pressed_index &&
+        left.enabled_mask == right.enabled_mask) as i32;
+}
+
+fn component_state_gallery_runtime_payload_equal(
+    left: ComponentStateGalleryRuntimeState,
+    right: ComponentStateGalleryRuntimeState) i32 {
+    return (node_key_equal(left.hovered, right.hovered) != 0 &&
+        node_key_equal(left.pressed, right.pressed) != 0 &&
+        node_key_equal(left.focused, right.focused) != 0 &&
+        left.focus_visible == right.focus_visible &&
+        component_state_gallery_segmented_model_equal(
+            left.segmented, right.segmented) != 0 &&
+        node_key_equal(left.last_activated, right.last_activated) != 0 &&
+        left.activation_count == right.activation_count) as i32;
+}
+
+fn component_state_gallery_runtime_state_hash(
+    state:  ComponentStateGalleryRuntimeState) i64 {
+    let hash: i64 = 17;
+    hash = (hash * 1099511628211) ^ state.hovered.value;
+    hash = (hash * 1099511628211) ^ state.hovered.generation;
+    hash = (hash * 1099511628211) ^ state.pressed.value;
+    hash = (hash * 1099511628211) ^ state.pressed.generation;
+    hash = (hash * 1099511628211) ^ state.focused.value;
+    hash = (hash * 1099511628211) ^ state.focused.generation;
+    hash = (hash * 1099511628211) ^ state.focus_visible as i64;
+    hash = (hash * 1099511628211) ^ state.segmented.segment_count as i64;
+    hash = (hash * 1099511628211) ^ state.segmented.selected_index as i64;
+    hash = (hash * 1099511628211) ^ state.segmented.roving_index as i64;
+    hash = (hash * 1099511628211) ^ state.segmented.has_focus as i64;
+    hash = (hash * 1099511628211) ^ state.segmented.focus_visible as i64;
+    hash = (hash * 1099511628211) ^ state.segmented.hovered_index as i64;
+    hash = (hash * 1099511628211) ^ state.segmented.pressed_index as i64;
+    hash = (hash * 1099511628211) ^ state.segmented.enabled_mask;
+    hash = (hash * 1099511628211) ^ state.last_activated.value;
+    hash = (hash * 1099511628211) ^ state.last_activated.generation;
+    hash = (hash * 1099511628211) ^ state.activation_count;
+    hash = (hash * 1099511628211) ^ state.revision;
+    if (hash == 0) { return 1; }
+    return hash;
+}
+
+fn component_state_gallery_runtime_state_valid(root: NodeKey,
+    state:  ComponentStateGalleryRuntimeState) i32 {
+    if (canvas_key_valid(root) == 0 ||
+        root.value > component_state_gallery_max_root_id() ||
+        (state.focus_visible != 0 && state.focus_visible != 1) ||
+        state.activation_count < 0 || state.revision < 0 ||
+        state.revision < state.activation_count ||
+        segmented_control_model_valid(state.segmented) == 0 ||
+        state.segmented.segment_count !=
+            component_state_gallery_segment_count() ||
+        segmented_control_index_enabled(state.segmented, 0) == 0 ||
+        segmented_control_index_enabled(state.segmented, 1) == 0 ||
+        segmented_control_index_enabled(state.segmented, 2) != 0 ||
+        segmented_control_index_enabled(state.segmented, 3) == 0) {
+        return 0;
+    }
+    let none: NodeKey = semantic_none_key();
+    if ((node_key_equal(state.hovered, none) == 0 &&
+            component_state_gallery_target_enabled(root,
+                state.hovered) == 0) ||
+        (node_key_equal(state.pressed, none) == 0 &&
+            component_state_gallery_target_enabled(root,
+                state.pressed) == 0) ||
+        (node_key_equal(state.focused, none) == 0 &&
+            component_state_gallery_target_enabled(root,
+                state.focused) == 0) ||
+        (node_key_equal(state.last_activated, none) == 0 &&
+            component_state_gallery_target_enabled(root,
+                state.last_activated) == 0)) { return 0; }
+    if ((node_key_equal(state.focused, none) != 0 &&
+            state.focus_visible != 0) ||
+        (state.activation_count == 0 &&
+            node_key_equal(state.last_activated, none) == 0) ||
+        (state.activation_count > 0 &&
+            node_key_equal(state.last_activated, none) != 0)) { return 0; }
+
+    let hovered_segment: i32 = component_state_gallery_segment_index(
+        root, state.hovered);
+    let pressed_segment: i32 = component_state_gallery_segment_index(
+        root, state.pressed);
+    let focused_segment: i32 = component_state_gallery_segment_index(
+        root, state.focused);
+    if ((hovered_segment >= 0 &&
+            state.segmented.hovered_index != hovered_segment) ||
+        (hovered_segment < 0 &&
+            state.segmented.hovered_index != segmented_control_no_index()) ||
+        (pressed_segment >= 0 &&
+            state.segmented.pressed_index != pressed_segment) ||
+        (pressed_segment < 0 &&
+            state.segmented.pressed_index != segmented_control_no_index())) {
+        return 0;
+    }
+    if (focused_segment >= 0) {
+        if (state.segmented.has_focus == 0 ||
+            state.segmented.roving_index != focused_segment ||
+            state.segmented.focus_visible != state.focus_visible) { return 0; }
+    } else if (state.segmented.has_focus != 0 ||
+        state.segmented.focus_visible != 0) { return 0; }
+    return 1;
+}
+
+fn component_state_gallery_event(kind: ComponentStateGalleryEventKind,
+    target: NodeKey) ComponentStateGalleryEvent {
+    return ComponentStateGalleryEvent{
+        .kind = kind,
+        .target = target,
+        .segmented_kind = SegmentedControlEventKind.pointer_cancel,
+        .segmented_target_index = segmented_control_no_index(),
+    };
+}
+
+fn component_state_gallery_segmented_event(kind: SegmentedControlEventKind,
+    target_index: i32) ComponentStateGalleryEvent {
+    return ComponentStateGalleryEvent{
+        .kind = ComponentStateGalleryEventKind.segmented,
+        .target = semantic_none_key(),
+        .segmented_kind = kind,
+        .segmented_target_index = target_index,
+    };
+}
+
+fn component_state_gallery_transition(
+    current: ComponentStateGalleryRuntimeState)
+    ComponentStateGalleryTransition {
+    return ComponentStateGalleryTransition{
+        .state = current,
+        .state_changed = 0,
+        .focus_changed = 0,
+        .activation_changed = 0,
+        .selection_changed = 0,
+        .rejected = 0,
+    };
+}
+
+fn component_state_gallery_clear_segment_pointer(
+    state:  *ComponentStateGalleryRuntimeState) void {
+    state.*.segmented.hovered_index = segmented_control_no_index();
+    state.*.segmented.pressed_index = segmented_control_no_index();
+}
+
+fn component_state_gallery_clear_segment_focus(
+    state:  *ComponentStateGalleryRuntimeState) void {
+    state.*.segmented.has_focus = 0;
+    state.*.segmented.focus_visible = 0;
+    state.*.segmented.pressed_index = segmented_control_no_index();
+}
+
+fn component_state_gallery_record_activation(
+    transition:  *ComponentStateGalleryTransition,
+    target: NodeKey) void {
+    transition.*.state.last_activated = target;
+    transition.*.state.activation_count =
+        transition.*.state.activation_count + 1;
+    transition.*.activation_changed = 1;
+}
+
+fn component_state_gallery_apply_segmented_transition(
+    transition:  *ComponentStateGalleryTransition,
+    root: NodeKey, segmented: SegmentedControlTransition) void {
+    if (segmented.rejected != 0) {
+        transition.*.rejected = 1;
+        return;
+    }
+    let old_selected: i32 = transition.*.state.segmented.selected_index;
+    let old_focused: NodeKey = transition.*.state.focused;
+    transition.*.state.segmented = segmented.model;
+    let old_hover_segment: i32 = component_state_gallery_segment_index(
+        root, transition.*.state.hovered);
+    if (segmented.model.hovered_index >= 0) {
+        transition.*.state.hovered = component_state_gallery_segment_id(
+            root, segmented.model.hovered_index);
+    } else if (old_hover_segment >= 0) {
+        transition.*.state.hovered = semantic_none_key();
+    }
+    let old_pressed_segment: i32 = component_state_gallery_segment_index(
+        root, transition.*.state.pressed);
+    if (segmented.model.pressed_index >= 0) {
+        transition.*.state.pressed = component_state_gallery_segment_id(
+            root, segmented.model.pressed_index);
+    } else if (old_pressed_segment >= 0) {
+        transition.*.state.pressed = semantic_none_key();
+    }
+    if (segmented.model.has_focus != 0) {
+        transition.*.state.focused = component_state_gallery_segment_id(
+            root, segmented.model.roving_index);
+        transition.*.state.focus_visible = segmented.model.focus_visible;
+    } else if (component_state_gallery_segment_index(root,
+        old_focused) >= 0) {
+        transition.*.state.focused = semantic_none_key();
+        transition.*.state.focus_visible = 0;
+    }
+    if (old_selected != segmented.model.selected_index) {
+        transition.*.selection_changed = 1;
+    }
+    if (segmented.activated != 0) {
+        component_state_gallery_record_activation(transition,
+            component_state_gallery_segment_id(root,
+                segmented.model.selected_index));
+    }
+}
+
+fn component_state_gallery_reduce(
+    current: ComponentStateGalleryRuntimeState,
+    root: NodeKey, event: ComponentStateGalleryEvent)
+    ComponentStateGalleryTransition {
+    let result: ComponentStateGalleryTransition =
+        component_state_gallery_transition(current);
+    if (component_state_gallery_runtime_state_valid(root, current) == 0) {
+        result.rejected = 1;
+        return result;
+    }
+    if (event.kind == ComponentStateGalleryEventKind.segmented) {
+        if (event.segmented_kind == SegmentedControlEventKind.disable_target ||
+            event.segmented_kind == SegmentedControlEventKind.enable_target) {
+            result.rejected = 1;
+            return result;
+        }
+        let segmented: SegmentedControlTransition = segmented_control_reduce(
+            current.segmented, segmented_control_event(event.segmented_kind,
+                event.segmented_target_index));
+        component_state_gallery_apply_segmented_transition(&result,
+            root, segmented);
+    } else if (event.kind == ComponentStateGalleryEventKind.pointer_cancel) {
+        result.state.pressed = semantic_none_key();
+        let segmented: SegmentedControlTransition = segmented_control_reduce(
+            current.segmented, segmented_control_event(
+                SegmentedControlEventKind.pointer_cancel,
+                segmented_control_no_index()));
+        component_state_gallery_apply_segmented_transition(&result,
+            root, segmented);
+    } else {
+        if (component_state_gallery_target_enabled(root, event.target) == 0) {
+            result.rejected = 1;
+            return result;
+        }
+        let segment: i32 = component_state_gallery_segment_index(
+            root, event.target);
+        switch (event.kind) {
+            .pointer_enter => {
+                if (segment >= 0) {
+                    let segmented: SegmentedControlTransition =
+                        segmented_control_reduce(current.segmented,
+                            segmented_control_event(
+                                SegmentedControlEventKind.pointer_enter,
+                                segment));
+                    component_state_gallery_apply_segmented_transition(
+                        &result, root, segmented);
+                } else {
+                    result.state.hovered = event.target;
+                    result.state.segmented.hovered_index =
+                        segmented_control_no_index();
+                }
+            }
+            .pointer_leave => {
+                if (segment >= 0) {
+                    let segmented: SegmentedControlTransition =
+                        segmented_control_reduce(current.segmented,
+                            segmented_control_event(
+                                SegmentedControlEventKind.pointer_leave,
+                                segment));
+                    component_state_gallery_apply_segmented_transition(
+                        &result, root, segmented);
+                } else {
+                    if (node_key_equal(result.state.hovered,
+                        event.target) != 0) {
+                        result.state.hovered = semantic_none_key();
+                    }
+                    if (node_key_equal(result.state.pressed,
+                        event.target) != 0) {
+                        result.state.pressed = semantic_none_key();
+                    }
+                }
+            }
+            .pointer_down => {
+                if (segment >= 0) {
+                    let segmented: SegmentedControlTransition =
+                        segmented_control_reduce(current.segmented,
+                            segmented_control_event(
+                                SegmentedControlEventKind.pointer_down,
+                                segment));
+                    component_state_gallery_apply_segmented_transition(
+                        &result, root, segmented);
+                } else {
+                    result.state.hovered = event.target;
+                    result.state.pressed = event.target;
+                    result.state.focused = event.target;
+                    result.state.focus_visible = 0;
+                    component_state_gallery_clear_segment_pointer(
+                        &result.state);
+                    component_state_gallery_clear_segment_focus(
+                        &result.state);
+                }
+            }
+            .pointer_up_inside => {
+                if (segment >= 0) {
+                    let segmented: SegmentedControlTransition =
+                        segmented_control_reduce(current.segmented,
+                            segmented_control_event(
+                                SegmentedControlEventKind.pointer_up_inside,
+                                segment));
+                    component_state_gallery_apply_segmented_transition(
+                        &result, root, segmented);
+                } else if (node_key_equal(current.pressed,
+                    event.target) != 0) {
+                    result.state.pressed = semantic_none_key();
+                    component_state_gallery_record_activation(&result,
+                        event.target);
+                } else {
+                    result.rejected = 1;
+                }
+            }
+            .focus_gained_pointer => {
+                result.state.focused = event.target;
+                result.state.focus_visible = 0;
+                if (segment >= 0) {
+                    result.state.segmented.roving_index = segment;
+                    result.state.segmented.has_focus = 1;
+                    result.state.segmented.focus_visible = 0;
+                } else {
+                    if (component_state_gallery_segment_index(root,
+                        result.state.pressed) >= 0) {
+                        result.state.pressed = semantic_none_key();
+                    }
+                    component_state_gallery_clear_segment_focus(
+                        &result.state);
+                }
+            }
+            .focus_gained_keyboard => {
+                result.state.focused = event.target;
+                result.state.focus_visible = 1;
+                if (segment >= 0) {
+                    let segmented: SegmentedControlTransition =
+                        segmented_control_reduce(current.segmented,
+                            segmented_control_event(
+                                SegmentedControlEventKind.focus_target,
+                                segment));
+                    component_state_gallery_apply_segmented_transition(
+                        &result, root, segmented);
+                } else {
+                    if (component_state_gallery_segment_index(root,
+                        result.state.pressed) >= 0) {
+                        result.state.pressed = semantic_none_key();
+                    }
+                    component_state_gallery_clear_segment_focus(
+                        &result.state);
+                }
+            }
+            .focus_lost => {
+                if (node_key_equal(current.focused, event.target) != 0) {
+                    result.state.focused = semantic_none_key();
+                    result.state.focus_visible = 0;
+                    if (node_key_equal(result.state.pressed,
+                        event.target) != 0) {
+                        result.state.pressed = semantic_none_key();
+                    }
+                    if (segment >= 0) {
+                        component_state_gallery_clear_segment_focus(
+                            &result.state);
+                    }
+                }
+            }
+            .activate_target => {
+                if (segment >= 0) {
+                    let segmented: SegmentedControlTransition =
+                        segmented_control_reduce(current.segmented,
+                            segmented_control_event(
+                                SegmentedControlEventKind.select_target,
+                                segment));
+                    component_state_gallery_apply_segmented_transition(
+                        &result, root, segmented);
+                } else {
+                    component_state_gallery_record_activation(&result,
+                        event.target);
+                }
+            }
+            .pointer_cancel => { }
+            .segmented => { }
+        }
+    }
+    if (result.rejected != 0) {
+        result.state = current;
+        result.state_changed = 0;
+        result.focus_changed = 0;
+        result.activation_changed = 0;
+        result.selection_changed = 0;
+        return result;
+    }
+    result.focus_changed = (node_key_equal(current.focused,
+        result.state.focused) == 0 ||
+        current.focus_visible != result.state.focus_visible) as i32;
+    if (component_state_gallery_runtime_payload_equal(current,
+        result.state) == 0) {
+        result.state.revision = current.revision + 1;
+        result.state_changed = 1;
+    }
+    if (component_state_gallery_runtime_state_valid(root,
+        result.state) == 0) {
+        result.state = current;
+        result.state_changed = 0;
+        result.focus_changed = 0;
+        result.activation_changed = 0;
+        result.selection_changed = 0;
+        result.rejected = 1;
+    }
+    return result;
+}
+
+fn component_state_gallery_emit_segmented(
+    artifact:  *ComponentStateGalleryArtifact,
+    face:  *OpenTypeFace) i32 {
+    let options: ArrayList[SegmentedControlOption] =
+        component_state_gallery_segment_options(artifact.*.id);
+    let checkpoint: ComponentStateGalleryCheckpoint =
+        component_state_gallery_checkpoint(artifact);
+    let model: SegmentedControlModel = artifact.*.runtime_state.segmented;
+    let spec: SegmentedControlSpec = segmented_control_spec(
+        component_state_gallery_segmented_id(artifact.*.id),
+        semantic_root_key(), artifact.*.layout.segmented_bounds,
+        "Component state behavior", model);
+    spec.description =
+        "Selected disabled resting and runtime focus-visible segments in one real control";
+    spec.focus_order_base = 400;
+    spec.z_order = 400;
+    spec.density = artifact.*.density;
+    let scratch_display: DisplayList = display_list_make();
+    let scratch_hits: HitTree = hit_tree_make();
+    let scratch_semantics: SemanticsTree = semantics_tree_make();
+    let built: SegmentedControlBuildResult = segmented_control_emit(spec,
+        &options, &scratch_display, &scratch_hits, &scratch_semantics);
+    if (built.error != SegmentedControlBuildError.none) {
+        artifact.*.error = ComponentStateGalleryError.segmented_error;
+        artifact.*.error_section = 4;
+        artifact.*.segmented_error = built.error;
+        artifact.*.display_error = built.display_error;
+        artifact.*.hit_error = built.hit_error;
+        artifact.*.semantics_error = built.semantics_error;
+        semantics_tree_free(&scratch_semantics);
+        hit_tree_free(&scratch_hits);
+        display_list_free(&scratch_display);
+        free[SegmentedControlOption](&options);
+        return 0;
+    }
+    let merged: ComponentStateGalleryMergeResult =
+        component_state_gallery_merge_scratch(artifact,
+            &scratch_display, &scratch_hits, &scratch_semantics,
+            1, artifact.*.id, semantic_none_key(), "",
+            component_state_gallery_segment_count() + 1,
+            component_state_gallery_segment_count() + 1);
+    semantics_tree_free(&scratch_semantics);
+    hit_tree_free(&scratch_hits);
+    display_list_free(&scratch_display);
+    if (merged.error != ComponentStateGalleryMergeError.none) {
+        component_state_gallery_record_merge_error(artifact, merged, 4, 0);
+        free[SegmentedControlOption](&options);
+        return 0;
+    }
+    artifact.*.segmented = built.artifact;
+    artifact.*.segmented.display_op_start = merged.display_start;
+    artifact.*.segmented.display_op_end = merged.display_end;
+    artifact.*.segmented.group_hit_node_index = merged.hit_start;
+    artifact.*.segmented.group_semantics_node_index = merged.semantics_start;
+    let added_resource_ids: ArrayList[i64] = make[i64](
+        component_state_gallery_segment_count());
+    let index: i32 = 0;
+    while (index < component_state_gallery_segment_count()) {
+        let style: SegmentedControlResolvedStyle = segmented_control_style(
+            spec, index);
+        if (component_state_gallery_emit_text(artifact, face,
+            options.data[index].id, options.data[index].id,
+            segmented_control_content_bounds(spec, index),
+            options.data[index].label, artifact.*.segmented.label_type_token,
+            style.label_color_token, 0, style.disabled, 4, index) == 0) {
+            if (component_state_gallery_rollback_text_resources(artifact,
+                checkpoint, &added_resource_ids) == 0) {
+                artifact.*.error = ComponentStateGalleryError.display_error;
+                artifact.*.display_error = DisplayError.content_mutated;
+            }
+            free[i64](&added_resource_ids);
+            free[SegmentedControlOption](&options);
+            return 0;
+        }
+        push[i64](&added_resource_ids, canvas_resource_id(
+            options.data[index].id, text_local_path_resource_id()));
+        index = index + 1;
+    }
+    artifact.*.live_focus_id = artifact.*.runtime_state.focused;
+    free[i64](&added_resource_ids);
+    free[SegmentedControlOption](&options);
+    return 1;
+}
+
+fn component_state_gallery_mix(hash: i64, value: i64) i64 {
+    return (hash * 1099511628211) ^ value;
+}
+
+fn component_state_gallery_rect_hash(hash: i64, value: Rect) i64 {
+    let result: i64 = component_state_gallery_mix(hash, value.x);
+    result = component_state_gallery_mix(result, value.y);
+    result = component_state_gallery_mix(result, value.width);
+    return component_state_gallery_mix(result, value.height);
+}
+
+fn component_state_gallery_placement_hash(hash: i64,
+    placement: ComponentStateGalleryPlacement) i64 {
+    let result: i64 = component_state_gallery_mix(hash,
+        placement.id.value);
+    result = component_state_gallery_mix(result, placement.id.generation);
+    result = component_state_gallery_mix(result,
+        placement.caption_id.value);
+    result = component_state_gallery_rect_hash(result,
+        placement.cell_bounds);
+    result = component_state_gallery_rect_hash(result,
+        placement.caption_bounds);
+    return component_state_gallery_rect_hash(result,
+        placement.control_bounds);
+}
+
+fn component_state_gallery_hit_hash(tree:  *HitTree) i64 {
+    let hash: i64 = component_state_gallery_mix(17,
+        tree.*.nodes.len as i64);
+    hash = component_state_gallery_mix(hash, tree.*.revision);
+    let index: i32 = 0;
+    while (index < tree.*.nodes.len) {
+        let node: HitNode = tree.*.nodes.data[index];
+        hash = component_state_gallery_mix(hash, node.id.value);
+        hash = component_state_gallery_mix(hash, node.id.generation);
+        hash = component_state_gallery_mix(hash, node.parent.value);
+        hash = component_state_gallery_rect_hash(hash, node.bounds);
+        hash = component_state_gallery_mix(hash, node.z_order);
+        hash = component_state_gallery_mix(hash, node.enabled as i64);
+        hash = component_state_gallery_mix(hash, node.focusable as i64);
+        index = index + 1;
+    }
+    if (hash == 0) { return 1; }
+    return hash;
+}
+
+fn component_state_gallery_calculate_hash(
+    artifact:  *ComponentStateGalleryArtifact) i64 {
+    let hash: i64 = component_state_gallery_mix(17, artifact.*.id.value);
+    hash = component_state_gallery_mix(hash, artifact.*.id.generation);
+    hash = component_state_gallery_rect_hash(hash, artifact.*.bounds);
+    hash = component_state_gallery_mix(hash, artifact.*.density as i64);
+    hash = component_state_gallery_mix(hash, artifact.*.direction as i64);
+    hash = component_state_gallery_mix(hash,
+        artifact.*.layout.required_height);
+    hash = component_state_gallery_mix(hash,
+        artifact.*.layout.minimum_width);
+    hash = component_state_gallery_rect_hash(hash,
+        artifact.*.layout.title_bounds);
+    let index: i32 = 0;
+    while (index < artifact.*.layout.section_heading_bounds.len) {
+        hash = component_state_gallery_rect_hash(hash,
+            artifact.*.layout.section_heading_bounds.data[index]);
+        index = index + 1;
+    }
+    index = 0;
+    while (index < artifact.*.layout.tier_placements.len) {
+        hash = component_state_gallery_placement_hash(hash,
+            artifact.*.layout.tier_placements.data[index]);
+        index = index + 1;
+    }
+    index = 0;
+    while (index < artifact.*.layout.surface_placements.len) {
+        hash = component_state_gallery_placement_hash(hash,
+            artifact.*.layout.surface_placements.data[index]);
+        index = index + 1;
+    }
+    index = 0;
+    while (index < artifact.*.layout.button_placements.len) {
+        hash = component_state_gallery_placement_hash(hash,
+            artifact.*.layout.button_placements.data[index]);
+        index = index + 1;
+    }
+    index = 0;
+    while (index < artifact.*.layout.navigation_placements.len) {
+        hash = component_state_gallery_placement_hash(hash,
+            artifact.*.layout.navigation_placements.data[index]);
+        index = index + 1;
+    }
+    hash = component_state_gallery_rect_hash(hash,
+        artifact.*.layout.segmented_bounds);
+    index = 0;
+    while (index < artifact.*.tier_surfaces.len) {
+        hash = component_state_gallery_mix(hash,
+            artifact.*.tier_surfaces.data[index].evidence_hash);
+        index = index + 1;
+    }
+    index = 0;
+    while (index < artifact.*.state_surfaces.len) {
+        hash = component_state_gallery_mix(hash,
+            artifact.*.state_surfaces.data[index].evidence_hash);
+        index = index + 1;
+    }
+    index = 0;
+    while (index < artifact.*.buttons.len) {
+        hash = component_state_gallery_mix(hash,
+            artifact.*.buttons.data[index].evidence_hash);
+        index = index + 1;
+    }
+    index = 0;
+    while (index < artifact.*.navigation_items.len) {
+        hash = component_state_gallery_mix(hash,
+            artifact.*.navigation_items.data[index].evidence_hash);
+        index = index + 1;
+    }
+    hash = component_state_gallery_mix(hash,
+        artifact.*.segmented.evidence_hash);
+    hash = component_state_gallery_mix(hash,
+        artifact.*.text_artifact_count as i64);
+    hash = component_state_gallery_mix(hash,
+        artifact.*.text_semantic_count as i64);
+    hash = component_state_gallery_mix(hash,
+        artifact.*.focus_snapshot_count as i64);
+    hash = component_state_gallery_mix(hash,
+        artifact.*.live_focus_id.value);
+    hash = component_state_gallery_mix(hash, artifact.*.runtime_hash);
+    hash = component_state_gallery_mix(hash,
+        artifact.*.frozen_conformance as i64);
+    hash = component_state_gallery_mix(hash, artifact.*.display_hash);
+    hash = component_state_gallery_mix(hash, artifact.*.hit_hash);
+    hash = component_state_gallery_mix(hash, artifact.*.talkback_hash);
+    if (hash == 0) { return 1; }
+    return hash;
+}
+
+fn component_state_gallery_focused_semantics_count(
+    semantics:  *SemanticsTree) i32 {
+    let count: i32 = 0;
+    let index: i32 = 0;
+    while (index < semantics.*.nodes.len) {
+        if (semantics.*.nodes.data[index].focused != 0) {
+            count = count + 1;
+        }
+        index = index + 1;
+    }
+    return count;
+}
+
+fn component_state_gallery_valid(
+    artifact:  *ComponentStateGalleryArtifact) i32 {
+    let expected_focus_count: i32 = 1;
+    if (node_key_equal(artifact.*.runtime_state.focused,
+        semantic_none_key()) != 0) { expected_focus_count = 0; }
+    if (artifact.*.error != ComponentStateGalleryError.none ||
+        artifact.*.layout.flex_error != FlexError.none ||
+        artifact.*.layout.overflow != 0 ||
+        artifact.*.layout.section_heading_bounds.len !=
+            component_state_gallery_section_count() ||
+        artifact.*.layout.tier_placements.len !=
+            component_state_gallery_tier_count() ||
+        artifact.*.layout.surface_placements.len !=
+            component_state_gallery_surface_state_count() ||
+        artifact.*.layout.button_placements.len !=
+            component_state_gallery_button_state_count() ||
+        artifact.*.layout.navigation_placements.len !=
+            component_state_gallery_navigation_state_count() ||
+        artifact.*.tier_surfaces.len !=
+            component_state_gallery_tier_count() ||
+        artifact.*.state_surfaces.len !=
+            component_state_gallery_surface_state_count() ||
+        artifact.*.buttons.len !=
+            component_state_gallery_button_state_count() ||
+        artifact.*.navigation_items.len !=
+            component_state_gallery_navigation_state_count() ||
+        artifact.*.segmented.segment_count !=
+            component_state_gallery_segment_count() ||
+        artifact.*.text_artifact_count !=
+            component_state_gallery_expected_text_count() ||
+        artifact.*.text_semantic_count !=
+            component_state_gallery_expected_text_semantics() ||
+        artifact.*.display.ops.len <= 0 ||
+        artifact.*.display.resources.resources.len !=
+            component_state_gallery_expected_display_resources() ||
+        artifact.*.hits.nodes.len !=
+            component_state_gallery_expected_hit_nodes() ||
+        artifact.*.semantics.nodes.len !=
+            component_state_gallery_expected_semantic_nodes() ||
+        artifact.*.read_only_surface_hit_count != 0 ||
+        artifact.*.focus_snapshot_count != 3 ||
+        node_key_equal(artifact.*.live_focus_id,
+            artifact.*.runtime_state.focused) == 0 ||
+        component_state_gallery_focused_semantics_count(
+            &artifact.*.semantics) != expected_focus_count ||
+        component_state_gallery_runtime_state_valid(artifact.*.id,
+            artifact.*.runtime_state) == 0 ||
+        artifact.*.runtime_hash == 0 ||
+        artifact.*.runtime_hash != component_state_gallery_runtime_state_hash(
+            artifact.*.runtime_state) ||
+        (artifact.*.frozen_conformance != 0 &&
+            artifact.*.frozen_conformance != 1) ||
+        artifact.*.display_hash == 0 || artifact.*.hit_hash == 0 ||
+        artifact.*.talkback_hash == 0 || artifact.*.evidence_hash == 0 ||
+        display_list_verify(&artifact.*.display) != DisplayError.none ||
+        artifact.*.display_hash != artifact.*.display.content_hash ||
+        artifact.*.hit_hash != component_state_gallery_hit_hash(
+            &artifact.*.hits) ||
+        artifact.*.talkback_hash != talkback_tree_hash(
+            artifact.*.semantics) ||
+        artifact.*.evidence_hash !=
+            component_state_gallery_calculate_hash(artifact)) { return 0; }
+    if (expected_focus_count != 0) {
+        let live_index: i32 = semantics_find_index_borrowed(
+            &artifact.*.semantics, artifact.*.live_focus_id);
+        if (live_index < 0 ||
+            artifact.*.semantics.nodes.data[live_index].focused == 0) {
+            return 0;
+        }
+    }
+    let index: i32 = 0;
+    while (index < component_state_gallery_tier_count()) {
+        let id: NodeKey = component_state_gallery_tier_id(
+            artifact.*.id, index);
+        let semantic_index: i32 = semantics_find_index_borrowed(
+            &artifact.*.semantics, id);
+        if (hit_tree_find_index_borrowed(&artifact.*.hits, id) >= 0 ||
+            semantic_index < 0 ||
+            artifact.*.semantics.nodes.data[semantic_index].role !=
+                SemanticRole.group ||
+            artifact.*.semantics.nodes.data[semantic_index].action_mask != 0) {
+            return 0;
+        }
+        index = index + 1;
+    }
+    return 1;
+}
+
+fn component_state_gallery_build_with_state(
+    spec:  ComponentStateGallerySpec,
+    face:  *OpenTypeFace,
+    runtime:  ComponentStateGalleryRuntimeState)
+    ComponentStateGalleryArtifact {
+    let artifact: ComponentStateGalleryArtifact =
+        component_state_gallery_empty(spec);
+    if (component_state_gallery_spec_valid(spec) == 0) {
+        artifact.error = ComponentStateGalleryError.invalid_spec;
+        return artifact;
+    }
+    artifact.runtime_state = runtime;
+    artifact.runtime_hash = component_state_gallery_runtime_state_hash(
+        runtime);
+    if (component_state_gallery_runtime_state_valid(spec.id, runtime) == 0) {
+        artifact.error = ComponentStateGalleryError.invalid_runtime_state;
+        return artifact;
+    }
+    if (text_font_valid(face.*) == 0) {
+        artifact.error = ComponentStateGalleryError.missing_font;
+        return artifact;
+    }
+    component_state_gallery_layout_free(&artifact.layout);
+    artifact.layout = component_state_gallery_layout(spec);
+    if (artifact.layout.flex_error != FlexError.none) {
+        artifact.error = ComponentStateGalleryError.layout_error;
+        artifact.flex_error = artifact.layout.flex_error;
+        return artifact;
+    }
+    if (artifact.layout.overflow != 0) {
+        artifact.error = ComponentStateGalleryError.layout_overflow;
+        return artifact;
+    }
+    if (component_state_gallery_root_semantics(&artifact, spec) == 0) {
+        return artifact;
+    }
+    if (component_state_gallery_emit_text(&artifact, face,
+        component_state_gallery_title_id(spec.id), spec.id,
+        artifact.layout.title_bounds, spec.name, SemanticTypeToken.title,
+        SemanticColorToken.text_primary, 1, 0, 0 - 1, 0) == 0) {
+        return artifact;
+    }
+    let index: i32 = 0;
+    if (component_state_gallery_emit_text(&artifact, face,
+        component_state_gallery_heading_id(spec.id, 0), spec.id,
+        artifact.layout.section_heading_bounds.data[0],
+        component_state_gallery_section_name(0),
+        SemanticTypeToken.heading, SemanticColorToken.text_primary,
+        1, 0, 0, 0 - 1) == 0) { return artifact; }
+    while (index < component_state_gallery_tier_count()) {
+        let placement: ComponentStateGalleryPlacement =
+            artifact.layout.tier_placements.data[index];
+        if (component_state_gallery_emit_text(&artifact, face,
+            placement.caption_id, spec.id, placement.caption_bounds,
+            component_state_gallery_tier_name(index),
+            SemanticTypeToken.caption, SemanticColorToken.text_secondary,
+            1, 0, 0, index) == 0 ||
+            component_state_gallery_emit_tier_surface(&artifact, face,
+                placement, index) == 0) { return artifact; }
+        index = index + 1;
+    }
+    index = 0;
+    if (component_state_gallery_emit_text(&artifact, face,
+        component_state_gallery_heading_id(spec.id, 1), spec.id,
+        artifact.layout.section_heading_bounds.data[1],
+        component_state_gallery_section_name(1),
+        SemanticTypeToken.heading, SemanticColorToken.text_primary,
+        1, 0, 1, 0 - 1) == 0) { return artifact; }
+    while (index < component_state_gallery_surface_state_count()) {
+        let placement: ComponentStateGalleryPlacement =
+            artifact.layout.surface_placements.data[index];
+        if (component_state_gallery_emit_text(&artifact, face,
+            placement.caption_id, spec.id, placement.caption_bounds,
+            component_state_gallery_state_name(index),
+            SemanticTypeToken.caption, SemanticColorToken.text_secondary,
+            1, 0, 1, index) == 0 ||
+            component_state_gallery_emit_state_surface(&artifact, face,
+                placement, index) == 0) { return artifact; }
+        index = index + 1;
+    }
+    index = 0;
+    if (component_state_gallery_emit_text(&artifact, face,
+        component_state_gallery_heading_id(spec.id, 2), spec.id,
+        artifact.layout.section_heading_bounds.data[2],
+        component_state_gallery_section_name(2),
+        SemanticTypeToken.heading, SemanticColorToken.text_primary,
+        1, 0, 2, 0 - 1) == 0) { return artifact; }
+    while (index < component_state_gallery_button_state_count()) {
+        let placement: ComponentStateGalleryPlacement =
+            artifact.layout.button_placements.data[index];
+        if (component_state_gallery_emit_text(&artifact, face,
+            placement.caption_id, spec.id, placement.caption_bounds,
+            component_state_gallery_state_name(index),
+            SemanticTypeToken.caption, SemanticColorToken.text_secondary,
+            1, 0, 2, index) == 0 ||
+            component_state_gallery_emit_button(&artifact, face,
+                placement, index) == 0) { return artifact; }
+        index = index + 1;
+    }
+    index = 0;
+    if (component_state_gallery_emit_text(&artifact, face,
+        component_state_gallery_heading_id(spec.id, 3), spec.id,
+        artifact.layout.section_heading_bounds.data[3],
+        component_state_gallery_section_name(3),
+        SemanticTypeToken.heading, SemanticColorToken.text_primary,
+        1, 0, 3, 0 - 1) == 0) { return artifact; }
+    while (index < component_state_gallery_navigation_state_count()) {
+        let placement: ComponentStateGalleryPlacement =
+            artifact.layout.navigation_placements.data[index];
+        if (component_state_gallery_emit_text(&artifact, face,
+            placement.caption_id, spec.id, placement.caption_bounds,
+            component_state_gallery_state_name(index),
+            SemanticTypeToken.caption, SemanticColorToken.text_secondary,
+            1, 0, 3, index) == 0 ||
+            component_state_gallery_emit_navigation(&artifact, face,
+                placement, index) == 0) { return artifact; }
+        index = index + 1;
+    }
+    if (component_state_gallery_emit_text(&artifact, face,
+        component_state_gallery_heading_id(spec.id, 4), spec.id,
+        artifact.layout.section_heading_bounds.data[4],
+        component_state_gallery_section_name(4),
+        SemanticTypeToken.heading, SemanticColorToken.text_primary,
+        1, 0, 4, 0 - 1) == 0) { return artifact; }
+    if (component_state_gallery_emit_segmented(&artifact, face) == 0) {
+        return artifact;
+    }
+    let sealed: DisplayError = display_list_seal(&artifact.display);
+    if (sealed != DisplayError.none) {
+        artifact.error = ComponentStateGalleryError.display_error;
+        artifact.display_error = sealed;
+        return artifact;
+    }
+    artifact.display_hash = artifact.display.content_hash;
+    artifact.hit_hash = component_state_gallery_hit_hash(&artifact.hits);
+    artifact.talkback_hash = talkback_tree_hash(artifact.semantics);
+    artifact.evidence_hash = component_state_gallery_calculate_hash(&artifact);
+    return artifact;
+}
+
+fn component_state_gallery_build(
+    spec:  ComponentStateGallerySpec,
+    face:  *OpenTypeFace) ComponentStateGalleryArtifact {
+    let runtime: ComponentStateGalleryRuntimeState =
+        component_state_gallery_runtime_state_default();
+    return component_state_gallery_build_with_state(spec, face, runtime);
+}
+
+fn component_state_gallery_build_frozen_conformance(
+    spec:  ComponentStateGallerySpec,
+    face:  *OpenTypeFace) ComponentStateGalleryArtifact {
+    let runtime: ComponentStateGalleryRuntimeState =
+        component_state_gallery_frozen_runtime_state(spec.id);
+    let artifact: ComponentStateGalleryArtifact =
+        component_state_gallery_build_with_state(spec, face, runtime);
+    if (artifact.error == ComponentStateGalleryError.none) {
+        artifact.frozen_conformance = 1;
+        artifact.evidence_hash =
+            component_state_gallery_calculate_hash(&artifact);
+    }
+    return artifact;
+}
+
+fn component_state_gallery_free(
+    artifact:  *ComponentStateGalleryArtifact) void {
+    free[NavigationItemArtifact](&artifact.*.navigation_items);
+    free[ButtonArtifact](&artifact.*.buttons);
+    free[SurfaceArtifact](&artifact.*.state_surfaces);
+    free[SurfaceArtifact](&artifact.*.tier_surfaces);
+    component_state_gallery_layout_free(&artifact.*.layout);
+    semantics_tree_free(&artifact.*.semantics);
+    hit_tree_free(&artifact.*.hits);
+    display_list_free(&artifact.*.display);
+    artifact.*.display_hash = 0;
+    artifact.*.hit_hash = 0;
+    artifact.*.talkback_hash = 0;
+    artifact.*.evidence_hash = 0;
+}

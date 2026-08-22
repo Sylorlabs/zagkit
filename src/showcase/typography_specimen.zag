@@ -1,0 +1,1345 @@
+@import("../components/text.zag")
+@import("../automation/talkback.zag")
+
+// Experimental, headless Typography conformance specimen. It composes the
+// canonical Text component through Flex and emits one immutable DisplayList
+// plus a parallel semantics tree. This is system evidence, not a substitute
+// for the shaping, bidi, fallback, or continuous scaling work still upstream.
+
+enum TypographySpecimenSection { type_ramp, weight, contrast }
+enum TypographySpecimenWeight { light, regular, bold }
+
+enum TypographySpecimenError {
+    none,
+    invalid_spec,
+    missing_font,
+    weight_not_visible,
+    layout_error,
+    layout_overflow,
+    semantics_error,
+    text_error,
+    contribution_error,
+    display_error,
+}
+
+struct TypographySpecimenSpec {
+    id: NodeKey,
+    bounds: Rect,
+    name: []u8,
+    ramp_sample: []u8,
+    weight_sample: []u8,
+    contrast_sample: []u8,
+    density: FlexDensity,
+    direction: LayoutDirection,
+    text_scale: i64,
+}
+
+struct TypographySpecimenRow {
+    index: i32,
+    section: TypographySpecimenSection,
+    row_id: NodeKey,
+    label_id: NodeKey,
+    sample_id: NodeKey,
+    bounds: Rect,
+    label_bounds: Rect,
+    sample_bounds: Rect,
+    requested_type: SemanticTypeToken,
+    resolved_type: SemanticTypeToken,
+    label_type: SemanticTypeToken,
+    weight: TypographySpecimenWeight,
+    color: SemanticColorToken,
+    label_alignment: TextAlignment,
+    sample_alignment: TextAlignment,
+    disabled: i32,
+    resolved_font_size: i64,
+    resolved_label_font_size: i64,
+    label_evidence_hash: i64,
+    sample_evidence_hash: i64,
+    sample_path_payload_hash: i64,
+}
+
+struct TypographySpecimenArtifact {
+    display: DisplayList,
+    semantics: SemanticsTree,
+    rows: ArrayList[TypographySpecimenRow],
+    id: NodeKey,
+    bounds: Rect,
+    density: FlexDensity,
+    direction: LayoutDirection,
+    text_scale: i64,
+    scale_steps: i32,
+    outer_padding: i64,
+    row_gap: i64,
+    row_padding: i64,
+    column_gap: i64,
+    required_height: i64,
+    structural_minimum_width: i64,
+    rtl_layout_applied: i32,
+    nominal_ltr_text_only: i32,
+    bidi_shaping_available: i32,
+    font_fallback_available: i32,
+    continuous_text_scaling_available: i32,
+    code_family_routing_available: i32,
+    weight_metadata_verified: i32,
+    weight_shape_proof: i32,
+    light_probe_hash: i64,
+    regular_probe_hash: i64,
+    bold_probe_hash: i64,
+    display_hash: i64,
+    talkback_hash: i64,
+    evidence_hash: i64,
+    error: TypographySpecimenError,
+    missing_face_index: i32,
+    error_row: i32,
+    flex_error: FlexError,
+    text_error: TextError,
+    contribution_error: TextContributionError,
+    semantics_error: SemanticsError,
+    display_error: DisplayError,
+}
+
+enum TypographySpecimenHostError {
+    none,
+    invalid_artifact,
+    invalid_destination,
+    invalid_semantic_parent,
+    missing_semantic_parent,
+    duplicate_semantic_id,
+    resource_collision,
+    resource_error,
+    display_error,
+    semantics_error,
+}
+
+struct TypographySpecimenHostSpec {
+    semantic_parent: NodeKey,
+}
+
+struct TypographySpecimenHostResult {
+    error: TypographySpecimenHostError,
+    resource_error: RenderResourceError,
+    display_error: DisplayError,
+    semantics_error: SemanticsError,
+    display_operations_added: i32,
+    display_resources_added: i32,
+    semantic_nodes_added: i32,
+}
+
+struct TypographySpecimenDisplayStage {
+    display: DisplayList,
+    valid: i32,
+}
+
+fn typography_specimen_row_count() i32 { return 13; }
+fn typography_specimen_type_row_count() i32 { return 7; }
+fn typography_specimen_weight_row_start() i32 { return 7; }
+fn typography_specimen_contrast_row_start() i32 { return 10; }
+fn typography_specimen_max_root_id() i64 { return 1000000000; }
+
+fn typography_specimen_spec(id: NodeKey, bounds: Rect)
+    TypographySpecimenSpec {
+    return TypographySpecimenSpec{
+        .id = id,
+        .bounds = bounds,
+        .name = "Typography specimen",
+        .ramp_sample = "Zagkit builds fluent interfaces",
+        .weight_sample = "Weight has visible structure 0123",
+        .contrast_sample = "Readable hierarchy at every level",
+        .density = FlexDensity.standard,
+        .direction = LayoutDirection.ltr,
+        .text_scale = unit_scale(),
+    };
+}
+
+fn typography_specimen_empty(spec:  TypographySpecimenSpec)
+    TypographySpecimenArtifact {
+    return TypographySpecimenArtifact{
+        .display = display_list_make(),
+        .semantics = semantics_tree_make(),
+        .rows = make[TypographySpecimenRow](typography_specimen_row_count()),
+        .id = spec.id,
+        .bounds = spec.bounds,
+        .density = spec.density,
+        .direction = spec.direction,
+        .text_scale = spec.text_scale,
+        .scale_steps = 0,
+        .outer_padding = 0,
+        .row_gap = 0,
+        .row_padding = 0,
+        .column_gap = 0,
+        .required_height = 0,
+        .structural_minimum_width = 0,
+        .rtl_layout_applied = 0,
+        .nominal_ltr_text_only = 1,
+        .bidi_shaping_available = 0,
+        .font_fallback_available = 0,
+        .continuous_text_scaling_available = 0,
+        .code_family_routing_available = 0,
+        .weight_metadata_verified = 0,
+        .weight_shape_proof = 0,
+        .light_probe_hash = 0,
+        .regular_probe_hash = 0,
+        .bold_probe_hash = 0,
+        .display_hash = 0,
+        .talkback_hash = 0,
+        .evidence_hash = 0,
+        .error = TypographySpecimenError.none,
+        .missing_face_index = 0 - 1,
+        .error_row = 0 - 1,
+        .flex_error = FlexError.none,
+        .text_error = TextError.none,
+        .contribution_error = TextContributionError.none,
+        .semantics_error = SemanticsError.none,
+        .display_error = DisplayError.none,
+    };
+}
+
+fn typography_specimen_density_valid(density: FlexDensity) i32 {
+    let value: i64 = density as i64;
+    return (value >= FlexDensity.compact as i64 &&
+        value <= FlexDensity.touch as i64) as i32;
+}
+
+fn typography_specimen_direction_valid(direction: LayoutDirection) i32 {
+    let value: i64 = direction as i64;
+    return (value >= LayoutDirection.ltr as i64 &&
+        value <= LayoutDirection.rtl as i64) as i32;
+}
+
+fn typography_specimen_sample_valid(value:  []u8) i32 {
+    return (value.len > 0 && value.len <= text_byte_limit() &&
+        semantic_text_input_valid(value) != 0) as i32;
+}
+
+fn typography_specimen_spec_valid(spec:  TypographySpecimenSpec) i32 {
+    return (canvas_key_valid(spec.id) != 0 &&
+        spec.id.value <= typography_specimen_max_root_id() &&
+        hit_geometry_valid(spec.bounds) != 0 &&
+        spec.name.len > 0 && spec.name.len <= text_byte_limit() &&
+        semantic_text_input_valid(spec.name) != 0 &&
+        typography_specimen_sample_valid(spec.ramp_sample) != 0 &&
+        typography_specimen_sample_valid(spec.weight_sample) != 0 &&
+        typography_specimen_sample_valid(spec.contrast_sample) != 0 &&
+        typography_specimen_density_valid(spec.density) != 0 &&
+        typography_specimen_direction_valid(spec.direction) != 0 &&
+        spec.text_scale >= unit_scale() &&
+        spec.text_scale <= unit_scale() * 4) as i32;
+}
+
+fn typography_specimen_scale_steps(text_scale: i64) i32 {
+    if (text_scale >= (unit_scale() * 7) / 4) { return 2; }
+    if (text_scale >= (unit_scale() * 5) / 4) { return 1; }
+    return 0;
+}
+
+fn typography_specimen_upshift_once(token: SemanticTypeToken)
+    SemanticTypeToken {
+    return switch (token) {
+        .display => SemanticTypeToken.display,
+        .title => SemanticTypeToken.display,
+        .heading => SemanticTypeToken.title,
+        .body => SemanticTypeToken.heading,
+        .label => SemanticTypeToken.body,
+        .caption => SemanticTypeToken.label,
+        .code => SemanticTypeToken.body,
+    };
+}
+
+fn typography_specimen_resolve_type(token: SemanticTypeToken, steps: i32)
+    SemanticTypeToken {
+    let result: SemanticTypeToken = token;
+    let index: i32 = 0;
+    while (index < steps) {
+        result = typography_specimen_upshift_once(result);
+        index = index + 1;
+    }
+    return result;
+}
+
+fn typography_specimen_section(index: i32) TypographySpecimenSection {
+    if (index < typography_specimen_weight_row_start()) {
+        return TypographySpecimenSection.type_ramp;
+    }
+    if (index < typography_specimen_contrast_row_start()) {
+        return TypographySpecimenSection.weight;
+    }
+    return TypographySpecimenSection.contrast;
+}
+
+fn typography_specimen_requested_type(index: i32) SemanticTypeToken {
+    return switch (index) {
+        0 => SemanticTypeToken.display,
+        1 => SemanticTypeToken.title,
+        2 => SemanticTypeToken.heading,
+        3 => SemanticTypeToken.body,
+        4 => SemanticTypeToken.label,
+        5 => SemanticTypeToken.caption,
+        6 => SemanticTypeToken.code,
+        else => SemanticTypeToken.body,
+    };
+}
+
+fn typography_specimen_weight(index: i32) TypographySpecimenWeight {
+    if (index == 7) { return TypographySpecimenWeight.light; }
+    if (index == 9) { return TypographySpecimenWeight.bold; }
+    return TypographySpecimenWeight.regular;
+}
+
+fn typography_specimen_color(index: i32) SemanticColorToken {
+    if (index == 11) { return SemanticColorToken.text_secondary; }
+    if (index == 12) { return SemanticColorToken.text_disabled; }
+    return SemanticColorToken.text_primary;
+}
+
+fn typography_specimen_disabled(index: i32) i32 {
+    return (index == 12) as i32;
+}
+
+fn typography_specimen_label(index: i32) []u8 {
+    return switch (index) {
+        0 => "DISPLAY",
+        1 => "TITLE",
+        2 => "HEADING",
+        3 => "BODY",
+        4 => "LABEL",
+        5 => "CAPTION",
+        6 => "CODE",
+        7 => "LIGHT",
+        8 => "REGULAR",
+        9 => "BOLD",
+        10 => "PRIMARY",
+        11 => "SECONDARY",
+        else => "DISABLED",
+    };
+}
+
+fn typography_specimen_row_name(index: i32) []u8 {
+    return switch (index) {
+        0 => "Display type specimen",
+        1 => "Title type specimen",
+        2 => "Heading type specimen",
+        3 => "Body type specimen",
+        4 => "Label type specimen",
+        5 => "Caption type specimen",
+        6 => "Code type specimen",
+        7 => "Light weight specimen",
+        8 => "Regular weight specimen",
+        9 => "Bold weight specimen",
+        10 => "Primary contrast specimen",
+        11 => "Secondary contrast specimen",
+        else => "Disabled contrast specimen",
+    };
+}
+
+fn typography_specimen_row_description(index: i32) []u8 {
+    if (index < typography_specimen_type_row_count()) {
+        return "Canonical semantic type role and resolved scale role";
+    }
+    if (index < typography_specimen_contrast_row_start()) {
+        return "Caller-declared face with distinct outline evidence";
+    }
+    return "Canonical semantic text color tier";
+}
+
+fn typography_specimen_row_value(index: i32) []u8 {
+    if (index < typography_specimen_type_row_count()) {
+        return semantic_type_name(typography_specimen_requested_type(index));
+    }
+    return switch (index) {
+        7 => "weight.light / outline verified",
+        8 => "weight.regular / outline verified",
+        9 => "weight.bold / outline verified",
+        10 => "color.text.primary",
+        11 => "color.text.secondary",
+        else => "color.text.disabled",
+    };
+}
+
+fn typography_specimen_sample(
+    spec: @retained_by_return TypographySpecimenSpec,
+    index: i32) []u8 {
+    if (index < typography_specimen_type_row_count()) {
+        return spec.ramp_sample;
+    }
+    if (index < typography_specimen_contrast_row_start()) {
+        return spec.weight_sample;
+    }
+    return spec.contrast_sample;
+}
+
+fn typography_specimen_id_value(root: NodeKey, offset: i64) i64 {
+    return root.value * 1000 + offset;
+}
+
+fn typography_specimen_row_id(root: NodeKey, index: i32) NodeKey {
+    return node_key_scoped(typography_specimen_id_value(root,
+        100 + (index as i64) * 10), root.generation);
+}
+
+fn typography_specimen_label_id(root: NodeKey, index: i32) NodeKey {
+    return node_key_scoped(typography_specimen_id_value(root,
+        101 + (index as i64) * 10), root.generation);
+}
+
+fn typography_specimen_sample_id(root: NodeKey, index: i32) NodeKey {
+    return node_key_scoped(typography_specimen_id_value(root,
+        102 + (index as i64) * 10), root.generation);
+}
+
+fn typography_specimen_probe_id(root: NodeKey) NodeKey {
+    return node_key_scoped(typography_specimen_id_value(root, 900),
+        root.generation);
+}
+
+fn typography_specimen_mix(hash: i64, value: i64) i64 {
+    return (hash * 1099511628211) ^ value;
+}
+
+fn typography_specimen_payload_hash(artifact:  *TextArtifact) i64 {
+    if (text_artifact_valid(artifact) == 0 ||
+        artifact.*.canvas.display.resources.resources.len != 1) { return 0; }
+    let resource: RenderResource =
+        artifact.*.canvas.display.resources.resources.data[0];
+    let hash: i64 = typography_specimen_mix(17,
+        resource.payload.len as i64);
+    let index: i32 = 0;
+    while (index < resource.payload.len) {
+        hash = typography_specimen_mix(hash,
+            resource.payload.data[index] as i64);
+        index = index + 1;
+    }
+    if (hash == 0) { return 1; }
+    return hash;
+}
+
+fn typography_specimen_row_basis(index: i32, scale_steps: i32,
+    density: FlexDensity) i64 {
+    let requested: SemanticTypeToken =
+        typography_specimen_requested_type(index);
+    let resolved: SemanticTypeToken = typography_specimen_resolve_type(
+        requested, scale_steps);
+    let label: SemanticTypeToken = typography_specimen_resolve_type(
+        SemanticTypeToken.caption, scale_steps);
+    let content_height: i64 = semantic_type_size(resolved);
+    if (semantic_type_size(label) > content_height) {
+        content_height = semantic_type_size(label);
+    }
+    let padding: i64 = flex_spacing(FlexSpacingToken.small, density);
+    let basis: i64 = (content_height * 3) / 2 + padding * 2;
+    let minimum: i64 = 32 * unit_scale();
+    if (basis < minimum) { return minimum; }
+    return basis;
+}
+
+fn typography_specimen_required_height(text_scale: i64,
+    density: FlexDensity) i64 {
+    let steps: i32 = typography_specimen_scale_steps(text_scale);
+    let total: i64 = flex_spacing(FlexSpacingToken.large, density) * 2 +
+        flex_spacing(FlexSpacingToken.small, density) *
+            ((typography_specimen_row_count() - 1) as i64);
+    let index: i32 = 0;
+    while (index < typography_specimen_row_count()) {
+        total = total + typography_specimen_row_basis(index, steps, density);
+        index = index + 1;
+    }
+    return total;
+}
+
+fn typography_specimen_structural_minimum_width(
+    density: FlexDensity) i64 {
+    return flex_spacing(FlexSpacingToken.large, density) * 2 +
+        flex_spacing(FlexSpacingToken.small, density) * 2 +
+        flex_spacing(FlexSpacingToken.large, density) +
+        120 * unit_scale() + 160 * unit_scale();
+}
+
+fn typography_specimen_root_semantics(
+    artifact:  *TypographySpecimenArtifact,
+    spec:  TypographySpecimenSpec) i32 {
+    let root: SemanticsSpec = semantics_spec(spec.id, semantic_root_key(),
+        SemanticRole.group, spec.name);
+    root.description =
+        "Type ramp, weight, and contrast system conformance specimen";
+    if (spec.direction == LayoutDirection.rtl) {
+        root.value = "RTL Flex layout; nominal LTR text only";
+    } else {
+        root.value = "LTR Flex layout; nominal LTR text only";
+    }
+    root.has_bounds = 1;
+    root.bounds = spec.bounds;
+    let error: SemanticsError = semantics_add(&artifact.*.semantics, root);
+    if (error == SemanticsError.none) { return 1; }
+    artifact.*.error = TypographySpecimenError.semantics_error;
+    artifact.*.semantics_error = error;
+    return 0;
+}
+
+fn typography_specimen_row_semantics(
+    artifact:  *TypographySpecimenArtifact,
+    index: i32, bounds: Rect) i32 {
+    let row: SemanticsSpec = semantics_spec(
+        typography_specimen_row_id(artifact.*.id, index), artifact.*.id,
+        SemanticRole.group, typography_specimen_row_name(index));
+    row.description = typography_specimen_row_description(index);
+    row.value = typography_specimen_row_value(index);
+    row.has_bounds = 1;
+    row.bounds = bounds;
+    row.set_size = typography_specimen_row_count() as i64;
+    row.position_in_set = 1 + index as i64;
+    let error: SemanticsError = semantics_add(&artifact.*.semantics, row);
+    if (error == SemanticsError.none) { return 1; }
+    artifact.*.error = TypographySpecimenError.semantics_error;
+    artifact.*.semantics_error = error;
+    artifact.*.error_row = index;
+    return 0;
+}
+
+fn typography_specimen_record_text_error(
+    artifact:  *TypographySpecimenArtifact,
+    index: i32, error: TextError) void {
+    artifact.*.error = TypographySpecimenError.text_error;
+    artifact.*.text_error = error;
+    artifact.*.error_row = index;
+}
+
+fn typography_specimen_record_contribution_error(
+    artifact:  *TypographySpecimenArtifact,
+    index: i32, result: TextContributionResult) void {
+    artifact.*.error = TypographySpecimenError.contribution_error;
+    artifact.*.contribution_error = result.error;
+    artifact.*.semantics_error = result.semantics_error;
+    artifact.*.display_error = result.display_error;
+    artifact.*.error_row = index;
+}
+
+fn typography_specimen_emit_row(
+    artifact:  *TypographySpecimenArtifact,
+    spec:  TypographySpecimenSpec,
+    regular_face:  *OpenTypeFace,
+    sample_face:  *OpenTypeFace,
+    index: i32, relative_bounds: Rect) i32 {
+    let bounds: Rect = rect(spec.bounds.x + relative_bounds.x,
+        spec.bounds.y + relative_bounds.y,
+        relative_bounds.width, relative_bounds.height);
+    let inner_items: ArrayList[FlexItem] = make[FlexItem](2);
+    let label_item: FlexItem = flex_item(1, 200 * unit_scale(),
+        relative_bounds.height);
+    label_item.min_main = 120 * unit_scale();
+    label_item.max_main = 240 * unit_scale();
+    label_item.grow = 0;
+    label_item.shrink = 1;
+    let sample_item: FlexItem = flex_item(2, 520 * unit_scale(),
+        relative_bounds.height);
+    sample_item.min_main = 160 * unit_scale();
+    sample_item.grow = 1;
+    sample_item.shrink = 1;
+    push[FlexItem](&inner_items, label_item);
+    push[FlexItem](&inner_items, sample_item);
+    let inner_style: FlexStyle = flex_style(FlexAxis.row,
+        artifact.*.column_gap, insets_all(artifact.*.row_padding));
+    inner_style.direction = spec.direction;
+    inner_style.cross_alignment = CrossAlignment.stretch;
+    let inner: FlexResult = flex_layout(inner_items,
+        tight_constraints(relative_bounds.width, relative_bounds.height),
+        inner_style);
+    free[FlexItem](&inner_items);
+    if (inner.error != FlexError.none) {
+        artifact.*.error = TypographySpecimenError.layout_error;
+        artifact.*.flex_error = inner.error;
+        artifact.*.error_row = index;
+        flex_free(&inner);
+        return 0;
+    }
+    if (inner.overflow != 0 || inner.placements.len != 2 ||
+        inner.duplicate_ids != 0) {
+        artifact.*.error = TypographySpecimenError.layout_overflow;
+        artifact.*.error_row = index;
+        flex_free(&inner);
+        return 0;
+    }
+    let label_relative: Rect = inner.placements.data[0].frame;
+    let sample_relative: Rect = inner.placements.data[1].frame;
+    let label_bounds: Rect = rect(bounds.x + label_relative.x,
+        bounds.y + label_relative.y,
+        label_relative.width, label_relative.height);
+    let sample_bounds: Rect = rect(bounds.x + sample_relative.x,
+        bounds.y + sample_relative.y,
+        sample_relative.width, sample_relative.height);
+    flex_free(&inner);
+
+    if (typography_specimen_row_semantics(artifact, index, bounds) == 0) {
+        return 0;
+    }
+    let requested: SemanticTypeToken =
+        typography_specimen_requested_type(index);
+    let resolved: SemanticTypeToken = typography_specimen_resolve_type(
+        requested, artifact.*.scale_steps);
+    let label_type: SemanticTypeToken = typography_specimen_resolve_type(
+        SemanticTypeToken.caption, artifact.*.scale_steps);
+    let label_alignment: TextAlignment = TextAlignment.end;
+    let sample_alignment: TextAlignment = TextAlignment.start;
+    if (spec.direction == LayoutDirection.rtl) {
+        label_alignment = TextAlignment.start;
+        sample_alignment = TextAlignment.end;
+    }
+
+    let label_spec: TextSpec = text_spec(
+        typography_specimen_label_id(spec.id, index),
+        typography_specimen_row_id(spec.id, index), label_bounds,
+        typography_specimen_label(index), label_type,
+        SemanticColorToken.text_secondary);
+    label_spec.alignment = label_alignment;
+    let sample_spec: TextSpec = text_spec(
+        typography_specimen_sample_id(spec.id, index),
+        typography_specimen_row_id(spec.id, index), sample_bounds,
+        typography_specimen_sample(spec, index), resolved,
+        typography_specimen_color(index));
+    sample_spec.alignment = sample_alignment;
+    sample_spec.disabled = typography_specimen_disabled(index);
+
+    let label: TextArtifact = text_build(regular_face.*, label_spec);
+    if (label.error != TextError.none) {
+        typography_specimen_record_text_error(artifact, index, label.error);
+        text_free(&label);
+        return 0;
+    }
+    let sample: TextArtifact = text_build(sample_face.*, sample_spec);
+    if (sample.error != TextError.none) {
+        typography_specimen_record_text_error(artifact, index, sample.error);
+        text_free(&sample);
+        text_free(&label);
+        return 0;
+    }
+    let label_contribution: TextContributionResult = text_contribute(
+        &label, &artifact.*.display, &artifact.*.semantics);
+    if (label_contribution.error != TextContributionError.none) {
+        typography_specimen_record_contribution_error(
+            artifact, index, label_contribution);
+        text_free(&sample);
+        text_free(&label);
+        return 0;
+    }
+    let sample_contribution: TextContributionResult = text_contribute(
+        &sample, &artifact.*.display, &artifact.*.semantics);
+    if (sample_contribution.error != TextContributionError.none) {
+        typography_specimen_record_contribution_error(
+            artifact, index, sample_contribution);
+        text_free(&sample);
+        text_free(&label);
+        return 0;
+    }
+    if (label_contribution.display_operations_added != 5 ||
+        label_contribution.display_resources_added != 1 ||
+        label_contribution.semantic_nodes_added != 1 ||
+        sample_contribution.display_operations_added != 5 ||
+        sample_contribution.display_resources_added != 1 ||
+        sample_contribution.semantic_nodes_added != 1) {
+        artifact.*.error = TypographySpecimenError.contribution_error;
+        artifact.*.error_row = index;
+        text_free(&sample);
+        text_free(&label);
+        return 0;
+    }
+
+    push[TypographySpecimenRow](&artifact.*.rows, TypographySpecimenRow{
+        .index = index,
+        .section = typography_specimen_section(index),
+        .row_id = typography_specimen_row_id(spec.id, index),
+        .label_id = typography_specimen_label_id(spec.id, index),
+        .sample_id = typography_specimen_sample_id(spec.id, index),
+        .bounds = bounds,
+        .label_bounds = label_bounds,
+        .sample_bounds = sample_bounds,
+        .requested_type = requested,
+        .resolved_type = resolved,
+        .label_type = label_type,
+        .weight = typography_specimen_weight(index),
+        .color = typography_specimen_color(index),
+        .label_alignment = label_alignment,
+        .sample_alignment = sample_alignment,
+        .disabled = typography_specimen_disabled(index),
+        .resolved_font_size = sample.font_size,
+        .resolved_label_font_size = label.font_size,
+        .label_evidence_hash = label.evidence_hash,
+        .sample_evidence_hash = sample.evidence_hash,
+        .sample_path_payload_hash =
+            typography_specimen_payload_hash(&sample),
+    });
+    text_free(&sample);
+    text_free(&label);
+    return 1;
+}
+
+fn typography_specimen_weight_probe(
+    artifact:  *TypographySpecimenArtifact,
+    spec:  TypographySpecimenSpec,
+    light_face:  *OpenTypeFace,
+    regular_face:  *OpenTypeFace,
+    bold_face:  *OpenTypeFace) i32 {
+    let probe_spec: TextSpec = text_spec(
+        typography_specimen_probe_id(spec.id), semantic_root_key(),
+        rect(0, 0, 720 * unit_scale(), 96 * unit_scale()),
+        spec.weight_sample, SemanticTypeToken.body,
+        SemanticColorToken.text_primary);
+    let light: TextArtifact = text_build(light_face.*, probe_spec);
+    let regular: TextArtifact = text_build(regular_face.*, probe_spec);
+    let bold: TextArtifact = text_build(bold_face.*, probe_spec);
+    if (light.error != TextError.none || regular.error != TextError.none ||
+        bold.error != TextError.none) {
+        artifact.*.error = TypographySpecimenError.text_error;
+        artifact.*.text_error = light.error;
+        if (artifact.*.text_error == TextError.none) {
+            artifact.*.text_error = regular.error;
+        }
+        if (artifact.*.text_error == TextError.none) {
+            artifact.*.text_error = bold.error;
+        }
+        artifact.*.error_row = typography_specimen_weight_row_start();
+        text_free(&bold);
+        text_free(&regular);
+        text_free(&light);
+        return 0;
+    }
+    artifact.*.light_probe_hash = typography_specimen_payload_hash(&light);
+    artifact.*.regular_probe_hash = typography_specimen_payload_hash(&regular);
+    artifact.*.bold_probe_hash = typography_specimen_payload_hash(&bold);
+    text_free(&bold);
+    text_free(&regular);
+    text_free(&light);
+    if (artifact.*.light_probe_hash == 0 ||
+        artifact.*.regular_probe_hash == 0 ||
+        artifact.*.bold_probe_hash == 0 ||
+        artifact.*.light_probe_hash == artifact.*.regular_probe_hash ||
+        artifact.*.light_probe_hash == artifact.*.bold_probe_hash ||
+        artifact.*.regular_probe_hash == artifact.*.bold_probe_hash) {
+        artifact.*.error = TypographySpecimenError.weight_not_visible;
+        artifact.*.error_row = typography_specimen_weight_row_start();
+        return 0;
+    }
+    artifact.*.weight_shape_proof = 1;
+    return 1;
+}
+
+fn typography_specimen_row_hash(hash: i64,
+    row: TypographySpecimenRow) i64 {
+    let result: i64 = typography_specimen_mix(hash, row.index as i64);
+    result = typography_specimen_mix(result, row.section as i64);
+    result = typography_specimen_mix(result, row.row_id.value);
+    result = typography_specimen_mix(result, row.row_id.generation);
+    result = typography_specimen_mix(result, row.label_id.value);
+    result = typography_specimen_mix(result, row.sample_id.value);
+    result = typography_specimen_mix(result, row.bounds.x);
+    result = typography_specimen_mix(result, row.bounds.y);
+    result = typography_specimen_mix(result, row.bounds.width);
+    result = typography_specimen_mix(result, row.bounds.height);
+    result = typography_specimen_mix(result, row.label_bounds.x);
+    result = typography_specimen_mix(result, row.label_bounds.y);
+    result = typography_specimen_mix(result, row.label_bounds.width);
+    result = typography_specimen_mix(result, row.label_bounds.height);
+    result = typography_specimen_mix(result, row.sample_bounds.x);
+    result = typography_specimen_mix(result, row.sample_bounds.y);
+    result = typography_specimen_mix(result, row.sample_bounds.width);
+    result = typography_specimen_mix(result, row.sample_bounds.height);
+    result = typography_specimen_mix(result, row.requested_type as i64);
+    result = typography_specimen_mix(result, row.resolved_type as i64);
+    result = typography_specimen_mix(result, row.label_type as i64);
+    result = typography_specimen_mix(result, row.weight as i64);
+    result = typography_specimen_mix(result, row.color as i64);
+    result = typography_specimen_mix(result, row.label_alignment as i64);
+    result = typography_specimen_mix(result, row.sample_alignment as i64);
+    result = typography_specimen_mix(result, row.disabled as i64);
+    result = typography_specimen_mix(result, row.resolved_font_size);
+    result = typography_specimen_mix(result, row.resolved_label_font_size);
+    result = typography_specimen_mix(result, row.label_evidence_hash);
+    result = typography_specimen_mix(result, row.sample_evidence_hash);
+    return typography_specimen_mix(result, row.sample_path_payload_hash);
+}
+
+fn typography_specimen_calculate_hash(
+    artifact:  *TypographySpecimenArtifact) i64 {
+    let hash: i64 = typography_specimen_mix(17, artifact.*.id.value);
+    hash = typography_specimen_mix(hash, artifact.*.id.generation);
+    hash = typography_specimen_mix(hash, artifact.*.bounds.x);
+    hash = typography_specimen_mix(hash, artifact.*.bounds.y);
+    hash = typography_specimen_mix(hash, artifact.*.bounds.width);
+    hash = typography_specimen_mix(hash, artifact.*.bounds.height);
+    hash = typography_specimen_mix(hash, artifact.*.density as i64);
+    hash = typography_specimen_mix(hash, artifact.*.direction as i64);
+    hash = typography_specimen_mix(hash, artifact.*.text_scale);
+    hash = typography_specimen_mix(hash, artifact.*.scale_steps as i64);
+    hash = typography_specimen_mix(hash, artifact.*.outer_padding);
+    hash = typography_specimen_mix(hash, artifact.*.row_gap);
+    hash = typography_specimen_mix(hash, artifact.*.row_padding);
+    hash = typography_specimen_mix(hash, artifact.*.column_gap);
+    hash = typography_specimen_mix(hash, artifact.*.required_height);
+    hash = typography_specimen_mix(hash,
+        artifact.*.structural_minimum_width);
+    hash = typography_specimen_mix(hash,
+        artifact.*.rtl_layout_applied as i64);
+    hash = typography_specimen_mix(hash,
+        artifact.*.nominal_ltr_text_only as i64);
+    hash = typography_specimen_mix(hash,
+        artifact.*.bidi_shaping_available as i64);
+    hash = typography_specimen_mix(hash,
+        artifact.*.font_fallback_available as i64);
+    hash = typography_specimen_mix(hash,
+        artifact.*.continuous_text_scaling_available as i64);
+    hash = typography_specimen_mix(hash,
+        artifact.*.code_family_routing_available as i64);
+    hash = typography_specimen_mix(hash,
+        artifact.*.weight_metadata_verified as i64);
+    hash = typography_specimen_mix(hash,
+        artifact.*.weight_shape_proof as i64);
+    hash = typography_specimen_mix(hash, artifact.*.light_probe_hash);
+    hash = typography_specimen_mix(hash, artifact.*.regular_probe_hash);
+    hash = typography_specimen_mix(hash, artifact.*.bold_probe_hash);
+    hash = typography_specimen_mix(hash, artifact.*.display_hash);
+    hash = typography_specimen_mix(hash, artifact.*.talkback_hash);
+    let index: i32 = 0;
+    while (index < artifact.*.rows.len) {
+        hash = typography_specimen_row_hash(hash,
+            artifact.*.rows.data[index]);
+        index = index + 1;
+    }
+    if (hash == 0) { return 1; }
+    return hash;
+}
+
+fn typography_specimen_build(
+    spec:  TypographySpecimenSpec,
+    light_face:  *OpenTypeFace,
+    regular_face:  *OpenTypeFace,
+    bold_face:  *OpenTypeFace) TypographySpecimenArtifact {
+    let artifact: TypographySpecimenArtifact =
+        typography_specimen_empty(spec);
+    if (typography_specimen_spec_valid(spec) == 0) {
+        artifact.error = TypographySpecimenError.invalid_spec;
+        return artifact;
+    }
+    if (text_font_valid(light_face.*) == 0) {
+        artifact.error = TypographySpecimenError.missing_font;
+        artifact.missing_face_index = 0;
+        return artifact;
+    }
+    if (text_font_valid(regular_face.*) == 0) {
+        artifact.error = TypographySpecimenError.missing_font;
+        artifact.missing_face_index = 1;
+        return artifact;
+    }
+    if (text_font_valid(bold_face.*) == 0) {
+        artifact.error = TypographySpecimenError.missing_font;
+        artifact.missing_face_index = 2;
+        return artifact;
+    }
+
+    artifact.scale_steps = typography_specimen_scale_steps(spec.text_scale);
+    artifact.outer_padding = flex_spacing(FlexSpacingToken.large,
+        spec.density);
+    artifact.row_gap = flex_spacing(FlexSpacingToken.small, spec.density);
+    artifact.row_padding = flex_spacing(FlexSpacingToken.small,
+        spec.density);
+    artifact.column_gap = flex_spacing(FlexSpacingToken.large, spec.density);
+    artifact.required_height = typography_specimen_required_height(
+        spec.text_scale, spec.density);
+    artifact.structural_minimum_width =
+        typography_specimen_structural_minimum_width(spec.density);
+    artifact.rtl_layout_applied =
+        (spec.direction == LayoutDirection.rtl) as i32;
+
+    let outer_items: ArrayList[FlexItem] = make[FlexItem](
+        typography_specimen_row_count());
+    let item_index: i32 = 0;
+    while (item_index < typography_specimen_row_count()) {
+        let basis: i64 = typography_specimen_row_basis(item_index,
+            artifact.scale_steps, spec.density);
+        let item: FlexItem = flex_item(1 + item_index as i64, basis,
+            spec.bounds.width);
+        item.min_main = basis;
+        item.max_main = basis;
+        item.grow = 0;
+        item.shrink = 0;
+        push[FlexItem](&outer_items, item);
+        item_index = item_index + 1;
+    }
+    let outer_style: FlexStyle = flex_style(FlexAxis.column,
+        artifact.row_gap, insets_all(artifact.outer_padding));
+    outer_style.direction = spec.direction;
+    outer_style.cross_alignment = CrossAlignment.stretch;
+    let outer: FlexResult = flex_layout(outer_items,
+        tight_constraints(spec.bounds.width, spec.bounds.height),
+        outer_style);
+    free[FlexItem](&outer_items);
+    if (outer.error != FlexError.none) {
+        artifact.error = TypographySpecimenError.layout_error;
+        artifact.flex_error = outer.error;
+        flex_free(&outer);
+        return artifact;
+    }
+    if (outer.overflow != 0 || outer.placements.len !=
+        typography_specimen_row_count() || outer.duplicate_ids != 0) {
+        artifact.error = TypographySpecimenError.layout_overflow;
+        flex_free(&outer);
+        return artifact;
+    }
+    if (typography_specimen_weight_probe(&artifact, spec,
+        light_face, regular_face, bold_face) == 0) {
+        flex_free(&outer);
+        return artifact;
+    }
+    if (typography_specimen_root_semantics(&artifact, spec) == 0) {
+        flex_free(&outer);
+        return artifact;
+    }
+
+    let row_index: i32 = 0;
+    while (row_index < typography_specimen_row_count()) {
+        let emitted: i32 = 0;
+        if (typography_specimen_weight(row_index) ==
+            TypographySpecimenWeight.light) {
+            emitted = typography_specimen_emit_row(&artifact, spec,
+                regular_face, light_face, row_index,
+                outer.placements.data[row_index].frame);
+        } else if (typography_specimen_weight(row_index) ==
+            TypographySpecimenWeight.bold) {
+            emitted = typography_specimen_emit_row(&artifact, spec,
+                regular_face, bold_face, row_index,
+                outer.placements.data[row_index].frame);
+        } else {
+            emitted = typography_specimen_emit_row(&artifact, spec,
+                regular_face, regular_face, row_index,
+                outer.placements.data[row_index].frame);
+        }
+        if (emitted == 0) {
+            flex_free(&outer);
+            return artifact;
+        }
+        row_index = row_index + 1;
+    }
+    flex_free(&outer);
+
+    let sealed: DisplayError = display_list_seal(&artifact.display);
+    if (sealed != DisplayError.none) {
+        artifact.error = TypographySpecimenError.display_error;
+        artifact.display_error = sealed;
+        return artifact;
+    }
+    let verified: DisplayError = display_list_verify(&artifact.display);
+    if (verified != DisplayError.none) {
+        artifact.error = TypographySpecimenError.display_error;
+        artifact.display_error = verified;
+        return artifact;
+    }
+    artifact.display_hash = artifact.display.content_hash;
+    artifact.talkback_hash = talkback_tree_hash(artifact.semantics);
+    artifact.evidence_hash = typography_specimen_calculate_hash(&artifact);
+    return artifact;
+}
+
+fn typography_specimen_valid(
+    artifact:  *TypographySpecimenArtifact) i32 {
+    if (artifact.*.error != TypographySpecimenError.none ||
+        artifact.*.rows.len != typography_specimen_row_count() ||
+        artifact.*.semantics.nodes.len !=
+            1 + typography_specimen_row_count() * 3 ||
+        artifact.*.display.ops.len != typography_specimen_row_count() * 10 ||
+        artifact.*.display.resources.resources.len !=
+            typography_specimen_row_count() * 2 ||
+        artifact.*.weight_shape_proof == 0 ||
+        artifact.*.rtl_layout_applied !=
+            (artifact.*.direction == LayoutDirection.rtl) as i32 ||
+        artifact.*.nominal_ltr_text_only != 1 ||
+        artifact.*.bidi_shaping_available != 0 ||
+        artifact.*.font_fallback_available != 0 ||
+        artifact.*.continuous_text_scaling_available != 0 ||
+        artifact.*.code_family_routing_available != 0 ||
+        artifact.*.weight_metadata_verified != 0 ||
+        artifact.*.required_height <= 0 ||
+        artifact.*.structural_minimum_width <= 0 ||
+        artifact.*.display_hash == 0 || artifact.*.talkback_hash == 0 ||
+        artifact.*.evidence_hash == 0 ||
+        display_list_verify(&artifact.*.display) != DisplayError.none ||
+        artifact.*.display_hash != artifact.*.display.content_hash ||
+        artifact.*.talkback_hash !=
+            talkback_tree_hash(artifact.*.semantics) ||
+        artifact.*.evidence_hash !=
+            typography_specimen_calculate_hash(artifact)) { return 0; }
+    return 1;
+}
+
+fn typography_specimen_host_spec(semantic_parent: NodeKey)
+    TypographySpecimenHostSpec {
+    return TypographySpecimenHostSpec{
+        .semantic_parent = semantic_parent,
+    };
+}
+
+fn typography_specimen_host_result() TypographySpecimenHostResult {
+    return TypographySpecimenHostResult{
+        .error = TypographySpecimenHostError.none,
+        .resource_error = RenderResourceError.none,
+        .display_error = DisplayError.none,
+        .semantics_error = SemanticsError.none,
+        .display_operations_added = 0,
+        .display_resources_added = 0,
+        .semantic_nodes_added = 0,
+    };
+}
+
+fn typography_specimen_host_resource_copy(resource: RenderResource)
+    RenderResource {
+    return RenderResource{
+        .id = resource.id,
+        .kind = resource.kind,
+        .payload = render_resource_payload_copy(
+            resource.payload.data[0..resource.payload.len]),
+        .revision = resource.revision,
+        .format_tag = resource.format_tag,
+        .width = resource.width,
+        .height = resource.height,
+        .color_space = resource.color_space,
+        .content_hash = resource.content_hash,
+    };
+}
+
+fn typography_specimen_host_stage_display(source:  *DisplayList)
+    TypographySpecimenDisplayStage {
+    let staged: DisplayList = display_list_make_with_resource_limits(
+        source.*.resources.max_resources,
+        source.*.resources.max_total_bytes,
+        source.*.resources.max_payload_bytes);
+    let result: TypographySpecimenDisplayStage =
+        TypographySpecimenDisplayStage{
+            .display = staged,
+            .valid = 0,
+        };
+    if (source.*.sealed != 0 || source.*.resources.sealed != 0 ||
+        source.*.last_error != DisplayError.none ||
+        source.*.resources.last_error != RenderResourceError.none ||
+        source.*.error_index != 0 - 1 ||
+        source.*.resources.error_id != 0 ||
+        render_resource_store_configuration_valid(source.*.resources) == 0 ||
+        source.*.stack_depth < 0 || source.*.layer_depth < 0) {
+        return result;
+    }
+    let total: i64 = 0;
+    let resource_index: i32 = 0;
+    while (resource_index < source.*.resources.resources.len) {
+        let resource: RenderResource =
+            source.*.resources.resources.data[resource_index];
+        if (resource.id <= 0 || resource.payload.len <= 0 ||
+            render_resource_hash(resource) != resource.content_hash ||
+            (resource_index > 0 && source.*.resources.resources.data[
+                resource_index - 1].id >= resource.id)) {
+            return result;
+        }
+        push[RenderResource](&result.display.resources.resources,
+            typography_specimen_host_resource_copy(resource));
+        total = total + resource.payload.len as i64;
+        resource_index = resource_index + 1;
+    }
+    if (total != source.*.resources.total_bytes ||
+        render_resource_store_hash(&source.*.resources) !=
+            source.*.resources.content_hash) { return result; }
+    result.display.resources.total_bytes = source.*.resources.total_bytes;
+    result.display.resources.revision = source.*.resources.revision;
+    result.display.resources.content_hash = source.*.resources.content_hash;
+    result.display.resources.last_error = RenderResourceError.none;
+    result.display.resources.error_id = 0;
+    result.display.content_hash = display_mix(17,
+        result.display.resources.content_hash);
+    result.display.revision = result.display.resources.revision;
+    let operation_index: i32 = 0;
+    while (operation_index < source.*.ops.len) {
+        if (display_list_push(&result.display,
+            source.*.ops.data[operation_index]) != DisplayError.none) {
+            return result;
+        }
+        operation_index = operation_index + 1;
+    }
+    if (result.display.stack_depth != source.*.stack_depth ||
+        result.display.layer_depth != source.*.layer_depth ||
+        result.display.revision != source.*.revision ||
+        result.display.content_hash != source.*.content_hash ||
+        display_list_calculate_hash(&result.display) !=
+            source.*.content_hash) { return result; }
+    result.valid = 1;
+    return result;
+}
+
+fn typography_specimen_host_semantic_spec(
+    node: @retained_by_return SemanticsNode,
+    parent: NodeKey)
+    SemanticsSpec {
+    return SemanticsSpec{
+        .id = node.id,
+        .parent = parent,
+        .role = node.role,
+        .name = node.name.data[0..node.name.len],
+        .description = node.description.data[0..node.description.len],
+        .value = node.value.data[0..node.value.len],
+        .action_mask = node.action_mask,
+        .focus_order = node.focus_order,
+        .disabled = node.disabled,
+        .selected = node.selected,
+        .focused = node.focused,
+        .hidden = node.hidden,
+        .live_region = node.live_region,
+        .has_range = node.has_range,
+        .range_min = node.range_min,
+        .range_max = node.range_max,
+        .range_value = node.range_value,
+        .range_step = node.range_step,
+        .text_length = node.text_length,
+        .selection_start = node.selection_start,
+        .selection_end = node.selection_end,
+        .has_bounds = node.has_bounds,
+        .bounds = node.bounds,
+        .labelled_by = node.labelled_by,
+        .described_by = node.described_by,
+        .controls = node.controls,
+        .row_count = node.row_count,
+        .column_count = node.column_count,
+        .row_index = node.row_index,
+        .column_index = node.column_index,
+        .row_span = node.row_span,
+        .column_span = node.column_span,
+        .level = node.level,
+        .set_size = node.set_size,
+        .position_in_set = node.position_in_set,
+        .expanded = node.expanded,
+    };
+}
+
+fn typography_specimen_host_semantics_preflight(
+    artifact:  *TypographySpecimenArtifact,
+    host: TypographySpecimenHostSpec,
+    destination:  *SemanticsTree) TypographySpecimenHostError {
+    if (node_key_equal(host.semantic_parent, semantic_none_key()) != 0 ||
+        (node_key_equal(host.semantic_parent, semantic_root_key()) == 0 &&
+         canvas_key_valid(host.semantic_parent) == 0)) {
+        return TypographySpecimenHostError.invalid_semantic_parent;
+    }
+    if (node_key_equal(host.semantic_parent, semantic_root_key()) == 0 &&
+        semantics_find_index_borrowed(destination,
+            host.semantic_parent) < 0) {
+        return TypographySpecimenHostError.missing_semantic_parent;
+    }
+    let root_found: i32 = 0;
+    let index: i32 = 0;
+    while (index < artifact.*.semantics.nodes.len) {
+        let source: SemanticsNode = artifact.*.semantics.nodes.data[index];
+        if (semantics_find_index_borrowed(destination, source.id) >= 0) {
+            return TypographySpecimenHostError.duplicate_semantic_id;
+        }
+        if (node_key_equal(source.id, artifact.*.id) != 0) {
+            if (root_found != 0 || index != 0 ||
+                node_key_equal(source.parent, semantic_root_key()) == 0) {
+                return TypographySpecimenHostError.invalid_artifact;
+            }
+            root_found = 1;
+        } else {
+            let parent_index: i32 = semantics_find_index_borrowed(
+                &artifact.*.semantics, source.parent);
+            if (node_key_equal(source.parent, semantic_root_key()) != 0 ||
+                parent_index < 0 || parent_index >= index) {
+                return TypographySpecimenHostError.invalid_artifact;
+            }
+        }
+        index = index + 1;
+    }
+    if (root_found == 0) {
+        return TypographySpecimenHostError.invalid_artifact;
+    }
+    return TypographySpecimenHostError.none;
+}
+
+fn typography_specimen_host_display_preflight(
+    artifact:  *TypographySpecimenArtifact,
+    destination:  *DisplayList) TypographySpecimenHostError {
+    if (destination.*.sealed != 0 || destination.*.resources.sealed != 0 ||
+        destination.*.last_error != DisplayError.none ||
+        destination.*.resources.last_error != RenderResourceError.none ||
+        render_resource_store_configuration_valid(
+            destination.*.resources) == 0 ||
+        destination.*.stack_depth < 0 || destination.*.layer_depth < 0) {
+        return TypographySpecimenHostError.invalid_destination;
+    }
+    if (destination.*.resources.resources.len >
+        destination.*.resources.max_resources -
+            artifact.*.display.resources.resources.len ||
+        artifact.*.display.resources.total_bytes >
+            destination.*.resources.max_total_bytes -
+                destination.*.resources.total_bytes) {
+        return TypographySpecimenHostError.invalid_destination;
+    }
+    let index: i32 = 0;
+    while (index < artifact.*.display.resources.resources.len) {
+        let resource: RenderResource =
+            artifact.*.display.resources.resources.data[index];
+        if (render_resource_find_index(&destination.*.resources,
+            resource.id) >= 0) {
+            return TypographySpecimenHostError.resource_collision;
+        }
+        if (resource.payload.len as i64 >
+            destination.*.resources.max_payload_bytes) {
+            return TypographySpecimenHostError.invalid_destination;
+        }
+        index = index + 1;
+    }
+    return TypographySpecimenHostError.none;
+}
+
+fn typography_specimen_host_add_display(
+    artifact:  *TypographySpecimenArtifact,
+    destination:  *DisplayList)
+    TypographySpecimenHostResult {
+    let result: TypographySpecimenHostResult =
+        typography_specimen_host_result();
+    let resource_index: i32 = 0;
+    while (resource_index < artifact.*.display.resources.resources.len) {
+        let source: RenderResource =
+            artifact.*.display.resources.resources.data[resource_index];
+        let spec: RenderResourceSpec = render_resource_spec(source.id,
+            source.kind, source.payload.data[0..source.payload.len],
+            source.format_tag);
+        spec.revision = source.revision;
+        spec.width = source.width;
+        spec.height = source.height;
+        spec.color_space = source.color_space;
+        let error: RenderResourceError = display_list_add_resource(
+            destination, spec);
+        if (error != RenderResourceError.none) {
+            result.error = TypographySpecimenHostError.resource_error;
+            result.resource_error = error;
+            return result;
+        }
+        result.display_resources_added =
+            result.display_resources_added + 1;
+        resource_index = resource_index + 1;
+    }
+    let operation_index: i32 = 0;
+    while (operation_index < artifact.*.display.ops.len) {
+        let error: DisplayError = display_list_push(destination,
+            artifact.*.display.ops.data[operation_index]);
+        if (error != DisplayError.none) {
+            result.error = TypographySpecimenHostError.display_error;
+            result.display_error = error;
+            return result;
+        }
+        result.display_operations_added =
+            result.display_operations_added + 1;
+        operation_index = operation_index + 1;
+    }
+    return result;
+}
+
+fn typography_specimen_host_add_semantics(
+    artifact:  *TypographySpecimenArtifact,
+    host: TypographySpecimenHostSpec,
+    destination:  *SemanticsTree) SemanticsError {
+    let index: i32 = 0;
+    while (index < artifact.*.semantics.nodes.len) {
+        let source: SemanticsNode = artifact.*.semantics.nodes.data[index];
+        let parent: NodeKey = source.parent;
+        if (node_key_equal(source.id, artifact.*.id) != 0) {
+            parent = host.semantic_parent;
+        }
+        let spec: SemanticsSpec =
+            typography_specimen_host_semantic_spec(source, parent);
+        let error: SemanticsError = semantics_add(destination, spec);
+        if (error != SemanticsError.none) { return error; }
+        index = index + 1;
+    }
+    return SemanticsError.none;
+}
+
+// Atomically contributes one already-built read-only specimen into unsealed
+// caller destinations. Only the specimen semantic root is reparented; exact
+// child IDs, Flex bounds, display owners, resources, and operations survive.
+fn typography_specimen_contribute_hosted(
+    artifact:  *TypographySpecimenArtifact,
+    host: TypographySpecimenHostSpec,
+    display:  *DisplayList,
+    semantics:  *SemanticsTree)
+    TypographySpecimenHostResult {
+    let result: TypographySpecimenHostResult =
+        typography_specimen_host_result();
+    if (typography_specimen_valid(artifact) == 0) {
+        result.error = TypographySpecimenHostError.invalid_artifact;
+        return result;
+    }
+    let semantic_preflight: TypographySpecimenHostError =
+        typography_specimen_host_semantics_preflight(
+            artifact, host, semantics);
+    if (semantic_preflight != TypographySpecimenHostError.none) {
+        result.error = semantic_preflight;
+        return result;
+    }
+    let display_preflight: TypographySpecimenHostError =
+        typography_specimen_host_display_preflight(artifact, display);
+    if (display_preflight != TypographySpecimenHostError.none) {
+        result.error = display_preflight;
+        return result;
+    }
+    let staged: TypographySpecimenDisplayStage =
+        typography_specimen_host_stage_display(display);
+    if (staged.valid == 0) {
+        display_list_free(&staged.display);
+        result.error = TypographySpecimenHostError.invalid_destination;
+        return result;
+    }
+    let stack_before: i32 = staged.display.stack_depth;
+    let layer_before: i32 = staged.display.layer_depth;
+    let display_added: TypographySpecimenHostResult =
+        typography_specimen_host_add_display(artifact, &staged.display);
+    if (display_added.error != TypographySpecimenHostError.none ||
+        staged.display.stack_depth != stack_before ||
+        staged.display.layer_depth != layer_before) {
+        result.error = display_added.error;
+        result.resource_error = display_added.resource_error;
+        result.display_error = display_added.display_error;
+        if (result.error == TypographySpecimenHostError.none) {
+            result.error = TypographySpecimenHostError.display_error;
+            if (staged.display.stack_depth != stack_before) {
+                result.display_error = DisplayError.unbalanced_stack;
+            } else {
+                result.display_error = DisplayError.unbalanced_layers;
+            }
+        }
+        display_list_free(&staged.display);
+        return result;
+    }
+
+    let checkpoint: SemanticsCheckpoint =
+        semantics_tree_checkpoint(semantics);
+    let semantic_error: SemanticsError =
+        typography_specimen_host_add_semantics(artifact, host, semantics);
+    if (semantic_error != SemanticsError.none) {
+        _ = semantics_tree_rollback(semantics, checkpoint);
+        display_list_free(&staged.display);
+        result.error = TypographySpecimenHostError.semantics_error;
+        result.semantics_error = semantic_error;
+        return result;
+    }
+
+    let previous: DisplayList = display.*;
+    display.* = staged.display;
+    display_list_free(&previous);
+    result.display_operations_added =
+        display_added.display_operations_added;
+    result.display_resources_added =
+        display_added.display_resources_added;
+    result.semantic_nodes_added =
+        semantics.*.nodes.len - checkpoint.length;
+    return result;
+}
+
+fn typography_specimen_free(
+    artifact:  *TypographySpecimenArtifact) void {
+    free[TypographySpecimenRow](&artifact.*.rows);
+    semantics_tree_free(&artifact.*.semantics);
+    display_list_free(&artifact.*.display);
+    artifact.*.display_hash = 0;
+    artifact.*.talkback_hash = 0;
+    artifact.*.evidence_hash = 0;
+}

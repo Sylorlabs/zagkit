@@ -43,6 +43,28 @@ but it must be labeled experimental and cannot promote the visual system.
   independently navigable native compositions. A single dashboard containing
   one instance of each shape does not count as proof that the system scales.
 
+### Material, lighting, and motion truth
+
+- Glass is a functional foreground layer for navigation, controls, and
+  transient presentation. It is not a decorative fill applied to every card;
+  ordinary content surfaces remain visually quieter so hierarchy survives.
+- A production glass claim requires retained backdrop sampling, blur,
+  background-adaptive tint and contrast, edge lensing/refraction, coherent
+  highlights, and soft multi-lobe shadows. A translucent rounded rectangle or
+  fixed gradient may be an explicitly labelled CPU fallback, but is not
+  liquid-glass conformance.
+- Material thickness changes with scale and presentation role: a compact
+  control and an expanded menu cannot reuse one fixed shadow, tint, or optical
+  response. Nearby content may influence the material only through bounded,
+  deterministic inputs recorded in the display-list evidence.
+- Interaction can energize, lift, flex, or morph a material only when the
+  motion is interruptible, reversible, refresh-rate aware, and continuous with
+  the pointer or gesture. Static before/after states do not prove fluidity.
+- Reduced transparency, increased contrast, reduced motion, grayscale, and
+  color-vision variants have explicit substitutions that preserve legibility,
+  focus, selection, and action truth. The system setting and chosen
+  substitution are inspectable tokens, never silent renderer branches.
+
 ### Interaction states
 
 - Canonical Button, IconButton, navigation item, segmented control, field,
@@ -71,7 +93,8 @@ but it must be labeled experimental and cannot promote the visual system.
 - Navigation exposes one canonical active location. Contextual inspectors and
   system status are labeled and styled as their actual roles.
 - A read-only status rail owns no navigation actions, focus stops, selection,
-  or pointer hit targets. Its category/status marks are either documented
+  or enabled pointer targets. Its structural Surface may retain disabled bounds
+  for inspection, but normal input routing must miss it. Category/status marks are either documented
   semantic symbols with redundant text or explicitly decorative; arbitrary
   colored-dot filler is a conformance failure.
 - Every enabled navigation item activates its named destination: the selected

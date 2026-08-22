@@ -21,6 +21,9 @@ replacement presented as exact typography.
 Every component produces a parallel `SemanticsNode` tree. Nodes carry stable
 identity, role, name, description, value, state, actions, focus order, live
 region behavior, selection, ranges, text navigation, bounds, and relationships.
+Actual focus is explicit state, distinct from focus order and focus-ring
+visibility. A valid tree exposes at most one enabled, visible, focusable node as
+focused; adapters and automation never infer focus from paint.
 
 The semantics tree drives native accessibility adapters, automation, semantic
 tests, and the inspector. Accessibility does not scrape pixels or infer meaning

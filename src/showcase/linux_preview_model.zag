@@ -16,10 +16,10 @@ fn linux_preview_navigation_name(index: i32) []u8 {
 }
 
 fn linux_preview_navigation_enabled(index: i32) i32 {
-    // The overview is currently the only route fully composed into the native
-    // shell. Components becomes available when the real Button gallery is
-    // embedded; a highlight-only destination is deliberately unavailable.
-    return (index == 0) as i32;
+    // Overview, Components, and Typography are fully composed into the native
+    // shell. Remaining routes are highlight-only destinations, deliberately
+    // unavailable.
+    return (index == 0 || index == 1 || index == 3) as i32;
 }
 
 fn linux_preview_navigation_value(index: i32) []u8 {
@@ -31,6 +31,11 @@ fn linux_preview_navigation_normalize(index: i32) i32 {
     if (index >= 0 && index < linux_preview_navigation_count() &&
         linux_preview_navigation_enabled(index) != 0) { return index; }
     return linux_preview_initial_navigation();
+}
+
+fn linux_preview_navigation_index_valid(index: i32) i32 {
+    return (index >= 0 && index < linux_preview_navigation_count() &&
+        linux_preview_navigation_enabled(index) != 0) as i32;
 }
 
 fn linux_preview_main_heading(index: i32) []u8 {

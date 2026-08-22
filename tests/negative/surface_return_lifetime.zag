@@ -1,0 +1,30 @@
+@import("../../src/components/surface.zag")
+
+fn append_text(owner:  *ArrayList[u8],
+    text:  []u8) void {
+    let index: i32 = 0;
+    while (index < text.len) {
+        push[u8](owner, text[index]);
+        index = index + 1;
+    }
+}
+
+fn main() i32 {
+    let owner: ArrayList[u8] = make[u8](32);
+    append_text(&owner, "Released too early");
+    let spec: SurfaceSpec = surface_spec(node_key(9900), hit_root_key(),
+        rect(0, 0, 200 * unit_scale(), 80 * unit_scale()),
+        owner.data[0..owner.len], SurfaceTier.raised);
+    free[u8](&owner);
+
+    let display: DisplayList = display_list_make();
+    let hits: HitTree = hit_tree_make();
+    let semantics: SemanticsTree = semantics_tree_make();
+    let built: SurfaceBuildResult = surface_emit(spec,
+        &display, &hits, &semantics);
+    semantics_tree_free(&semantics);
+    hit_tree_free(&hits);
+    display_list_free(&display);
+    if (built.error == SurfaceBuildError.none) { return 0; }
+    return 1;
+}

@@ -23,6 +23,13 @@ enum TalkbackCommand {
     replay,
 }
 
+enum TalkbackScrollAxis {
+    none,
+    horizontal,
+    vertical,
+    both,
+}
+
 enum TalkbackStatus {
     accepted,
     invalid_request,
@@ -33,6 +40,18 @@ enum TalkbackStatus {
     pixel_fallback_disabled,
     pixel_out_of_bounds,
     unsupported_command,
+}
+
+struct TalkbackPixelFallbackTarget {
+    status: TalkbackStatus,
+    source_id: NodeKey,
+    bounds_x: i64,
+    bounds_y: i64,
+    logical_bounds: Rect,
+    pixel_x: i64,
+    pixel_y: i64,
+    action_available: i32,
+    evidence_hash: i64,
 }
 
 struct TalkbackCapabilities {
@@ -62,6 +81,9 @@ struct TalkbackRequest {
     pixel_y: i64,
     scale_numerator: i64,
     scale_denominator: i64,
+    scroll_axis: TalkbackScrollAxis,
+    scroll_delta_x: i64,
+    scroll_delta_y: i64,
 }
 
 struct TalkbackResponse {
@@ -103,6 +125,9 @@ struct TalkbackEvent {
     pixel_y: i64,
     scale_numerator: i64,
     scale_denominator: i64,
+    scroll_axis: TalkbackScrollAxis,
+    scroll_delta_x: i64,
+    scroll_delta_y: i64,
 }
 
 struct TalkbackSession {
@@ -153,7 +178,21 @@ fn talkback_request(request_id: i64, command: TalkbackCommand, target_id: NodeKe
         .pixel_y = 0,
         .scale_numerator = 1,
         .scale_denominator = 1,
+        .scroll_axis = TalkbackScrollAxis.none,
+        .scroll_delta_x = 0,
+        .scroll_delta_y = 0,
     };
+}
+
+fn talkback_scroll_request(request_id: i64, target_id: NodeKey,
+    semantics_revision: i64, axis: TalkbackScrollAxis,
+    delta_x: i64, delta_y: i64) TalkbackRequest {
+    let request: TalkbackRequest = talkback_request(request_id,
+        TalkbackCommand.scroll, target_id, semantics_revision);
+    request.scroll_axis = axis;
+    request.scroll_delta_x = delta_x;
+    request.scroll_delta_y = delta_y;
+    return request;
 }
 
 fn talkback_pixel_request(request_id: i64, command: TalkbackCommand, pixel_x: i64, pixel_y: i64, scale_numerator: i64, scale_denominator: i64) TalkbackRequest {
@@ -344,6 +383,9 @@ fn talkback_record(session: *TalkbackSession, tree_revision: i64, request: Talkb
         .pixel_y = request.pixel_y,
         .scale_numerator = request.scale_numerator,
         .scale_denominator = request.scale_denominator,
+        .scroll_axis = request.scroll_axis,
+        .scroll_delta_x = request.scroll_delta_x,
+        .scroll_delta_y = request.scroll_delta_y,
     };
     push[TalkbackEvent](&session.*.events, recorded_event);
     return TalkbackResponse{
@@ -470,9 +512,71 @@ fn talkback_dispatch(session: *TalkbackSession, tree: SemanticsTree, viewport: R
     if (tree.nodes.data[node_index].hidden != 0) {
         response.state_flags = response.state_flags | 4;
     }
+    if (tree.nodes.data[node_index].focused != 0) {
+        response.state_flags = response.state_flags | 8;
+    }
     response.evidence_hash = semantic_node_evidence_hash(tree.nodes.data[node_index]);
     if (required_action != 0 || talkback_emits_action(request.command) != 0) {
         response.emitted_action = 1;
     }
     return response;
+}
+
+fn talkback_state_focused_bit() i64 { return 8; }
+fn talkback_state_selected_bit() i64 { return 2; }
+fn talkback_state_disabled_bit() i64 { return 1; }
+
+fn talkback_pixel_fallback_for_id(tree: SemanticsTree,
+    viewport: Rect, target_id: NodeKey, command: TalkbackCommand,
+    scale_numerator: i64, scale_denominator: i64) TalkbackPixelFallbackTarget {
+    let fallback: TalkbackPixelFallbackTarget = TalkbackPixelFallbackTarget{
+        .status = TalkbackStatus.target_not_found,
+        .source_id = target_id,
+        .bounds_x = 0,
+        .bounds_y = 0,
+        .logical_bounds = rect(0, 0, 0, 0),
+        .pixel_x = 0,
+        .pixel_y = 0,
+        .action_available = 0,
+        .evidence_hash = 0,
+    };
+    let nodes: ArrayList[SemanticsNode] = tree.nodes;
+    let node_index: i32 = semantics_find_index(tree, target_id);
+    if (node_index < 0 || node_index >= nodes.len) { return fallback; }
+    let node_bounds: Rect = nodes.data[node_index].bounds;
+    let node_evidence: i64 = semantic_node_evidence_hash(nodes.data[node_index]);
+    let center_x: i64 = node_bounds.x + node_bounds.width / 2;
+    let center_y: i64 = node_bounds.y + node_bounds.height / 2;
+    let pixel_x: i64 = (center_x * scale_numerator) /
+        (scale_denominator * unit_scale());
+    let pixel_y: i64 = (center_y * scale_numerator) /
+        (scale_denominator * unit_scale());
+    let viewport_right: i64 = viewport.x + viewport.width;
+    let viewport_bottom: i64 = viewport.y + viewport.height;
+    if (center_x < viewport.x || center_x > viewport_right ||
+        center_y < viewport.y || center_y > viewport_bottom) {
+        let out_of_bounds: TalkbackPixelFallbackTarget = TalkbackPixelFallbackTarget{
+            .status = TalkbackStatus.pixel_out_of_bounds,
+            .source_id = target_id,
+            .bounds_x = node_bounds.x,
+            .bounds_y = node_bounds.y,
+            .logical_bounds = node_bounds,
+            .pixel_x = pixel_x,
+            .pixel_y = pixel_y,
+            .action_available = 0,
+            .evidence_hash = node_evidence,
+        };
+        return out_of_bounds;
+    }
+    return TalkbackPixelFallbackTarget{
+        .status = TalkbackStatus.accepted,
+        .source_id = target_id,
+        .bounds_x = node_bounds.x,
+        .bounds_y = node_bounds.y,
+        .logical_bounds = node_bounds,
+        .pixel_x = pixel_x,
+        .pixel_y = pixel_y,
+        .action_available = 1,
+        .evidence_hash = node_evidence,
+    };
 }

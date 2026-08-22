@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-08-06T23:02:37-07:00",
+  "generated_at": "2026-08-09T13:03:05-07:00",
   "zagkit_version": "0.1.0-experimental.0",
   "compiler_commit": "43870455a07bf8e7d4adf38fad807fe3baee4e26",
   "goal": {
-    "total_items": 97,
-    "completed_items": 28,
-    "blocked_items": 69
+    "total_items": 100,
+    "completed_items": 26,
+    "blocked_items": 74
   },
   "upstream": {
     "total_entries": 17,
@@ -17,6 +17,6 @@
   "platforms": {
     "required": "linux, macos, windows, ios, android",
     "capabilities_total": 45,
-    "unavailable": 45
+    "unavailable": 42
   }
 }

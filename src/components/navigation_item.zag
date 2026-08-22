@@ -402,17 +402,17 @@ fn navigation_item_emit(spec: NavigationItemSpec, display: *DisplayList,
             style.radius + extent,
             semantic_color_with_alpha(style.focus_token, 42000));
     }
-    if (display_error == DisplayError.none && elevation.shadow_alpha > 0 &&
+    if (display_error == DisplayError.none && elevation.ambient_shadow_alpha > 0 &&
         spec.interaction.pressed == 0 && enabled != 0) {
-        let spread: i64 = elevation.shadow_spread;
+        let spread: i64 = elevation.ambient_shadow_blur;
         display_error = navigation_item_push_round(display, spec.id,
             rect(spec.bounds.x - spread,
-                spec.bounds.y + elevation.shadow_offset_y - spread,
+                spec.bounds.y + elevation.ambient_shadow_y - spread,
                 spec.bounds.width + spread * 2,
                 spec.bounds.height + spread * 2),
             style.radius + spread,
             semantic_color_with_alpha(SemanticColorToken.shadow,
-                elevation.shadow_alpha));
+                elevation.ambient_shadow_alpha));
     }
     if (display_error == DisplayError.none && style.border_alpha > 0) {
         display_error = navigation_item_push_round(display, spec.id,
@@ -420,12 +420,8 @@ fn navigation_item_emit(spec: NavigationItemSpec, display: *DisplayList,
             semantic_color_with_alpha(style.border_token, style.border_alpha));
     }
     if (display_error == DisplayError.none && style.fill_alpha > 0) {
-        let edge: i64 = unit_scale();
         display_error = navigation_item_push_round(display, spec.id,
-            rect(spec.bounds.x + edge, spec.bounds.y + edge,
-                spec.bounds.width - edge * 2,
-                spec.bounds.height - edge * 2),
-            style.radius - edge,
+            spec.bounds, style.radius,
             semantic_color_with_alpha(style.fill_token, style.fill_alpha));
     }
     if (display_error == DisplayError.none && spec.interaction.selected != 0) {

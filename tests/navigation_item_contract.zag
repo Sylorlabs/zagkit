@@ -267,7 +267,7 @@ fn deterministic_hash_contract(state: *TestState) void {
     expect(state, first.error == NavigationItemBuildError.none &&
         second.error == NavigationItemBuildError.none &&
         first.artifact.evidence_hash != 0 &&
-        first.artifact.evidence_hash == -8023176794990020306 &&
+        first.artifact.evidence_hash == -3727622835224814674 &&
         first.artifact.evidence_hash == second.artifact.evidence_hash &&
         display_a.content_hash == display_b.content_hash &&
         talkback_tree_hash(semantics_a) == talkback_tree_hash(semantics_b),

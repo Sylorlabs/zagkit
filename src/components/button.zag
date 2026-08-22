@@ -31,6 +31,8 @@ enum ButtonEvent {
     pointer_up_inside,
     pointer_cancel,
     focus_gained,
+    focus_gained_pointer,
+    focus_gained_keyboard,
     focus_lost,
     select,
     deselect,
@@ -48,6 +50,7 @@ enum ButtonBuildError { none, invalid_spec, display_error, hit_error, semantics_
 struct ButtonInteraction {
     hovered: i32,
     focused: i32,
+    focus_visible: i32,
     pressed: i32,
     selected: i32,
     enabled: i32,
@@ -104,6 +107,7 @@ struct ButtonArtifact {
     style: ButtonResolvedStyle,
     effectively_enabled: i32,
     content_visible: i32,
+    focus_ring_visible: i32,
     display_op_start: i32,
     display_op_end: i32,
     hit_node_index: i32,
@@ -134,8 +138,8 @@ struct ButtonBuildCheckpoint {
 
 fn button_interaction() ButtonInteraction {
     return ButtonInteraction{
-        .hovered = 0, .focused = 0, .pressed = 0, .selected = 0,
-        .enabled = 1, .loading = 0, .error = 0,
+        .hovered = 0, .focused = 0, .focus_visible = 0, .pressed = 0,
+        .selected = 0, .enabled = 1, .loading = 0, .error = 0,
     };
 }
 
@@ -145,7 +149,7 @@ fn button_description_byte_limit() i32 { return 16384; }
 fn button_canonical_state(state: ButtonCanonicalState) ButtonInteraction {
     let value: ButtonInteraction = button_interaction();
     if (state == ButtonCanonicalState.hover) { value.hovered = 1; }
-    if (state == ButtonCanonicalState.focus) { value.focused = 1; }
+    if (state == ButtonCanonicalState.focus) { value.focused = 1; value.focus_visible = 1; }
     if (state == ButtonCanonicalState.pressed) { value.pressed = 1; }
     if (state == ButtonCanonicalState.selected) { value.selected = 1; }
     if (state == ButtonCanonicalState.disabled) { value.enabled = 0; }
@@ -192,13 +196,21 @@ fn button_reduce(current: ButtonInteraction, event: ButtonEvent) ButtonTransitio
         }
         .pointer_cancel => { next.pressed = 0; }
         .focus_gained => { if (available != 0) { next.focused = 1; } }
-        .focus_lost => { next.focused = 0; next.pressed = 0; }
+        .focus_gained_pointer => {
+            if (available != 0) { next.focused = 1; next.focus_visible = 0; }
+        }
+        .focus_gained_keyboard => {
+            if (available != 0) { next.focused = 1; next.focus_visible = 1; }
+        }
+        .focus_lost => {
+            next.focused = 0; next.focus_visible = 0; next.pressed = 0;
+        }
         .select => { next.selected = 1; }
         .deselect => { next.selected = 0; }
         .enable => { next.enabled = 1; }
         .disable => {
             next.enabled = 0; next.hovered = 0; next.focused = 0;
-            next.pressed = 0;
+            next.focus_visible = 0; next.pressed = 0;
         }
         .begin_loading => { next.loading = 1; next.pressed = 0; }
         .finish_loading => { next.loading = 0; }
@@ -408,7 +420,8 @@ fn button_artifact_hash(artifact: ButtonArtifact) i64 {
     hash = button_hash_mix(hash, artifact.style.radius);
     hash = button_hash_mix(hash, artifact.style.elevation as i64);
     hash = button_hash_mix(hash, artifact.effectively_enabled as i64);
-    return button_hash_mix(hash, artifact.content_visible as i64);
+    hash = button_hash_mix(hash, artifact.content_visible as i64);
+    return button_hash_mix(hash, artifact.focus_ring_visible as i64);
 }
 
 fn button_empty_artifact(spec: ButtonSpec) ButtonArtifact {
@@ -417,6 +430,7 @@ fn button_empty_artifact(spec: ButtonSpec) ButtonArtifact {
         .content_bounds = rect(0, 0, 0, 0),
         .interaction = spec.interaction, .style = button_style(spec),
         .effectively_enabled = 0, .content_visible = 0,
+        .focus_ring_visible = 0,
         .display_op_start = 0 - 1, .display_op_end = 0 - 1,
         .hit_node_index = 0 - 1, .semantics_node_index = 0 - 1,
         .evidence_hash = 0,
@@ -486,7 +500,8 @@ fn button_emit(spec: ButtonSpec, display: *DisplayList, hits: *HitTree,
     let op_start: i32 = display.*.ops.len;
 
     let display_error: DisplayError = DisplayError.none;
-    if (spec.interaction.focused != 0 && enabled != 0) {
+    if (spec.interaction.focused != 0 && enabled != 0 &&
+        spec.interaction.focus_visible != 0) {
         let focus_extent: i64 = 3 * unit_scale();
         display_error = button_push_round(display, spec.id,
             rect(spec.bounds.x - focus_extent, spec.bounds.y - focus_extent,
@@ -495,17 +510,17 @@ fn button_emit(spec: ButtonSpec, display: *DisplayList, hits: *HitTree,
             style.radius + focus_extent,
             semantic_color_with_alpha(style.focus_token, 39000));
     }
-    if (display_error == DisplayError.none && elevation.shadow_alpha > 0 &&
+    if (display_error == DisplayError.none && elevation.ambient_shadow_alpha > 0 &&
         spec.interaction.pressed == 0 && enabled != 0) {
-        let spread: i64 = elevation.shadow_spread;
+        let spread: i64 = elevation.ambient_shadow_blur;
         display_error = button_push_round(display, spec.id,
             rect(spec.bounds.x - spread,
-                spec.bounds.y + elevation.shadow_offset_y - spread,
+                spec.bounds.y + elevation.ambient_shadow_y - spread,
                 spec.bounds.width + spread * 2,
                 spec.bounds.height + spread * 2),
             style.radius + spread,
             semantic_color_with_alpha(SemanticColorToken.shadow,
-                elevation.shadow_alpha));
+                elevation.ambient_shadow_alpha));
     }
     if (display_error == DisplayError.none) {
         display_error = button_push_round(display, spec.id, spec.bounds,
@@ -559,6 +574,7 @@ fn button_emit(spec: ButtonSpec, display: *DisplayList, hits: *HitTree,
     semantic.focus_order = spec.focus_order;
     semantic.disabled = (enabled == 0) as i32;
     semantic.selected = spec.interaction.selected;
+    semantic.focused = (spec.interaction.focused != 0 && enabled != 0) as i32;
     semantic.has_bounds = 1;
     semantic.bounds = spec.bounds;
     if (enabled != 0) {
@@ -579,6 +595,8 @@ fn button_emit(spec: ButtonSpec, display: *DisplayList, hits: *HitTree,
         .interaction = spec.interaction, .style = style,
         .effectively_enabled = enabled,
         .content_visible = (spec.interaction.loading == 0) as i32,
+        .focus_ring_visible = (spec.interaction.focus_visible != 0 &&
+            enabled != 0) as i32,
         .display_op_start = op_start, .display_op_end = display.*.ops.len,
         .hit_node_index = hits.*.nodes.len - 1,
         .semantics_node_index = semantics.*.nodes.len - 1,

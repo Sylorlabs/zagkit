@@ -26,16 +26,19 @@ radius, elevation, and Flex spacing tokens.
 
 State is not encoded by color alone:
 
-- focus emits a retained outer focus ring;
+- actual focus is semantic state, while keyboard-visible focus emits the
+  retained outer ring;
 - selection emits a persistent leading marker and `selected` semantic truth;
 - loading emits a two-part progress rail, exposes the value `Loading`, and
   makes actions unavailable while remaining discoverable; and
-- error emits a shaped exclamation badge and exposes the value `Error`.
+- error emits a trailing state rail sized by Flex `tiny` and `xlarge`
+  spacing tokens and exposes the value `Error`.
 
 Disabled items remain queryable but expose no activate, select, or focus action
 and are removed from pointer and focus routing. Enabled items expose all three
-actions. The exact focus order, set size, and one-based position in set are
-copied into the parallel semantic tree.
+actions. Actual focus, exact focus order, set size, and one-based position in
+set are copied into the parallel semantic tree. Pointer focus does not invent a
+keyboard ring, and visual focus is never the only focus evidence.
 
 ## Placement and Text composition
 

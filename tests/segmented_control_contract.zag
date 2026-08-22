@@ -1,0 +1,874 @@
+@import("../src/components/segmented_control.zag")
+@import("../src/automation/talkback.zag")
+
+struct TestState { passed: i32, failed: i32 }
+
+fn expect(state:  *TestState, condition: i32,
+    name:  []u8) void {
+    if (condition != 0) {
+        state.*.passed = state.*.passed + 1;
+        _zag_print("ok  "); _zag_println(name);
+    } else {
+        state.*.failed = state.*.failed + 1;
+        _zag_print("FAIL "); _zag_println(name);
+    }
+}
+
+fn option_label(index: i32) []u8 {
+    return switch (index) {
+        0 => "Overview", 1 => "Components", 2 => "Typography",
+        3 => "Motion", 4 => "Renderer", 5 => "Accessibility",
+        else => "Segment",
+    };
+}
+
+fn option_description(index: i32) []u8 {
+    return switch (index) {
+        0 => "Show overview", 1 => "Show components", 2 => "Show type ramp",
+        3 => "Show motion", 4 => "Show renderer", 5 => "Show accessibility",
+        else => "Show segment",
+    };
+}
+
+fn fill_options(options:  *ArrayList[SegmentedControlOption],
+    base: i64, count: i32) void {
+    let index: i32 = 0;
+    while (index < count) {
+        push[SegmentedControlOption](options, SegmentedControlOption{
+            .id = node_key(base + index as i64),
+            .label = option_label(index),
+            .description = option_description(index),
+        });
+        index = index + 1;
+    }
+}
+
+fn copy_owned_bytes(destination:  *ArrayList[u8],
+    source:  []u8) void {
+    let index: i32 = 0;
+    while (index < source.len) {
+        push[u8](destination, source[index]);
+        index = index + 1;
+    }
+}
+
+fn six_state_spec(group_id: i64) SegmentedControlSpec {
+    let model: SegmentedControlModel = segmented_control_model(6, 5);
+    model.hovered_index = 1;
+    model.roving_index = 2;
+    model.has_focus = 1;
+    model.focus_visible = 1;
+    model.pressed_index = 3;
+    model.enabled_mask = model.enabled_mask &
+        (0 - 1 - segmented_control_bit(4));
+    let spec: SegmentedControlSpec = segmented_control_spec(node_key(group_id),
+        hit_root_key(), rect(40 * unit_scale(), 60 * unit_scale(),
+            600 * unit_scale(), 48 * unit_scale()),
+        "Toolkit sections", model);
+    spec.description = "Choose exactly one toolkit section";
+    spec.focus_order_base = 20;
+    spec.z_order = 30;
+    return spec;
+}
+
+fn model_and_reducer_contract(state:  *TestState) void {
+    let model: SegmentedControlModel = segmented_control_model(4, 1);
+    expect(state, segmented_control_model_valid(model) != 0 &&
+        model.enabled_mask == 15 && model.selected_index == 1 &&
+        model.roving_index == 1 && model.has_focus == 0 &&
+        model.focus_visible == 0,
+        "model constructor establishes one selection and roving target without fabricating focus");
+
+    let entered: SegmentedControlTransition = segmented_control_reduce(model,
+        segmented_control_event(SegmentedControlEventKind.pointer_enter, 2));
+    let down: SegmentedControlTransition = segmented_control_reduce(entered.model,
+        segmented_control_event(SegmentedControlEventKind.pointer_down, 2));
+    let up: SegmentedControlTransition = segmented_control_reduce(down.model,
+        segmented_control_event(SegmentedControlEventKind.pointer_up_inside, 2));
+    expect(state, entered.model.hovered_index == 2 &&
+        down.model.pressed_index == 2 && down.model.roving_index == 2 &&
+        down.model.has_focus == 1 && down.model.focus_visible == 0 &&
+        down.roving_changed == 1 && down.focus_changed == 1 &&
+        up.model.pressed_index == segmented_control_no_index() &&
+        up.model.selected_index == 2 && up.selection_changed == 1 &&
+        up.previous_selected_index == 1 && up.activated == 1,
+        "pointer focus stays non-visible while inside release emits one explicit selection action");
+
+    let cancelled: SegmentedControlTransition = segmented_control_reduce(down.model,
+        segmented_control_event(SegmentedControlEventKind.pointer_cancel,
+            segmented_control_no_index()));
+    let mismatched: SegmentedControlTransition = segmented_control_reduce(down.model,
+        segmented_control_event(SegmentedControlEventKind.pointer_up_inside, 3));
+    expect(state, cancelled.model.pressed_index == segmented_control_no_index() &&
+        cancelled.model.selected_index == 1 && cancelled.activated == 0 &&
+        mismatched.rejected == 1 && mismatched.selection_changed == 0,
+        "cancel and mismatched releases never manufacture a selection");
+
+    let focus: SegmentedControlTransition = segmented_control_reduce(model,
+        segmented_control_event(SegmentedControlEventKind.focus_target, 3));
+    let blur: SegmentedControlTransition = segmented_control_reduce(focus.model,
+        segmented_control_event(SegmentedControlEventKind.focus_lost, 3));
+    expect(state, focus.model.roving_index == 3 &&
+        focus.model.has_focus == 1 && focus.model.focus_visible == 1 &&
+        focus.roving_changed == 1 && focus.focus_changed == 1 &&
+        focus.model.selected_index == 1 && focus.selection_changed == 0 &&
+        blur.model.roving_index == 3 && blur.model.has_focus == 0 &&
+        blur.model.focus_visible == 0 && blur.focus_changed == 1,
+        "focus ownership and visibility change without destroying the roving target or selection");
+
+    let available: SegmentedControlModel = model;
+    available.enabled_mask = available.enabled_mask &
+        (0 - 1 - segmented_control_bit(2));
+    let next: SegmentedControlTransition = segmented_control_reduce(available,
+        segmented_control_event(SegmentedControlEventKind.key_next,
+            segmented_control_no_index()));
+    let previous: SegmentedControlTransition = segmented_control_reduce(next.model,
+        segmented_control_event(SegmentedControlEventKind.key_previous,
+            segmented_control_no_index()));
+    expect(state, next.model.selected_index == 3 && next.model.roving_index == 3 &&
+        next.model.has_focus == 1 && next.model.focus_visible == 1 &&
+        next.roving_changed == 1 && next.focus_changed == 1 &&
+        next.selection_changed == 1 && next.activated == 1 &&
+        previous.model.selected_index == 1,
+        "arrow-key selection starts from selection when unfocused, skips disabled segments, and exposes keyboard focus");
+
+    let home: SegmentedControlTransition = segmented_control_reduce(available,
+        segmented_control_event(SegmentedControlEventKind.key_home,
+            segmented_control_no_index()));
+    let end: SegmentedControlTransition = segmented_control_reduce(available,
+        segmented_control_event(SegmentedControlEventKind.key_end,
+            segmented_control_no_index()));
+    expect(state, home.model.selected_index == 0 &&
+        end.model.selected_index == 3 && home.selection_changed == 1 &&
+        end.selection_changed == 1,
+        "Home and End select the first and last available segment");
+
+    let direct: SegmentedControlTransition = segmented_control_reduce(model,
+        segmented_control_event(SegmentedControlEventKind.select_target, 3));
+    let activate: SegmentedControlTransition = segmented_control_reduce(model,
+        segmented_control_event(SegmentedControlEventKind.activate_focused,
+            segmented_control_no_index()));
+    expect(state, direct.model.selected_index == 3 && direct.activated == 1 &&
+        direct.model.has_focus == 0 && direct.model.focus_visible == 0 &&
+        direct.roving_changed == 1 && direct.focus_changed == 0 &&
+        activate.model.selected_index == 1 && activate.selection_changed == 0 &&
+        activate.model.has_focus == 1 && activate.model.focus_visible == 1 &&
+        activate.roving_changed == 0 && activate.focus_changed == 1 &&
+        activate.activated == 1,
+        "semantic selection preserves focus mode while keyboard activation establishes visible focus");
+
+    let disabled_current: SegmentedControlTransition = segmented_control_reduce(model,
+        segmented_control_event(SegmentedControlEventKind.disable_target, 1));
+    expect(state, segmented_control_index_enabled(disabled_current.model, 1) == 0 &&
+        disabled_current.model.selected_index == 2 &&
+        disabled_current.selection_changed == 1 &&
+        segmented_control_model_valid(disabled_current.model) != 0,
+        "disabling the selection atomically chooses the next enabled segment");
+
+    let only_one: SegmentedControlModel = segmented_control_model(2, 0);
+    only_one.enabled_mask = segmented_control_bit(0);
+    let refuse_last: SegmentedControlTransition = segmented_control_reduce(only_one,
+        segmented_control_event(SegmentedControlEventKind.disable_target, 0));
+    let refuse_disabled: SegmentedControlTransition = segmented_control_reduce(available,
+        segmented_control_event(SegmentedControlEventKind.select_target, 2));
+    expect(state, refuse_last.rejected == 1 && refuse_last.model.enabled_mask == 1 &&
+        refuse_disabled.rejected == 1 && refuse_disabled.model.selected_index == 1,
+        "the reducer rejects zero-selection and disabled-selection states");
+
+    let invalid_target: SegmentedControlTransition = segmented_control_reduce(model,
+        segmented_control_event(SegmentedControlEventKind.pointer_down, 99));
+    let invalid_model: SegmentedControlModel = model;
+    invalid_model.selected_index = 99;
+    let invalid_state: SegmentedControlTransition = segmented_control_reduce(invalid_model,
+        segmented_control_event(SegmentedControlEventKind.key_next,
+            segmented_control_no_index()));
+    let impossible_focus: SegmentedControlModel = model;
+    impossible_focus.focus_visible = 1;
+    expect(state, invalid_target.rejected == 1 && invalid_state.rejected == 1 &&
+        segmented_control_model_valid(impossible_focus) == 0 &&
+        invalid_target.model.selected_index == model.selected_index,
+        "invalid targets, invalid selections, and visible focus without ownership fail closed");
+}
+
+fn exhaustive_selection_property_contract(
+    state:  *TestState) void {
+    let valid: i32 = 1;
+    let cases: i64 = 0;
+    let count: i32 = 2;
+    while (count <= segmented_control_maximum_segments()) {
+        let limit: i64 = (1 as i64) << count;
+        let mask: i64 = 1;
+        while (mask < limit) {
+            let selected: i32 = 0;
+            while (selected < count) {
+                if ((mask & segmented_control_bit(selected)) != 0) {
+                    let model: SegmentedControlModel = segmented_control_model(
+                        count, selected);
+                    model.enabled_mask = mask;
+                    model.roving_index = selected;
+                    if (segmented_control_model_valid(model) == 0) { valid = 0; }
+                    let next: SegmentedControlTransition = segmented_control_reduce(
+                        model, segmented_control_event(
+                            SegmentedControlEventKind.key_next,
+                            segmented_control_no_index()));
+                    let previous: SegmentedControlTransition =
+                        segmented_control_reduce(model, segmented_control_event(
+                            SegmentedControlEventKind.key_previous,
+                            segmented_control_no_index()));
+                    let home: SegmentedControlTransition = segmented_control_reduce(
+                        model, segmented_control_event(
+                            SegmentedControlEventKind.key_home,
+                            segmented_control_no_index()));
+                    let end: SegmentedControlTransition = segmented_control_reduce(
+                        model, segmented_control_event(
+                            SegmentedControlEventKind.key_end,
+                            segmented_control_no_index()));
+                    if (next.rejected != 0 || previous.rejected != 0 ||
+                        home.rejected != 0 || end.rejected != 0 ||
+                        segmented_control_model_valid(next.model) == 0 ||
+                        segmented_control_model_valid(previous.model) == 0 ||
+                        segmented_control_model_valid(home.model) == 0 ||
+                        segmented_control_model_valid(end.model) == 0 ||
+                        next.model.has_focus == 0 || next.model.focus_visible == 0 ||
+                        previous.model.has_focus == 0 ||
+                            previous.model.focus_visible == 0 ||
+                        home.model.has_focus == 0 || home.model.focus_visible == 0 ||
+                        end.model.has_focus == 0 || end.model.focus_visible == 0 ||
+                        segmented_control_index_enabled(next.model,
+                            next.model.selected_index) == 0 ||
+                        segmented_control_index_enabled(previous.model,
+                            previous.model.selected_index) == 0) { valid = 0; }
+                    cases = cases + 4;
+                }
+                selected = selected + 1;
+            }
+            mask = mask + 1;
+        }
+        count = count + 1;
+    }
+    expect(state, valid != 0 && cases == 180224,
+        "all 180224 enabled-mask selection and directional-key cases preserve one valid selection");
+}
+
+fn placement_and_state_contract(state:  *TestState) void {
+    let options: ArrayList[SegmentedControlOption] = make[SegmentedControlOption](6);
+    fill_options(&options, 100, 6);
+    let spec: SegmentedControlSpec = six_state_spec(90);
+    expect(state, segmented_control_spec_valid(spec, &options) != 0 &&
+        segmented_control_minimum_target() == 44 * unit_scale() &&
+        segmented_control_minimum_height(FlexDensity.standard) == 48 * unit_scale(),
+        "valid controls retain a 44-pixel target inside a token-spaced rail");
+
+    let first: Rect = segmented_control_segment_bounds(spec, 0);
+    let last: Rect = segmented_control_segment_bounds(spec, 5);
+    let gap: i64 = segmented_control_gap(spec.density);
+    let index: i32 = 0;
+    let exact_chain: i32 = 1;
+    while (index < 5) {
+        let left: Rect = segmented_control_segment_bounds(spec, index);
+        let right: Rect = segmented_control_segment_bounds(spec, index + 1);
+        if (left.x + left.width + gap != right.x) { exact_chain = 0; }
+        index = index + 1;
+    }
+    expect(state, exact_chain != 0 &&
+        first.x == spec.bounds.x + segmented_control_padding(spec.density) &&
+        last.x + last.width == spec.bounds.x + spec.bounds.width -
+            segmented_control_padding(spec.density),
+        "segment placement conserves every fixed-point unit and exact Flex gap");
+
+    let content: Rect = segmented_control_content_bounds(spec, 0);
+    expect(state, content.x == first.x +
+            flex_spacing(FlexSpacingToken.large, spec.density) &&
+        content.y == first.y + flex_spacing(FlexSpacingToken.small, spec.density) &&
+        content.width == first.width -
+            flex_spacing(FlexSpacingToken.large, spec.density) * 2,
+        "every label slot exposes exact Flex padding for first-party Text");
+
+    let rest: SegmentedControlResolvedStyle = segmented_control_style(spec, 0);
+    let hover: SegmentedControlResolvedStyle = segmented_control_style(spec, 1);
+    let focus: SegmentedControlResolvedStyle = segmented_control_style(spec, 2);
+    let pressed: SegmentedControlResolvedStyle = segmented_control_style(spec, 3);
+    let disabled: SegmentedControlResolvedStyle = segmented_control_style(spec, 4);
+    let selected: SegmentedControlResolvedStyle = segmented_control_style(spec, 5);
+    expect(state, rest.fill_token == SemanticColorToken.surface_base &&
+        hover.fill_token == SemanticColorToken.surface_interactive &&
+        focus.border_token == SemanticColorToken.focus &&
+        pressed.fill_token == SemanticColorToken.accent_emphasis &&
+        disabled.label_color_token == SemanticColorToken.text_disabled &&
+        selected.fill_token == SemanticColorToken.surface_selected,
+        "default hover focus pressed disabled and selected map to named semantic tokens");
+    expect(state, selected.marker_token == SemanticColorToken.accent &&
+        selected.selected == 1 && focus.focused == 1 &&
+        focus.has_focus == 1 && focus.focus_visible == 1 &&
+        pressed.pressed == 1 &&
+        disabled.disabled == 1 && hover.hovered == 1,
+        "all six state flags remain inspectable independently of resolved color");
+
+    let resting: SegmentedControlSpec = spec;
+    resting.model = segmented_control_model(6, 5);
+    let resting_selected: SegmentedControlResolvedStyle =
+        segmented_control_style(resting, 5);
+    expect(state, resting_selected.selected == 1 &&
+        resting_selected.has_focus == 0 &&
+        resting_selected.focus_visible == 0 &&
+        resting_selected.focused == 0 &&
+        resting_selected.border_token == SemanticColorToken.border_emphasis,
+        "resting selection keeps its non-color cue without painting an unearned focus ring");
+
+    let too_small: SegmentedControlSpec = spec;
+    too_small.bounds.width = segmented_control_minimum_width(spec.model,
+        spec.density) - 1;
+    expect(state, segmented_control_spec_valid(too_small, &options) == 0,
+        "undersized segmented targets fail instead of gaining invisible hit halos");
+    let invalid_model: SegmentedControlSpec = spec;
+    invalid_model.model.selected_index = 4;
+    options.data[0].label = "";
+    expect(state, segmented_control_spec_valid(invalid_model, &options) == 0 &&
+        segmented_control_spec_valid(spec, &options) == 0,
+        "disabled selections and empty labels fail strict validation");
+    options.data[0].label = option_label(0);
+    free[SegmentedControlOption](&options);
+
+    let placement_valid: i32 = 1;
+    let count: i32 = 2;
+    while (count <= segmented_control_maximum_segments()) {
+        let placement_options: ArrayList[SegmentedControlOption] =
+            make[SegmentedControlOption](count);
+        fill_options(&placement_options, 1000 + count as i64 * 20, count);
+        let model: SegmentedControlModel = segmented_control_model(count, 0);
+        let extra: i32 = 0;
+        while (extra < count) {
+            let placement: SegmentedControlSpec = segmented_control_spec(
+                node_key(900 + count as i64), hit_root_key(),
+                rect(0, 0,
+                    segmented_control_minimum_width(model,
+                        FlexDensity.standard) + extra as i64,
+                    segmented_control_minimum_height(FlexDensity.standard)),
+                "Placement property", model);
+            let child: i32 = 0;
+            let expected_x: i64 = placement.bounds.x +
+                segmented_control_padding(placement.density);
+            while (child < count) {
+                let bounds: Rect = segmented_control_segment_bounds(
+                    placement, child);
+                if (bounds.x != expected_x ||
+                    bounds.width < segmented_control_minimum_target()) {
+                    placement_valid = 0;
+                }
+                expected_x = bounds.x + bounds.width;
+                if (child + 1 < count) {
+                    expected_x = expected_x +
+                        segmented_control_gap(placement.density);
+                }
+                child = child + 1;
+            }
+            if (expected_x != placement.bounds.x + placement.bounds.width -
+                segmented_control_padding(placement.density)) {
+                placement_valid = 0;
+            }
+            extra = extra + 1;
+        }
+        free[SegmentedControlOption](&placement_options);
+        count = count + 1;
+    }
+    expect(state, placement_valid != 0,
+        "every supported count and fixed-point remainder conserves exact target geometry");
+}
+
+fn retained_tree_contract(state:  *TestState) void {
+    let options: ArrayList[SegmentedControlOption] = make[SegmentedControlOption](6);
+    fill_options(&options, 100, 6);
+    let spec: SegmentedControlSpec = six_state_spec(90);
+    let display: DisplayList = display_list_make();
+    let hits: HitTree = hit_tree_make();
+    let semantics: SemanticsTree = semantics_tree_make();
+    let built: SegmentedControlBuildResult = segmented_control_emit(spec,
+        &options, &display, &hits, &semantics);
+    expect(state, built.error == SegmentedControlBuildError.none &&
+        built.artifact.id.value == 90 && built.artifact.segment_count == 6 &&
+        built.artifact.selected_index == 5 &&
+        built.artifact.selected_id.value == 105 &&
+        built.artifact.roving_index == 2 &&
+        built.artifact.has_focus == 1 && built.artifact.focus_visible == 1 &&
+        built.artifact.selected_marker_visible == 1 &&
+        built.artifact.rail_fill_token == SemanticColorToken.surface_inset &&
+        built.artifact.rail_border_token == SemanticColorToken.border_subtle &&
+        built.artifact.rail_radius_token == SemanticRadiusToken.control &&
+        built.artifact.rail_elevation_token == SemanticElevationToken.base &&
+        built.artifact.label_type_token == SemanticTypeToken.label &&
+        built.artifact.group_role == SemanticRole.tab_list,
+        "successful emission returns exact single-selection artifact truth");
+    expect(state, hits.nodes.len == 7 && semantics.nodes.len == 7 &&
+        built.artifact.group_hit_node_index == 0 &&
+        built.artifact.group_semantics_node_index == 0 &&
+        semantics.nodes.data[0].role == SemanticRole.tab_list &&
+        semantics.nodes.data[0].action_mask == 0,
+        "one non-focusable group owns six retained tab children");
+
+    let index: i32 = 0;
+    let shared: i32 = 1;
+    let roving_focus_targets: i32 = 0;
+    while (index < 6) {
+        let bounds: Rect = segmented_control_segment_bounds(spec, index);
+        let hit: HitNode = hits.nodes.data[index + 1];
+        let semantic: SemanticsNode = semantics.nodes.data[index + 1];
+        if (node_key_equal(hit.id, options.data[index].id) == 0 ||
+            node_key_equal(semantic.id, options.data[index].id) == 0 ||
+            hit.bounds.x != bounds.x || hit.bounds.y != bounds.y ||
+            hit.bounds.width != bounds.width || hit.bounds.height != bounds.height ||
+            semantic.bounds.x != bounds.x || semantic.bounds.y != bounds.y ||
+            semantic.bounds.width != bounds.width || semantic.bounds.height != bounds.height ||
+            semantic.role != SemanticRole.tab ||
+            semantic.focus_order !=
+                ((index == spec.model.roving_index) as i64) *
+                    spec.focus_order_base ||
+            semantic.focused != (index == spec.model.roving_index) as i32 ||
+            semantic.set_size != 6 || semantic.position_in_set != index + 1) {
+            shared = 0;
+        }
+        if (hit.focusable != 0 || semantic.focus_order > 0) {
+            if (hit.focusable == 1 && semantic.focus_order ==
+                spec.focus_order_base && index == spec.model.roving_index) {
+                roving_focus_targets = roving_focus_targets + 1;
+            } else { shared = 0; }
+        }
+        let exact_pixel_owner: i32 = 0;
+        let op_index: i32 = built.artifact.display_op_start;
+        while (op_index < built.artifact.display_op_end) {
+            let op: DisplayOp = display.ops.data[op_index];
+            if (node_key_equal(op.owner, options.data[index].id) != 0 &&
+                op.bounds.x == bounds.x && op.bounds.y == bounds.y &&
+                op.bounds.width == bounds.width && op.bounds.height == bounds.height) {
+                exact_pixel_owner = 1;
+            }
+            op_index = op_index + 1;
+        }
+        if (exact_pixel_owner == 0) { shared = 0; }
+        index = index + 1;
+    }
+    expect(state, shared != 0 && roving_focus_targets == 1,
+        "pixels hit testing semantics and Talkback share exact child identity while exposing one roving tab stop");
+
+    expect(state, semantics.nodes.data[6].selected == 1 &&
+        semantic_text_equal(semantics.nodes.data[6].value, "Selected") != 0 &&
+        semantics.nodes.data[5].disabled == 1 &&
+        semantics.nodes.data[5].action_mask == 0 &&
+        semantic_text_equal(semantics.nodes.data[5].value, "Unavailable") != 0 &&
+        hits.nodes.data[5].enabled == 0 && hits.nodes.data[5].focusable == 0,
+        "selected and disabled truth agrees across semantic value actions and hit routing");
+    expect(state, semantic_actions_has(semantics.nodes.data[1].action_mask,
+            SemanticAction.activate) != 0 &&
+        semantic_actions_has(semantics.nodes.data[1].action_mask,
+            SemanticAction.select) != 0 &&
+        semantic_actions_has(semantics.nodes.data[1].action_mask,
+            SemanticAction.focus) != 0,
+        "enabled segments expose keyboard activation selection and focus actions");
+
+    let selected_bounds: Rect = segmented_control_segment_bounds(spec, 5);
+    let selected_hit: HitResult = hit_test(hits,
+        selected_bounds.x + selected_bounds.width / 2,
+        selected_bounds.y + selected_bounds.height / 2);
+    let disabled_bounds: Rect = segmented_control_segment_bounds(spec, 4);
+    let disabled_hit: HitResult = hit_test(hits,
+        disabled_bounds.x + disabled_bounds.width / 2,
+        disabled_bounds.y + disabled_bounds.height / 2);
+    expect(state, selected_hit.found != 0 && selected_hit.id.value == 105 &&
+        disabled_hit.found == 0,
+        "pointer routing resolves enabled stable IDs while disabled pixels fail closed");
+
+    let selected_op_count: i32 = 0;
+    let selected_marker: i32 = 0;
+    let selected_shadow: i32 = 0;
+    let focus_ring_geometry: i32 = 0;
+    let pressed_inset_geometry: i32 = 0;
+    let focus_bounds: Rect = segmented_control_segment_bounds(spec, 2);
+    let pressed_bounds: Rect = segmented_control_segment_bounds(spec, 3);
+    index = built.artifact.display_op_start;
+    while (index < built.artifact.display_op_end) {
+        let op: DisplayOp = display.ops.data[index];
+        if (op.owner.value == 105) {
+            selected_op_count = selected_op_count + 1;
+            if (op.bounds.height == 3 * unit_scale() &&
+                op.bounds.width < selected_bounds.width) { selected_marker = 1; }
+            if (op.bounds.width > selected_bounds.width &&
+                op.bounds.height > selected_bounds.height) { selected_shadow = 1; }
+        }
+        if (op.owner.value == 102 &&
+            op.bounds.x == focus_bounds.x + 2 * unit_scale() &&
+            op.bounds.y == focus_bounds.y + 2 * unit_scale() &&
+            op.bounds.width == focus_bounds.width - 4 * unit_scale()) {
+            focus_ring_geometry = 1;
+        }
+        if (op.owner.value == 103 &&
+            op.bounds.x == pressed_bounds.x + 2 * unit_scale() &&
+            op.bounds.y == pressed_bounds.y + 2 * unit_scale() &&
+            op.bounds.width == pressed_bounds.width - 4 * unit_scale()) {
+            pressed_inset_geometry = 1;
+        }
+        index = index + 1;
+    }
+    expect(state, selected_op_count >= 4 && selected_marker != 0 &&
+        selected_shadow != 0,
+        "selection emits a raised thumb and persistent underline in addition to selected color");
+    expect(state, focus_ring_geometry != 0 && pressed_inset_geometry != 0,
+        "focus and press retain visibly thicker and inset geometry rather than hue-only states");
+
+    let session: TalkbackSession = talkback_session_make(talkback_capabilities());
+    let viewport: Rect = rect(0, 0, 900 * unit_scale(), 400 * unit_scale());
+    let selected_query: TalkbackResponse = talkback_dispatch(&session, semantics,
+        viewport, talkback_request(1, TalkbackCommand.query, node_key(105),
+            semantics.revision));
+    let selected_key: TalkbackResponse = talkback_dispatch(&session, semantics,
+        viewport, talkback_request(2, TalkbackCommand.key, node_key(105),
+            semantics.revision));
+    let focused_query: TalkbackResponse = talkback_dispatch(&session, semantics,
+        viewport, talkback_request(3, TalkbackCommand.query, node_key(102),
+            semantics.revision));
+    let disabled_query: TalkbackResponse = talkback_dispatch(&session, semantics,
+        viewport, talkback_request(4, TalkbackCommand.query, node_key(104),
+            semantics.revision));
+    let disabled_key: TalkbackResponse = talkback_dispatch(&session, semantics,
+        viewport, talkback_request(5, TalkbackCommand.key, node_key(104),
+            semantics.revision));
+    expect(state, selected_query.status == TalkbackStatus.accepted &&
+        selected_query.resolved_role == SemanticRole.tab &&
+        (selected_query.state_flags & talkback_state_selected_bit()) != 0 &&
+        selected_query.bounds.x == selected_bounds.x &&
+        selected_key.status == TalkbackStatus.accepted &&
+        selected_key.emitted_action == 1,
+        "Talkback queries and keyboard-activates the selected segment by stable ID");
+    expect(state, focused_query.status == TalkbackStatus.accepted &&
+        (focused_query.state_flags & talkback_state_focused_bit()) != 0 &&
+        semantics.nodes.data[3].focused == 1 &&
+        semantics.nodes.data[3].focus_order == spec.focus_order_base,
+        "Talkback reports actual semantic focus independently from selected state and focus-ring modality");
+    expect(state, disabled_query.status == TalkbackStatus.accepted &&
+        (disabled_query.state_flags & talkback_state_disabled_bit()) != 0 &&
+        disabled_key.status == TalkbackStatus.action_unavailable &&
+        disabled_key.emitted_action == 0,
+        "Talkback keeps disabled segments queryable while actions fail closed");
+
+    expect(state, display_list_seal(&display) == DisplayError.none &&
+        display_list_verify(&display) == DisplayError.none &&
+        built.artifact.evidence_hash != 0,
+        "segmented chrome seals as immutable deterministic DisplayList evidence");
+    talkback_session_free(&session);
+    semantics_tree_free(&semantics);
+    hit_tree_free(&hits);
+    display_list_free(&display);
+    free[SegmentedControlOption](&options);
+}
+
+fn pointer_focus_semantics_contract(state:  *TestState) void {
+    let options: ArrayList[SegmentedControlOption] =
+        make[SegmentedControlOption](3);
+    fill_options(&options, 1300, 3);
+    let model: SegmentedControlModel = segmented_control_model(3, 0);
+    let pointer: SegmentedControlTransition = segmented_control_reduce(model,
+        segmented_control_event(SegmentedControlEventKind.pointer_down, 1));
+    let spec: SegmentedControlSpec = segmented_control_spec(node_key(1290),
+        hit_root_key(), rect(20 * unit_scale(), 20 * unit_scale(),
+            240 * unit_scale(), 48 * unit_scale()),
+        "Pointer focus contract", pointer.model);
+    spec.focus_order_base = 88;
+    let display: DisplayList = display_list_make();
+    let hits: HitTree = hit_tree_make();
+    let semantics: SemanticsTree = semantics_tree_make();
+    let built: SegmentedControlBuildResult = segmented_control_emit(spec,
+        &options, &display, &hits, &semantics);
+    let style: SegmentedControlResolvedStyle = segmented_control_style(spec, 1);
+    let session: TalkbackSession = talkback_session_make(talkback_capabilities());
+    let query: TalkbackResponse = talkback_dispatch(&session, semantics,
+        rect(0, 0, 400 * unit_scale(), 200 * unit_scale()),
+        talkback_request(41, TalkbackCommand.query, node_key(1301),
+            semantics.revision));
+    let keyboard_spec: SegmentedControlSpec = spec;
+    keyboard_spec.model.focus_visible = 1;
+    let keyboard_display: DisplayList = display_list_make();
+    let keyboard_hits: HitTree = hit_tree_make();
+    let keyboard_semantics: SemanticsTree = semantics_tree_make();
+    let keyboard_built: SegmentedControlBuildResult = segmented_control_emit(
+        keyboard_spec, &options, &keyboard_display, &keyboard_hits,
+        &keyboard_semantics);
+    let keyboard_style: SegmentedControlResolvedStyle =
+        segmented_control_style(keyboard_spec, 1);
+    expect(state, built.error == SegmentedControlBuildError.none &&
+        pointer.model.has_focus == 1 && pointer.model.focus_visible == 0 &&
+        style.has_focus == 1 && style.focus_visible == 0 &&
+        style.focused == 0 && style.border_token != SemanticColorToken.focus,
+        "pointer acquisition owns focus without borrowing the keyboard focus-ring style");
+    expect(state, semantics.nodes.data[2].focused == 1 &&
+        semantics.nodes.data[2].focus_order == spec.focus_order_base &&
+        hits.nodes.data[2].focusable == 1 &&
+        query.status == TalkbackStatus.accepted &&
+        (query.state_flags & talkback_state_focused_bit()) != 0,
+        "semantic and Talkback focus remain truthful when focus-visible styling is intentionally absent");
+    expect(state, keyboard_built.error == SegmentedControlBuildError.none &&
+        keyboard_style.focused == 1 && keyboard_style.focus_visible == 1 &&
+        built.artifact.evidence_hash != keyboard_built.artifact.evidence_hash &&
+        display.content_hash != keyboard_display.content_hash &&
+        talkback_tree_hash(semantics) == talkback_tree_hash(keyboard_semantics),
+        "focus-ring modality changes visual evidence without corrupting identical semantic focus truth");
+    semantics_tree_free(&keyboard_semantics);
+    hit_tree_free(&keyboard_hits);
+    display_list_free(&keyboard_display);
+    talkback_session_free(&session);
+    semantics_tree_free(&semantics);
+    hit_tree_free(&hits);
+    display_list_free(&display);
+    free[SegmentedControlOption](&options);
+}
+
+fn deterministic_contract(state:  *TestState) void {
+    let options: ArrayList[SegmentedControlOption] = make[SegmentedControlOption](6);
+    fill_options(&options, 300, 6);
+    let spec: SegmentedControlSpec = six_state_spec(290);
+    spec.purpose = SegmentedControlPurpose.value_picker;
+    let display_a: DisplayList = display_list_make();
+    let hits_a: HitTree = hit_tree_make();
+    let semantics_a: SemanticsTree = semantics_tree_make();
+    let display_b: DisplayList = display_list_make();
+    let hits_b: HitTree = hit_tree_make();
+    let semantics_b: SemanticsTree = semantics_tree_make();
+    let first: SegmentedControlBuildResult = segmented_control_emit(spec,
+        &options, &display_a, &hits_a, &semantics_a);
+    let second: SegmentedControlBuildResult = segmented_control_emit(spec,
+        &options, &display_b, &hits_b, &semantics_b);
+    expect(state, first.error == SegmentedControlBuildError.none &&
+        second.error == SegmentedControlBuildError.none &&
+        first.artifact.evidence_hash == second.artifact.evidence_hash &&
+        display_a.content_hash == display_b.content_hash &&
+        talkback_tree_hash(semantics_a) == talkback_tree_hash(semantics_b) &&
+        first.artifact.purpose == SegmentedControlPurpose.value_picker &&
+        first.artifact.group_role == SemanticRole.radio_group &&
+        semantics_a.nodes.data[0].role == SemanticRole.radio_group &&
+        semantics_a.nodes.data[1].role == SemanticRole.radio &&
+        semantics_b.nodes.data[6].role == SemanticRole.radio,
+        "value-picker purpose emits deterministic radio semantics instead of tab semantics");
+    semantics_tree_free(&semantics_b); hit_tree_free(&hits_b);
+    display_list_free(&display_b);
+    semantics_tree_free(&semantics_a); hit_tree_free(&hits_a);
+    display_list_free(&display_a);
+    free[SegmentedControlOption](&options);
+}
+
+fn dynamic_borrow_copy_contract(state:  *TestState) void {
+    let label_owner: ArrayList[u8] = make[u8](16);
+    let description_owner: ArrayList[u8] = make[u8](32);
+    copy_owned_bytes(&label_owner, "Dynamic mode");
+    copy_owned_bytes(&description_owner, "Label bytes are caller owned");
+    let options: ArrayList[SegmentedControlOption] =
+        make[SegmentedControlOption](2);
+    push[SegmentedControlOption](&options, SegmentedControlOption{
+        .id = node_key(1201),
+        .label = label_owner.data[0..label_owner.len],
+        .description = description_owner.data[0..description_owner.len],
+    });
+    push[SegmentedControlOption](&options, SegmentedControlOption{
+        .id = node_key(1202),
+        .label = "Static mode",
+        .description = "Literal peer verifies mixed provenance",
+    });
+    let spec: SegmentedControlSpec = segmented_control_spec(node_key(1200),
+        hit_root_key(), rect(20 * unit_scale(), 20 * unit_scale(),
+            240 * unit_scale(), 48 * unit_scale()),
+        "Borrowed option copy", segmented_control_model(2, 0));
+    let display: DisplayList = display_list_make();
+    let hits: HitTree = hit_tree_make();
+    let semantics: SemanticsTree = semantics_tree_make();
+    let built: SegmentedControlBuildResult = segmented_control_emit(spec,
+        &options, &display, &hits, &semantics);
+
+    // The call has copied semantic text. End every caller-side view and owner
+    // before inspecting the retained tree; a surviving aggregate loan must make
+    // this release fail compilation rather than being hidden by the component.
+    free[SegmentedControlOption](&options);
+    free[u8](&label_owner);
+    free[u8](&description_owner);
+
+    let session: TalkbackSession = talkback_session_make(talkback_capabilities());
+    let viewport: Rect = rect(0, 0, 400 * unit_scale(), 200 * unit_scale());
+    let query: TalkbackResponse = talkback_dispatch(&session, semantics,
+        viewport, talkback_request(51, TalkbackCommand.query, node_key(1201),
+            semantics.revision));
+    expect(state, built.error == SegmentedControlBuildError.none &&
+        semantic_text_equal(semantics.nodes.data[1].name, "Dynamic mode") != 0 &&
+        semantic_text_equal(semantics.nodes.data[1].description,
+            "Label bytes are caller owned") != 0 &&
+        query.status == TalkbackStatus.accepted &&
+        query.name_length == 12 && query.description_length == 28,
+        "dynamic borrowed option bytes end at emission while retained semantics keep an owned copy");
+    talkback_session_free(&session);
+    semantics_tree_free(&semantics);
+    hit_tree_free(&hits);
+    display_list_free(&display);
+}
+
+fn builders_restored(display:  *DisplayList,
+    hits:  *HitTree,
+    semantics:  *SemanticsTree,
+    display_length: i32, display_revision: i64,
+    display_hash: i64, hit_length: i32, hit_revision: i64,
+    semantic_length: i32, semantic_revision: i64) i32 {
+    return (display.*.ops.len == display_length &&
+        display.*.revision == display_revision &&
+        display.*.content_hash == display_hash &&
+        hits.*.nodes.len == hit_length && hits.*.revision == hit_revision &&
+        semantics.*.nodes.len == semantic_length &&
+        semantics.*.revision == semantic_revision) as i32;
+}
+
+fn capacity_and_atomicity_contract(state:  *TestState) void {
+    let options: ArrayList[SegmentedControlOption] = make[SegmentedControlOption](6);
+    fill_options(&options, 500, 6);
+    let base: SegmentedControlSpec = six_state_spec(490);
+    let display: DisplayList = display_list_make();
+    let hits: HitTree = hit_tree_make();
+    let semantics: SemanticsTree = semantics_tree_make();
+    let display_length: i32 = display.ops.len;
+    let display_revision: i64 = display.revision;
+    let display_hash: i64 = display.content_hash;
+    let hit_length: i32 = hits.nodes.len;
+    let hit_revision: i64 = hits.revision;
+    let semantic_length: i32 = semantics.nodes.len;
+    let semantic_revision: i64 = semantics.revision;
+
+    let display_limited: SegmentedControlSpec = base;
+    display_limited.limits.display_operations = 3;
+    let display_failure: SegmentedControlBuildResult = segmented_control_emit(
+        display_limited, &options, &display, &hits, &semantics);
+    expect(state, display_failure.error == SegmentedControlBuildError.capacity_error &&
+        display_failure.capacity_error ==
+            SegmentedControlCapacityError.display_operations &&
+        builders_restored(&display, &hits, &semantics, display_length,
+            display_revision, display_hash, hit_length, hit_revision,
+            semantic_length, semantic_revision) != 0,
+        "display-operation capacity failure rolls every builder back exactly");
+
+    let hit_limited: SegmentedControlSpec = base;
+    hit_limited.limits.hit_nodes = 2;
+    let hit_failure: SegmentedControlBuildResult = segmented_control_emit(
+        hit_limited, &options, &display, &hits, &semantics);
+    expect(state, hit_failure.error == SegmentedControlBuildError.capacity_error &&
+        hit_failure.capacity_error == SegmentedControlCapacityError.hit_nodes &&
+        builders_restored(&display, &hits, &semantics, display_length,
+            display_revision, display_hash, hit_length, hit_revision,
+            semantic_length, semantic_revision) != 0,
+        "hit-node capacity failure rolls rendered operations and hit nodes back");
+
+    let semantic_limited: SegmentedControlSpec = base;
+    semantic_limited.limits.semantic_nodes = 2;
+    let semantic_failure: SegmentedControlBuildResult = segmented_control_emit(
+        semantic_limited, &options, &display, &hits, &semantics);
+    expect(state, semantic_failure.error == SegmentedControlBuildError.capacity_error &&
+        semantic_failure.capacity_error == SegmentedControlCapacityError.semantic_nodes &&
+        builders_restored(&display, &hits, &semantics, display_length,
+            display_revision, display_hash, hit_length, hit_revision,
+            semantic_length, semantic_revision) != 0,
+        "semantic capacity failure frees copied text and restores every builder");
+
+    let valid: SegmentedControlBuildResult = segmented_control_emit(base,
+        &options, &display, &hits, &semantics);
+    let committed_display_length: i32 = display.ops.len;
+    let committed_display_revision: i64 = display.revision;
+    let committed_display_hash: i64 = display.content_hash;
+    let committed_hit_length: i32 = hits.nodes.len;
+    let committed_hit_revision: i64 = hits.revision;
+    let committed_semantic_length: i32 = semantics.nodes.len;
+    let committed_semantic_revision: i64 = semantics.revision;
+    let duplicate: SegmentedControlBuildResult = segmented_control_emit(base,
+        &options, &display, &hits, &semantics);
+    expect(state, valid.error == SegmentedControlBuildError.none &&
+        duplicate.error == SegmentedControlBuildError.hit_error &&
+        duplicate.hit_error == HitTreeError.duplicate_id &&
+        builders_restored(&display, &hits, &semantics, committed_display_length,
+            committed_display_revision, committed_display_hash,
+            committed_hit_length, committed_hit_revision,
+            committed_semantic_length, committed_semantic_revision) != 0,
+        "duplicate stable IDs return the hit error without disturbing prior content");
+
+    semantics_tree_free(&semantics);
+    hit_tree_free(&hits);
+    display_list_free(&display);
+    free[SegmentedControlOption](&options);
+
+    let invalid_options: ArrayList[SegmentedControlOption] =
+        make[SegmentedControlOption](6);
+    fill_options(&invalid_options, 700, 6);
+    invalid_options.data[1].id = invalid_options.data[0].id;
+    let invalid_display: DisplayList = display_list_make();
+    let invalid_hits: HitTree = hit_tree_make();
+    let invalid_semantics: SemanticsTree = semantics_tree_make();
+    let invalid: SegmentedControlBuildResult = segmented_control_emit(
+        six_state_spec(690), &invalid_options, &invalid_display,
+        &invalid_hits, &invalid_semantics);
+    expect(state, invalid.error == SegmentedControlBuildError.invalid_spec &&
+        invalid_display.ops.len == 0 && invalid_hits.nodes.len == 0 &&
+        invalid_semantics.nodes.len == 0,
+        "duplicate option IDs fail validation before retained mutation");
+    semantics_tree_free(&invalid_semantics); hit_tree_free(&invalid_hits);
+    display_list_free(&invalid_display);
+    free[SegmentedControlOption](&invalid_options);
+
+    let sealed_options: ArrayList[SegmentedControlOption] =
+        make[SegmentedControlOption](6);
+    fill_options(&sealed_options, 800, 6);
+    let sealed_display: DisplayList = display_list_make();
+    let sealed_hits: HitTree = hit_tree_make();
+    let sealed_semantics: SemanticsTree = semantics_tree_make();
+    _ = display_list_seal(&sealed_display);
+    let sealed: SegmentedControlBuildResult = segmented_control_emit(
+        six_state_spec(790), &sealed_options, &sealed_display,
+        &sealed_hits, &sealed_semantics);
+    expect(state, sealed.error == SegmentedControlBuildError.display_error &&
+        sealed.display_error == DisplayError.sealed &&
+        sealed_display.ops.len == 0 && sealed_hits.nodes.len == 0 &&
+        sealed_semantics.nodes.len == 0,
+        "sealed destinations fail visibly without partial trees");
+    semantics_tree_free(&sealed_semantics); hit_tree_free(&sealed_hits);
+    display_list_free(&sealed_display);
+    free[SegmentedControlOption](&sealed_options);
+
+    let collision_options: ArrayList[SegmentedControlOption] =
+        make[SegmentedControlOption](6);
+    fill_options(&collision_options, 900, 6);
+    let collision_display: DisplayList = display_list_make();
+    let collision_hits: HitTree = hit_tree_make();
+    let collision_semantics: SemanticsTree = semantics_tree_make();
+    let occupied: SemanticsSpec = semantics_spec(node_key(9999),
+        semantic_root_key(), SemanticRole.button, "Existing focus target");
+    occupied.focus_order = 20;
+    _ = semantics_add(&collision_semantics, occupied);
+    let collision: SegmentedControlBuildResult = segmented_control_emit(
+        six_state_spec(890), &collision_options, &collision_display,
+        &collision_hits, &collision_semantics);
+    expect(state, collision.error == SegmentedControlBuildError.semantics_error &&
+        collision.semantics_error == SemanticsError.duplicate_focus_order &&
+        collision_display.ops.len == 0 && collision_hits.nodes.len == 0 &&
+        collision_semantics.nodes.len == 1 &&
+        collision_semantics.revision == 1 &&
+        collision_semantics.nodes.data[0].id.value == 9999,
+        "semantic focus collisions free staged text and restore other builders");
+    semantics_tree_free(&collision_semantics);
+    hit_tree_free(&collision_hits);
+    display_list_free(&collision_display);
+    free[SegmentedControlOption](&collision_options);
+}
+
+fn main() i32 {
+    let state: TestState = TestState{ .passed = 0, .failed = 0 };
+    model_and_reducer_contract(&state);
+    exhaustive_selection_property_contract(&state);
+    placement_and_state_contract(&state);
+    retained_tree_contract(&state);
+    pointer_focus_semantics_contract(&state);
+    deterministic_contract(&state);
+    dynamic_borrow_copy_contract(&state);
+    capacity_and_atomicity_contract(&state);
+    _zag_print("SegmentedControl contract: pass=");
+    _zag_print_i64(state.passed as i64);
+    _zag_print(" fail="); _zag_print_i64(state.failed as i64);
+    _zag_println("");
+    if (state.failed == 0) { return 0; }
+    return 1;
+}

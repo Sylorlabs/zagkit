@@ -78,6 +78,10 @@ fn hit_tree_find_index(tree: HitTree, id: NodeKey) i32 {
     return 0 - 1;
 }
 
+fn hit_tree_find_index_borrowed(tree: *HitTree, id: NodeKey) i32 {
+    return hit_tree_find_index(tree.*, id);
+}
+
 fn hit_transform_values_valid(transform: Transform) i32 {
     let limit: i64 = 4096 * unit_scale();
     if (transform.scale_x < 0 - limit || transform.scale_x > limit ||

@@ -264,6 +264,12 @@ X11 fallback. The window presents Zagkit's deterministic CPU surface through
 the public Xlib transport, handles close, expose, and live resize events, and
 prints the backend selected by `.auto`. It is experimental and does not claim
 Wayland, IME, AT-SPI, GPU, packaging, or Linux-polish completion.
+The expanded reference opens at 1360 by 900 logical pixels. The launcher
+requires distinct light, regular, and bold font files for the native
+Typography route; it resolves Fira Sans through Fontconfig when the three
+`ZAGKIT_FONT_LIGHT_FILE`, `ZAGKIT_FONT_FILE`, and
+`ZAGKIT_FONT_BOLD_FILE` variables are not supplied, and fails closed rather
+than aliasing a weight.
 Use `./zagkit run --linux-preview --output <capture.png>` for the bounded native
 create/present/sync/capture/cleanup path used by conformance automation. See the
 [Linux shell contract](docs/architecture/linux-shell.md).

@@ -18,13 +18,24 @@ coordinates and a positive rational display scale. Zagkit converts them to its
 pixel attempt remains labelled `pixel`; it can never be reported as an ID
 action.
 
+When an external platform driver can inject only pixels, the in-process
+`talkback_pixel_fallback_for_id` resolver derives one target center from the
+current semantic ID, exact bounds, semantic revision, command, and rational
+scale. Its result records the source ID, disabled/action availability, logical
+bounds, physical center, scale, and evidence hash. That source is provenance,
+not a change of target kind: the eventual injected action must still be logged
+as `pixel`. Hidden, unbounded, out-of-viewport, and invalid-scale targets fail
+before coordinates are produced. This resolver does not claim that the still
+missing native Talkback transport exists.
+
 ## Requests and evidence
 
 The machine-readable field, command, status, and capability vocabulary lives in
 [the protocol contract](../../contracts/talkback-protocol.json). Request IDs
 must be positive. Timeouts must be between 1 and 300000 milliseconds. Every
 dispatch receives one monotonic event sequence and records the command, target
-kind, target ID, semantic revision, status, coordinates, and scale.
+kind, target ID, semantic revision, status, coordinates, scale, and explicit
+scroll axis and signed logical delta when applicable.
 
 The in-process slice resolves semantic discovery and queries and validates
 click, type, focus, and scroll before emitting them into the ordered event
@@ -37,6 +48,17 @@ fixed-point bounds, collection counts and coordinates, tree level and expansion
 state, owned-text lengths, state flags, and a deterministic evidence hash over
 the complete semantic node. This makes geometry and semantic-state changes
 observable even before the native transport gains structured text payloads.
+Protocol minor version 3 makes scroll payloads mandatory: `horizontal`
+requires a nonzero X delta and zero Y delta, `vertical` requires the inverse,
+and `both` accepts either or both nonzero deltas. Deltas use Zagkit's signed
+26.6 logical units and are retained in event evidence. This validates intent;
+it does not claim the still-unavailable native transport applied the scroll.
+
+State flags are a stable bit set: `disabled = 1`, `selected = 2`, `hidden = 4`,
+and `focused = 8`. `focused` reports actual retained input focus; it is not a
+proxy for focus order, the roving tab stop, a focus-ring specimen, or keyboard
+modality. One semantics tree may expose at most one focused node, and that node
+must be enabled, visible, ordered, and support the semantic focus action.
 Capability reports and timeline counts are available. Pixel fallback is fail-closed
 unless advertised, and screenshots remain unavailable in this slice.
 Advertising a command in the protocol vocabulary does not claim its runtime
@@ -45,7 +67,7 @@ capability.
 ## Planned agent contract
 
 The complete control plane will add app and window discovery, structured query
-results, text payloads, keyboard input, scrolling parameters, paths and
+results, text payloads, keyboard input, paths and
 velocity for drag and gesture, waits and assertions, screenshots, frame
 timelines, capability records, snapshots, and deterministic replay. Failed
 actions will retain candidates, geometry, semantics, backend truth, and timeout

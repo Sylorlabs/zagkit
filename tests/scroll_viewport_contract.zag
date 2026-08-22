@@ -1,0 +1,664 @@
+@import("../src/components/scroll_viewport.zag")
+@import("../src/automation/talkback.zag")
+
+struct TestState { passed: i32, failed: i32 }
+
+struct ScrollViewportFixture {
+    display: DisplayList,
+    semantics: SemanticsTree,
+    hits: HitTree,
+}
+
+fn expect(state:  *TestState,
+    condition: i32, name: []u8) void {
+    if (condition != 0) {
+        state.*.passed = state.*.passed + 1;
+        _zag_print("ok  "); _zag_println(name);
+    } else {
+        state.*.failed = state.*.failed + 1;
+        _zag_print("FAIL "); _zag_println(name);
+    }
+}
+
+fn scroll_viewport_fixture(include_resource: i32)
+    ScrollViewportFixture {
+    let fixture: ScrollViewportFixture = ScrollViewportFixture{
+        .display = display_list_make(),
+        .semantics = semantics_tree_make(),
+        .hits = hit_tree_make(),
+    };
+    if (include_resource != 0) {
+        _ = display_list_add_resource(&fixture.display,
+            render_resource_spec(700001, RenderResourceKind.svg_source,
+                "<svg/>", 1));
+    }
+    let first: DisplayOp = display_op(DisplayOpKind.fill_rect,
+        node_key(200));
+    first.bounds = rect(0, 0, 480 * unit_scale(), 600 * unit_scale());
+    first.paint = semantic_color_paint(SemanticColorToken.surface_panel);
+    _ = display_list_push(&fixture.display, first);
+    let second: DisplayOp = display_op(DisplayOpKind.fill_rect,
+        node_key(201));
+    second.bounds = rect(100 * unit_scale(), 140 * unit_scale(),
+        80 * unit_scale(), 50 * unit_scale());
+    second.paint = semantic_color_paint(SemanticColorToken.accent);
+    _ = display_list_push(&fixture.display, second);
+    let third: DisplayOp = display_op(DisplayOpKind.fill_rect,
+        node_key(202));
+    third.bounds = rect(420 * unit_scale(), 520 * unit_scale(),
+        40 * unit_scale(), 40 * unit_scale());
+    third.paint = semantic_color_paint(SemanticColorToken.status_error);
+    _ = display_list_push(&fixture.display, third);
+    _ = display_list_seal(&fixture.display);
+
+    let root: SemanticsSpec = semantics_spec(node_key(200),
+        semantic_root_key(), SemanticRole.group, "Content document");
+    root.has_bounds = 1;
+    root.bounds = rect(0, 0, 480 * unit_scale(), 600 * unit_scale());
+    _ = semantics_add(&fixture.semantics, root);
+    let visible: SemanticsSpec = semantics_spec(node_key(201),
+        node_key(200), SemanticRole.button, "Visible content action");
+    visible.description = "Hosted content target";
+    visible.value = "Ready";
+    visible.has_bounds = 1;
+    visible.bounds = second.bounds;
+    visible.focus_order = 1;
+    visible.action_mask = semantic_actions_add(
+        semantic_actions(SemanticAction.activate), SemanticAction.focus);
+    _ = semantics_add(&fixture.semantics, visible);
+    let offscreen: SemanticsSpec = semantics_spec(node_key(202),
+        node_key(200), SemanticRole.button, "Offscreen content action");
+    offscreen.has_bounds = 1;
+    offscreen.bounds = third.bounds;
+    offscreen.focus_order = 2;
+    offscreen.action_mask = semantic_actions_add(
+        semantic_actions(SemanticAction.activate), SemanticAction.focus);
+    _ = semantics_add(&fixture.semantics, offscreen);
+
+    let hit_root: HitNode = hit_node(node_key(200), hit_root_key(),
+        root.bounds);
+    hit_root.enabled = 0;
+    _ = hit_tree_add(&fixture.hits, hit_root);
+    let visible_hit: HitNode = hit_node(node_key(201), node_key(200),
+        second.bounds);
+    visible_hit.focusable = 1;
+    _ = hit_tree_add(&fixture.hits, visible_hit);
+    let offscreen_hit: HitNode = hit_node(node_key(202), node_key(200),
+        third.bounds);
+    offscreen_hit.focusable = 1;
+    _ = hit_tree_add(&fixture.hits, offscreen_hit);
+    return fixture;
+}
+
+fn scroll_viewport_fixture_free(
+    fixture:  *ScrollViewportFixture) void {
+    hit_tree_free(&fixture.*.hits);
+    semantics_tree_free(&fixture.*.semantics);
+    display_list_free(&fixture.*.display);
+}
+
+fn scroll_viewport_destination() ScrollViewportFixture {
+    return ScrollViewportFixture{
+        .display = display_list_make(),
+        .semantics = semantics_tree_make(),
+        .hits = hit_tree_make(),
+    };
+}
+
+fn hosted_two_axis_contract(state:  *TestState) void {
+    let content: ScrollViewportFixture = scroll_viewport_fixture(1);
+    let destination: ScrollViewportFixture = scroll_viewport_destination();
+    let scroll: ScrollState = scroll_state(
+        size(240 * unit_scale(), 160 * unit_scale()),
+        size(480 * unit_scale(), 600 * unit_scale()));
+    _ = scroll_to(&scroll, 80 * unit_scale(), 120 * unit_scale());
+    let spec: ScrollViewportSpec = scroll_viewport_spec(node_key(100),
+        semantic_root_key(), hit_root_key(),
+        rect(20 * unit_scale(), 30 * unit_scale(),
+            240 * unit_scale(), 160 * unit_scale()),
+        "Scrollable component gallery");
+    spec.description = "Two-axis retained viewport";
+    spec.value = "Vertical 120 of 440; horizontal 80 of 240";
+    spec.axis = ScrollViewportAxis.both;
+    spec.focus_order = 5;
+    spec.content_focus_order_offset = 20;
+    spec.z_order = 10;
+    let content_hash: i64 = content.display.content_hash;
+    let result: ScrollViewportBuildResult = scroll_viewport_contribute(
+        spec, scroll, &content.display, &content.semantics, &content.hits,
+        &destination.display, &destination.semantics, &destination.hits);
+
+    expect(state, result.error == ScrollViewportBuildError.none &&
+        result.artifact.scrollable == 1 &&
+        result.artifact.geometry.horizontal_track_visible == 1 &&
+        result.artifact.geometry.vertical_track_visible == 1 &&
+        result.artifact.geometry.visible_content_bounds.x ==
+            80 * unit_scale() &&
+        result.artifact.geometry.visible_content_bounds.y ==
+            120 * unit_scale() &&
+        result.artifact.geometry.content_transform.translate_x ==
+            (20 - 80) * unit_scale() &&
+        result.artifact.geometry.content_transform.translate_y ==
+            (30 - 120) * unit_scale(),
+        "ScrollState drives exact two-axis clip translation and scrollbar geometry");
+    expect(state, destination.display.ops.len == 11 &&
+        destination.display.ops.data[0].kind == DisplayOpKind.save &&
+        destination.display.ops.data[1].kind == DisplayOpKind.clip_rect &&
+        destination.display.ops.data[2].kind ==
+            DisplayOpKind.concat_transform &&
+        destination.display.ops.data[3].kind == DisplayOpKind.fill_rect &&
+        destination.display.ops.data[4].kind == DisplayOpKind.fill_rect &&
+        destination.display.ops.data[5].kind == DisplayOpKind.fill_rect &&
+        destination.display.ops.data[6].kind == DisplayOpKind.restore &&
+        destination.display.ops.data[7].kind ==
+            DisplayOpKind.fill_rounded_rect &&
+        destination.display.ops.data[10].kind ==
+            DisplayOpKind.fill_rounded_rect &&
+        destination.display.ops.data[1].bounds.x == spec.bounds.x &&
+        destination.display.ops.data[2].transform.translate_y ==
+            result.artifact.geometry.content_transform.translate_y,
+        "display order is save clip transform content restore then tokenized track and thumb chrome");
+    expect(state, result.artifact.track_token ==
+            SemanticColorToken.surface_inset &&
+        result.artifact.thumb_token == SemanticColorToken.border_emphasis &&
+        destination.display.ops.data[7].paint.red ==
+            semantic_color_paint(SemanticColorToken.surface_inset).red &&
+        destination.display.ops.data[8].paint.blue ==
+            semantic_color_paint(SemanticColorToken.border_emphasis).blue,
+        "scrollbar chrome exposes named semantic color provenance without local RGBA");
+
+    let root_semantic_index: i32 = semantics_find_index(
+        destination.semantics, spec.id);
+    let child_semantic_index: i32 = semantics_find_index(
+        destination.semantics, node_key(201));
+    let offscreen_semantic_index: i32 = semantics_find_index(
+        destination.semantics, node_key(202));
+    let root_semantic: SemanticsNode =
+        destination.semantics.nodes.data[root_semantic_index];
+    let child_semantic: SemanticsNode =
+        destination.semantics.nodes.data[child_semantic_index];
+    let offscreen_semantic: SemanticsNode =
+        destination.semantics.nodes.data[offscreen_semantic_index];
+    expect(state, root_semantic.has_bounds == 1 &&
+        root_semantic.bounds.x == spec.bounds.x &&
+        root_semantic.bounds.width == spec.bounds.width &&
+        root_semantic.has_range == 1 &&
+        root_semantic.range_min == 0 &&
+        root_semantic.range_max == 440 * unit_scale() &&
+        root_semantic.range_value == 120 * unit_scale() &&
+        semantic_actions_has(root_semantic.action_mask,
+            SemanticAction.scroll) != 0 &&
+        semantic_actions_has(root_semantic.action_mask,
+            SemanticAction.focus) != 0,
+        "viewport semantics expose exact bounds range value and scroll/focus actions");
+    expect(state, node_key_equal(child_semantic.parent, spec.id) != 0 &&
+        child_semantic.bounds.x == 40 * unit_scale() &&
+        child_semantic.bounds.y == 50 * unit_scale() &&
+        child_semantic.focus_order == 21 &&
+        offscreen_semantic.hidden == 0 &&
+        offscreen_semantic.bounds.x == 360 * unit_scale() &&
+        offscreen_semantic.bounds.y == 430 * unit_scale() &&
+        offscreen_semantic.bounds.width == 40 * unit_scale() &&
+        offscreen_semantic.bounds.height == 40 * unit_scale(),
+        "hosted semantics clip visible bounds but retain offscreen stable IDs and transformed geometry");
+
+    let routed: HitResult = hit_test(destination.hits,
+        50 * unit_scale(), 60 * unit_scale());
+    let offscreen_hit: HitResult = hit_test(destination.hits,
+        460 * unit_scale(), 470 * unit_scale());
+    let child_hit_index: i32 = hit_tree_find_index(destination.hits,
+        node_key(201));
+    expect(state, routed.found != 0 && routed.id.value == 201 &&
+        offscreen_hit.found == 0 &&
+        destination.hits.nodes.data[child_hit_index].clip.x ==
+            80 * unit_scale() &&
+        destination.hits.nodes.data[child_hit_index].clip.y ==
+            120 * unit_scale() &&
+        destination.hits.nodes.data[child_hit_index].transform.translate_x ==
+            result.artifact.geometry.content_transform.translate_x,
+        "hit routing uses the same content transform and visible clip as pixels");
+
+    let session: TalkbackSession = talkback_session_make(
+        talkback_capabilities());
+    let viewport: Rect = rect(0, 0, 800 * unit_scale(),
+        600 * unit_scale());
+    let query: TalkbackResponse = talkback_dispatch(&session,
+        destination.semantics, viewport,
+        talkback_request(1, TalkbackCommand.query, spec.id,
+            destination.semantics.revision));
+    let scroll_action: TalkbackResponse = talkback_dispatch(&session,
+        destination.semantics, viewport,
+        talkback_scroll_request(2, spec.id,
+            destination.semantics.revision,
+            TalkbackScrollAxis.vertical, 0, 48 * unit_scale()));
+    let fallback: TalkbackPixelFallbackTarget =
+        talkback_pixel_fallback_for_id(destination.semantics,
+            viewport, spec.id, TalkbackCommand.scroll, 2, 1);
+    let offscreen_query: TalkbackResponse = talkback_dispatch(&session,
+        destination.semantics, viewport,
+        talkback_request(3, TalkbackCommand.query, node_key(202),
+            destination.semantics.revision));
+    let offscreen_pixel: TalkbackPixelFallbackTarget =
+        talkback_pixel_fallback_for_id(destination.semantics,
+            spec.bounds, node_key(202), TalkbackCommand.click, 1, 1);
+    expect(state, query.status == TalkbackStatus.accepted &&
+        query.target_id.value == 100 &&
+        query.bounds.x == spec.bounds.x &&
+        scroll_action.status == TalkbackStatus.accepted &&
+        scroll_action.emitted_action == 1 &&
+        fallback.status == TalkbackStatus.accepted &&
+        fallback.source_id.value == 100 &&
+        fallback.logical_bounds.width == spec.bounds.width &&
+        offscreen_query.status == TalkbackStatus.accepted &&
+        offscreen_query.target_id.value == 202 &&
+        offscreen_pixel.status == TalkbackStatus.pixel_out_of_bounds,
+        "Talkback queries and scrolls the exact stable viewport ID before pixel fallback");
+    let horizontal_range_index: i32 = semantics_find_index(
+        destination.semantics,
+        scroll_viewport_horizontal_range_id(spec.id));
+    let vertical_range_index: i32 = semantics_find_index(
+        destination.semantics,
+        scroll_viewport_vertical_range_id(spec.id));
+    expect(state, horizontal_range_index >= 0 && vertical_range_index >= 0 &&
+        destination.semantics.nodes.data[horizontal_range_index].role ==
+            SemanticRole.slider &&
+        destination.semantics.nodes.data[horizontal_range_index].range_max ==
+            240 * unit_scale() &&
+        destination.semantics.nodes.data[horizontal_range_index].range_value ==
+            80 * unit_scale() &&
+        destination.semantics.nodes.data[vertical_range_index].range_max ==
+            440 * unit_scale() &&
+        destination.semantics.nodes.data[vertical_range_index].range_value ==
+            120 * unit_scale(),
+        "stable axis semantic IDs expose both exact ranges in a two-axis viewport");
+
+    let revealed_scroll: ScrollState = scroll;
+    let revealed: ScrollViewportTargetReveal =
+        scroll_viewport_reveal_hosted_semantic_id(&revealed_scroll,
+            spec.axis, spec.direction, spec.enabled,
+            &destination.semantics, result.artifact.geometry,
+            spec.id, node_key(202));
+    expect(state, revealed.found == 1 && revealed.focusable == 1 &&
+        revealed.transition.accepted == 1 &&
+        revealed.content_bounds.x == 420 * unit_scale() &&
+        revealed.content_bounds.y == 520 * unit_scale() &&
+        revealed_scroll.offset_x == 220 * unit_scale() &&
+        revealed_scroll.offset_y == 400 * unit_scale() &&
+        revealed.evidence_hash != 0,
+        "hosted offscreen Talkback ID reverses exact geometry and reveals without retaining source content or guessing pixels");
+    let revealed_destination: ScrollViewportFixture =
+        scroll_viewport_destination();
+    let revealed_build: ScrollViewportBuildResult =
+        scroll_viewport_contribute(spec, revealed_scroll,
+            &content.display, &content.semantics, &content.hits,
+            &revealed_destination.display,
+            &revealed_destination.semantics, &revealed_destination.hits);
+    let revealed_semantic: SemanticsNode =
+        revealed_destination.semantics.nodes.data[
+            semantics_find_index(revealed_destination.semantics,
+                node_key(202))];
+    let revealed_hit: HitResult = hit_test(revealed_destination.hits,
+        230 * unit_scale(), 160 * unit_scale());
+    expect(state, revealed_build.error == ScrollViewportBuildError.none &&
+        revealed_semantic.hidden == 0 &&
+        revealed_semantic.bounds.x == 220 * unit_scale() &&
+        revealed_semantic.bounds.y == 150 * unit_scale() &&
+        revealed_hit.found != 0 && revealed_hit.id.value == 202,
+        "rebuild after semantic reveal makes the same ID visibly and pointer actionable");
+    expect(state, content.display.sealed == 1 &&
+        content.display.content_hash == content_hash &&
+        result.artifact.evidence_hash != 0 &&
+        result.artifact.display_resources_added == 1 &&
+        display_list_seal(&destination.display) == DisplayError.none &&
+        display_list_verify(&destination.display) == DisplayError.none,
+        "hosting preserves source ownership and seals deterministic destination evidence");
+
+    talkback_session_free(&session);
+    scroll_viewport_fixture_free(&revealed_destination);
+    scroll_viewport_fixture_free(&destination);
+    scroll_viewport_fixture_free(&content);
+}
+
+fn rtl_and_mutation_contract(state:  *TestState) void {
+    let scroll: ScrollState = scroll_state(
+        size(200 * unit_scale(), 100 * unit_scale()),
+        size(500 * unit_scale(), 100 * unit_scale()));
+    _ = scroll_to(&scroll, 60 * unit_scale(), 0);
+    let spec: ScrollViewportSpec = scroll_viewport_spec(node_key(300),
+        semantic_root_key(), hit_root_key(),
+        rect(10 * unit_scale(), 20 * unit_scale(),
+            200 * unit_scale(), 100 * unit_scale()),
+        "RTL horizontal strip");
+    spec.axis = ScrollViewportAxis.horizontal;
+    spec.direction = LayoutDirection.rtl;
+    let geometry: ScrollViewportGeometry = scroll_viewport_geometry(spec,
+        scroll);
+    // RTL thumb position proof at 60/300 logical offset (80% scrolled):
+    //   physical_value = max - offset = 300 - 60 = 240
+    //   thumb_offset   = travel * 240 / 300 = travel * 0.8
+    //   thumb_width    = track_width * 200 / 500 = track_width * 0.4
+    //   thumb.center   = track.x + travel*0.8 + thumb_width/2
+    //   track.center   = track.x + track_width/2
+    //   thumb.center > track.center  iff  0.3*track_width > 0.3*thumb_width
+    //   Since thumb_width = 0.4*track_width, this holds for any track_width > 0.
+    //   The original assertion (thumb.x > track.center) required
+    //   track/thumb > 8/3 = 2.67, but the actual ratio is 1/0.4 = 2.5,
+    //   making it false for this fixture.  Comparing centers is the
+    //   correct invariant: at 80% scroll the thumb center passes the
+    //   track center, regardless of thumb proportions.
+    expect(state, geometry.valid == 1 &&
+        geometry.visible_content_bounds.x == 240 * unit_scale() &&
+        geometry.content_transform.translate_x ==
+            (10 - 240) * unit_scale() &&
+        geometry.horizontal_track_visible == 1 &&
+        geometry.vertical_track_visible == 0 &&
+        geometry.horizontal_thumb_bounds.x +
+            geometry.horizontal_thumb_bounds.width / 2 >
+            geometry.horizontal_track_bounds.x +
+                geometry.horizontal_track_bounds.width / 2,
+        "RTL mirrors physical visible origin and scrollbar thumb while retaining logical offset");
+
+    let wheel: ScrollViewportTransition = scroll_viewport_wheel(&scroll,
+        ScrollViewportAxis.horizontal, LayoutDirection.rtl, 1,
+        40 * unit_scale(), 0);
+    expect(state, wheel.accepted == 1 && wheel.rejected == 0 &&
+        wheel.requested_x == 0 - 40 * unit_scale() &&
+        scroll.offset_x == 20 * unit_scale() &&
+        wheel.mutation.consumed_x == 0 - 40 * unit_scale() &&
+        wheel.evidence_hash != 0,
+        "physical horizontal wheel input maps to logical RTL ScrollState mutation");
+    let right: ScrollViewportTransition = scroll_viewport_key(&scroll,
+        ScrollViewportAxis.horizontal, LayoutDirection.rtl, 1,
+        FlexDensity.standard, ScrollViewportCommand.arrow_right);
+    expect(state, right.accepted == 1 && scroll.offset_x == 0 &&
+        right.mutation.unconsumed_x == 0 - 28 * unit_scale(),
+        "RTL right-arrow consumes toward logical start and reports boundary handoff");
+    let reveal: ScrollViewportTransition = scroll_viewport_reveal_focus(
+        &scroll, ScrollViewportAxis.horizontal, LayoutDirection.rtl, 1,
+        rect(20 * unit_scale(), 0, 20 * unit_scale(), 40 * unit_scale()));
+    expect(state, reveal.accepted == 1 &&
+        scroll.offset_x == 280 * unit_scale() &&
+        scroll_visible_rect(scroll, LayoutDirection.rtl).x ==
+            20 * unit_scale(),
+        "focus reveal converts physical RTL target geometry back to logical offset authority");
+}
+
+fn keyboard_semantic_and_disabled_contract(
+    state:  *TestState) void {
+    let scroll: ScrollState = scroll_state(
+        size(200 * unit_scale(), 160 * unit_scale()),
+        size(200 * unit_scale(), 500 * unit_scale()));
+    let page: ScrollViewportTransition = scroll_viewport_key(&scroll,
+        ScrollViewportAxis.vertical, LayoutDirection.ltr, 1,
+        FlexDensity.standard, ScrollViewportCommand.page_down);
+    expect(state, page.accepted == 1 &&
+        scroll.offset_y == 112 * unit_scale() &&
+        page.mutation.changed == 1,
+        "keyboard PageDown uses a density token step against ScrollState viewport extent");
+    let end: ScrollViewportTransition = scroll_viewport_semantic_scroll(
+        &scroll, ScrollViewportAxis.vertical, LayoutDirection.ltr, 1,
+        FlexDensity.standard, ScrollViewportCommand.end);
+    expect(state, end.accepted == 1 &&
+        scroll.offset_y == 340 * unit_scale() &&
+        end.input_kind == ScrollViewportInputKind.semantic,
+        "semantic End routes through the same exact state mutation contract as keyboard input");
+    let disabled_offset: i64 = scroll.offset_y;
+    let disabled: ScrollViewportTransition = scroll_viewport_wheel(&scroll,
+        ScrollViewportAxis.vertical, LayoutDirection.ltr, 0,
+        0, 20 * unit_scale());
+    expect(state, disabled.accepted == 0 && disabled.rejected == 1 &&
+        disabled.rejected_disabled == 1 &&
+        scroll.offset_y == disabled_offset &&
+        scroll.revision == 2,
+        "disabled viewport rejects wheel input without phantom offset or revision");
+
+    let idle: ScrollState = scroll_state(
+        size(200 * unit_scale(), 160 * unit_scale()),
+        size(160 * unit_scale(), 100 * unit_scale()));
+    let no_overflow: ScrollViewportTransition =
+        scroll_viewport_semantic_scroll(&idle,
+            ScrollViewportAxis.vertical, LayoutDirection.ltr, 1,
+            FlexDensity.standard, ScrollViewportCommand.page_down);
+    expect(state, no_overflow.accepted == 0 &&
+        no_overflow.rejected_no_overflow == 1 &&
+        idle.offset_y == 0 && idle.revision == 0,
+        "no-overflow semantic scroll fails closed without fabricating work");
+
+    let reveal_state: ScrollState = scroll_state(
+        size(200 * unit_scale(), 160 * unit_scale()),
+        size(200 * unit_scale(), 500 * unit_scale()));
+    let reveal: ScrollViewportTransition = scroll_viewport_reveal_focus(
+        &reveal_state, ScrollViewportAxis.vertical, LayoutDirection.ltr, 1,
+        rect(20 * unit_scale(), 350 * unit_scale(),
+            80 * unit_scale(), 20 * unit_scale()));
+    expect(state, reveal.accepted == 1 &&
+        reveal_state.offset_y == 210 * unit_scale(),
+        "focus reveal scrolls only enough to expose the complete focused target");
+}
+
+fn no_overflow_disabled_and_focus_contract(
+    state:  *TestState) void {
+    let content: ScrollViewportFixture = scroll_viewport_fixture(0);
+    let destination: ScrollViewportFixture = scroll_viewport_destination();
+    let scroll: ScrollState = scroll_state(
+        size(520 * unit_scale(), 640 * unit_scale()),
+        size(480 * unit_scale(), 600 * unit_scale()));
+    let spec: ScrollViewportSpec = scroll_viewport_spec(node_key(400),
+        semantic_root_key(), hit_root_key(),
+        rect(0, 0, 520 * unit_scale(), 640 * unit_scale()),
+        "Static content viewport");
+    spec.focus_order = 10;
+    spec.focused = 1;
+    spec.focus_visible = 1;
+    spec.content_focus_order_offset = 20;
+    let built: ScrollViewportBuildResult = scroll_viewport_contribute(
+        spec, scroll, &content.display, &content.semantics, &content.hits,
+        &destination.display, &destination.semantics, &destination.hits);
+    let root: SemanticsNode = destination.semantics.nodes.data[
+        semantics_find_index(destination.semantics, spec.id)];
+    expect(state, built.error == ScrollViewportBuildError.none &&
+        built.artifact.scrollable == 0 &&
+        built.artifact.focus_ring_visible == 1 &&
+        built.artifact.geometry.horizontal_track_visible == 0 &&
+        built.artifact.geometry.vertical_track_visible == 0 &&
+        built.artifact.display_operations_added == 8 &&
+        destination.display.ops.data[7].kind == DisplayOpKind.stroke_rect &&
+        destination.display.ops.data[7].paint.blue ==
+            semantic_color_paint(SemanticColorToken.focus).blue &&
+        root.has_range == 0 &&
+        semantic_actions_has(root.action_mask, SemanticAction.scroll) == 0 &&
+        semantic_actions_has(root.action_mask, SemanticAction.focus) != 0 &&
+        root.focused == 1,
+        "no-overflow viewport removes fake scroll truth while retaining real semantic focus and ring");
+    scroll_viewport_fixture_free(&destination);
+    scroll_viewport_fixture_free(&content);
+
+    let disabled_content: ScrollViewportFixture =
+        scroll_viewport_fixture(0);
+    let disabled_destination: ScrollViewportFixture =
+        scroll_viewport_destination();
+    let disabled_scroll: ScrollState = scroll_state(
+        size(240 * unit_scale(), 160 * unit_scale()),
+        size(480 * unit_scale(), 600 * unit_scale()));
+    let disabled_spec: ScrollViewportSpec = scroll_viewport_spec(node_key(401),
+        semantic_root_key(), hit_root_key(),
+        rect(0, 0, 240 * unit_scale(), 160 * unit_scale()),
+        "Disabled viewport");
+    disabled_spec.axis = ScrollViewportAxis.both;
+    disabled_spec.enabled = 0;
+    disabled_spec.focus_order = 12;
+    disabled_spec.content_focus_order_offset = 20;
+    let disabled_built: ScrollViewportBuildResult =
+        scroll_viewport_contribute(disabled_spec, disabled_scroll,
+            &disabled_content.display, &disabled_content.semantics,
+            &disabled_content.hits, &disabled_destination.display,
+            &disabled_destination.semantics, &disabled_destination.hits);
+    let disabled_root: SemanticsNode =
+        disabled_destination.semantics.nodes.data[
+            semantics_find_index(disabled_destination.semantics,
+                disabled_spec.id)];
+    let disabled_hit: HitNode = disabled_destination.hits.nodes.data[
+        hit_tree_find_index(disabled_destination.hits, disabled_spec.id)];
+    expect(state, disabled_built.error == ScrollViewportBuildError.none &&
+        disabled_root.disabled == 1 && disabled_root.action_mask == 0 &&
+        disabled_root.focused == 0 && disabled_hit.enabled == 0 &&
+        disabled_hit.focusable == 0 &&
+        disabled_destination.semantics.nodes.data[
+            semantics_find_index(disabled_destination.semantics,
+                node_key(201))].action_mask == 0 &&
+        disabled_destination.hits.nodes.data[
+            hit_tree_find_index(disabled_destination.hits,
+                node_key(201))].enabled == 0,
+        "disabled state preserves inspectable IDs while removing root and child actionability");
+    scroll_viewport_fixture_free(&disabled_destination);
+    scroll_viewport_fixture_free(&disabled_content);
+}
+
+fn atomic_failure_contract(state:  *TestState) void {
+    let content: ScrollViewportFixture = scroll_viewport_fixture(1);
+    let destination: ScrollViewportFixture = scroll_viewport_destination();
+    _ = display_list_add_resource(&destination.display,
+        render_resource_spec(700001, RenderResourceKind.svg_source,
+            "<host/>", 1));
+    let background: DisplayOp = display_op(DisplayOpKind.fill_rect,
+        node_key(900));
+    background.bounds = rect(0, 0, 20 * unit_scale(), 20 * unit_scale());
+    background.paint = semantic_color_paint(SemanticColorToken.canvas);
+    _ = display_list_push(&destination.display, background);
+    let scroll: ScrollState = scroll_state(
+        size(240 * unit_scale(), 160 * unit_scale()),
+        size(480 * unit_scale(), 600 * unit_scale()));
+    let spec: ScrollViewportSpec = scroll_viewport_spec(node_key(500),
+        semantic_root_key(), hit_root_key(),
+        rect(0, 0, 240 * unit_scale(), 160 * unit_scale()),
+        "Atomic viewport");
+    spec.axis = ScrollViewportAxis.both;
+    spec.content_focus_order_offset = 20;
+    let ops_before: i32 = destination.display.ops.len;
+    let resources_before: i32 = destination.display.resources.resources.len;
+    let display_hash_before: i64 = destination.display.content_hash;
+    let collision: ScrollViewportBuildResult = scroll_viewport_contribute(
+        spec, scroll, &content.display, &content.semantics, &content.hits,
+        &destination.display, &destination.semantics, &destination.hits);
+    expect(state, collision.error ==
+            ScrollViewportBuildError.resource_collision &&
+        collision.resource_error == RenderResourceError.duplicate_id &&
+        destination.display.ops.len == ops_before &&
+        destination.display.resources.resources.len == resources_before &&
+        destination.display.content_hash == display_hash_before &&
+        destination.semantics.nodes.len == 0 &&
+        destination.hits.nodes.len == 0,
+        "resource collision leaves display resources semantics and hits byte-for-byte unmodified");
+    scroll_viewport_fixture_free(&destination);
+    scroll_viewport_fixture_free(&content);
+
+    let semantic_content: ScrollViewportFixture =
+        scroll_viewport_fixture(0);
+    let semantic_destination: ScrollViewportFixture =
+        scroll_viewport_destination();
+    semantic_content.semantics.nodes.data[1].parent = node_key(999999);
+    let semantic_failed: ScrollViewportBuildResult =
+        scroll_viewport_contribute(spec, scroll,
+            &semantic_content.display, &semantic_content.semantics,
+            &semantic_content.hits, &semantic_destination.display,
+            &semantic_destination.semantics, &semantic_destination.hits);
+    expect(state, semantic_failed.error ==
+            ScrollViewportBuildError.semantics_error &&
+        semantic_failed.semantics_error == SemanticsError.missing_parent &&
+        semantic_destination.display.ops.len == 0 &&
+        semantic_destination.display.resources.resources.len == 0 &&
+        semantic_destination.semantics.nodes.len == 0 &&
+        semantic_destination.hits.nodes.len == 0,
+        "late semantic failure rolls back the entire staged host contribution");
+    scroll_viewport_fixture_free(&semantic_destination);
+    scroll_viewport_fixture_free(&semantic_content);
+
+    let hit_content: ScrollViewportFixture = scroll_viewport_fixture(0);
+    let hit_destination: ScrollViewportFixture = scroll_viewport_destination();
+    hit_content.hits.nodes.data[1].parent = node_key(999999);
+    let hit_failed: ScrollViewportBuildResult = scroll_viewport_contribute(
+        spec, scroll, &hit_content.display, &hit_content.semantics,
+        &hit_content.hits, &hit_destination.display,
+        &hit_destination.semantics, &hit_destination.hits);
+    expect(state, hit_failed.error == ScrollViewportBuildError.hit_error &&
+        hit_failed.hit_error == HitTreeError.missing_parent &&
+        hit_destination.display.ops.len == 0 &&
+        hit_destination.semantics.nodes.len == 0 &&
+        hit_destination.hits.nodes.len == 0,
+        "late hit failure also restores semantics and discards staged display resources");
+    scroll_viewport_fixture_free(&hit_destination);
+    scroll_viewport_fixture_free(&hit_content);
+
+    let limited_content: ScrollViewportFixture = scroll_viewport_fixture(0);
+    let limited_destination: ScrollViewportFixture =
+        scroll_viewport_destination();
+    let limited_spec: ScrollViewportSpec = spec;
+    limited_spec.limits.display_operations = 1;
+    let limited: ScrollViewportBuildResult = scroll_viewport_contribute(
+        limited_spec, scroll, &limited_content.display,
+        &limited_content.semantics, &limited_content.hits,
+        &limited_destination.display, &limited_destination.semantics,
+        &limited_destination.hits);
+    expect(state, limited.error == ScrollViewportBuildError.capacity_error &&
+        limited.capacity_error ==
+            ScrollViewportCapacityError.display_operations &&
+        limited_destination.display.ops.len == 0 &&
+        limited_destination.semantics.nodes.len == 0 &&
+        limited_destination.hits.nodes.len == 0,
+        "explicit operation ceiling fails before any caller-owned builder mutation");
+    scroll_viewport_fixture_free(&limited_destination);
+    scroll_viewport_fixture_free(&limited_content);
+}
+
+fn deterministic_contract(state:  *TestState) void {
+    let content: ScrollViewportFixture = scroll_viewport_fixture(0);
+    let first: ScrollViewportFixture = scroll_viewport_destination();
+    let second: ScrollViewportFixture = scroll_viewport_destination();
+    let scroll: ScrollState = scroll_state(
+        size(240 * unit_scale(), 160 * unit_scale()),
+        size(480 * unit_scale(), 600 * unit_scale()));
+    _ = scroll_to(&scroll, 30 * unit_scale(), 70 * unit_scale());
+    let spec: ScrollViewportSpec = scroll_viewport_spec(node_key(600),
+        semantic_root_key(), hit_root_key(),
+        rect(4 * unit_scale(), 8 * unit_scale(),
+            240 * unit_scale(), 160 * unit_scale()),
+        "Deterministic viewport");
+    spec.axis = ScrollViewportAxis.both;
+    spec.content_focus_order_offset = 20;
+    let a: ScrollViewportBuildResult = scroll_viewport_contribute(spec,
+        scroll, &content.display, &content.semantics, &content.hits,
+        &first.display, &first.semantics, &first.hits);
+    let b: ScrollViewportBuildResult = scroll_viewport_contribute(spec,
+        scroll, &content.display, &content.semantics, &content.hits,
+        &second.display, &second.semantics, &second.hits);
+    expect(state, a.error == ScrollViewportBuildError.none &&
+        b.error == ScrollViewportBuildError.none &&
+        a.artifact.evidence_hash == b.artifact.evidence_hash &&
+        a.artifact.geometry.evidence_hash ==
+            b.artifact.geometry.evidence_hash &&
+        first.display.content_hash == second.display.content_hash &&
+        first.display.ops.len == second.display.ops.len &&
+        first.semantics.nodes.len == second.semantics.nodes.len &&
+        first.hits.nodes.len == second.hits.nodes.len,
+        "identical state content and host inputs produce identical retained evidence");
+    scroll_viewport_fixture_free(&second);
+    scroll_viewport_fixture_free(&first);
+    scroll_viewport_fixture_free(&content);
+}
+
+fn main() i32 {
+    let state: TestState = TestState{ .passed = 0, .failed = 0 };
+    hosted_two_axis_contract(&state);
+    rtl_and_mutation_contract(&state);
+    keyboard_semantic_and_disabled_contract(&state);
+    no_overflow_disabled_and_focus_contract(&state);
+    atomic_failure_contract(&state);
+    deterministic_contract(&state);
+    let passed: []u8 = _zag_i64_to_str(state.passed as i64);
+    let failed: []u8 = _zag_i64_to_str(state.failed as i64);
+    _zag_print("ScrollViewport contract: pass="); _zag_print(passed);
+    _zag_print(" fail="); _zag_println(failed);
+    _zag_str_free(passed); _zag_str_free(failed);
+    if (state.failed == 0) { return 0; }
+    return 1;
+}

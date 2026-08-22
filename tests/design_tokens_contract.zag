@@ -53,33 +53,42 @@ fn main() i32 {
     let panel: ResolvedElevationToken = semantic_elevation(SemanticElevationToken.panel);
     let raised: ResolvedElevationToken = semantic_elevation(SemanticElevationToken.raised);
     let overlay: ResolvedElevationToken = semantic_elevation(SemanticElevationToken.overlay);
-    expect(&state, base.shadow_alpha < panel.shadow_alpha &&
-        panel.shadow_alpha < raised.shadow_alpha &&
-        raised.shadow_alpha < overlay.shadow_alpha,
-        "base panel raised and overlay elevations have ordered depth");
-    let shell_material: ResolvedMaterialToken = semantic_material(
-        SemanticMaterialToken.shell);
-    let raised_material: ResolvedMaterialToken = semantic_material(
-        SemanticMaterialToken.raised);
-    let overlay_material: ResolvedMaterialToken = semantic_material(
-        SemanticMaterialToken.overlay);
-    expect(&state, semantic_material_token_count() == 5 &&
-        bytes_equal(shell_material.id, "material.glass.shell") != 0 &&
-        shell_material.elevation_token == SemanticElevationToken.base &&
-        raised_material.elevation_token == SemanticElevationToken.raised &&
-        overlay_material.elevation_token == SemanticElevationToken.overlay &&
-        shell_material.fill_token != raised_material.fill_token,
-        "glass materials bind inspectable fill radius depth and fallback rules");
-    let backdrop_first: Paint = semantic_material_band_paint(
-        SemanticMaterialToken.showcase_backdrop, 0, 48);
-    let backdrop_last: Paint = semantic_material_band_paint(
-        SemanticMaterialToken.showcase_backdrop, 47, 48);
-    expect(&state, paint_equal(backdrop_first, backdrop_last) == 0 &&
-        backdrop_first.alpha == backdrop_last.alpha &&
+    expect(&state, base.ambient_shadow_alpha < panel.ambient_shadow_alpha &&
+        panel.ambient_shadow_alpha < raised.ambient_shadow_alpha &&
+        raised.ambient_shadow_alpha < overlay.ambient_shadow_alpha,
+        "base panel raised and overlay elevations have ordered ambient depth");
+    expect(&state, panel.contact_shadow_alpha > 0 &&
+        panel.contact_shadow_alpha < raised.contact_shadow_alpha &&
+        raised.contact_shadow_alpha < overlay.contact_shadow_alpha,
+        "contact shadow alpha increases with elevation tier");
+    expect(&state, base.edge_highlight_alpha < panel.edge_highlight_alpha &&
+        panel.edge_highlight_alpha < raised.edge_highlight_alpha &&
+        raised.edge_highlight_alpha < overlay.edge_highlight_alpha,
+        "edge highlight alpha increases with elevation tier");
+    let solid_material: ResolvedMaterialToken = semantic_material(
+        SemanticMaterialToken.solid);
+    let veil_material: ResolvedMaterialToken = semantic_material(
+        SemanticMaterialToken.veil);
+    let glass_material: ResolvedMaterialToken = semantic_material(
+        SemanticMaterialToken.glass);
+    expect(&state, semantic_material_token_count() == 3 &&
+        bytes_equal(solid_material.id, "material.solid") != 0 &&
+        solid_material.elevation_token == SemanticElevationToken.base &&
+        veil_material.elevation_token == SemanticElevationToken.panel &&
+        glass_material.elevation_token == SemanticElevationToken.raised &&
+        solid_material.fill_token != veil_material.fill_token &&
+        veil_material.fill_token != glass_material.fill_token,
+        "three material tiers bind inspectable fill radius depth and fallback rules");
+    let veil_first: Paint = semantic_material_band_paint(
+        SemanticMaterialToken.veil, 0, 48);
+    let veil_last: Paint = semantic_material_band_paint(
+        SemanticMaterialToken.veil, 47, 48);
+    expect(&state, paint_equal(veil_first, veil_last) == 0 &&
+        veil_first.alpha == veil_last.alpha &&
         bytes_equal(semantic_material(
-            SemanticMaterialToken.showcase_backdrop).id,
-            "material.showcase.backdrop") != 0,
-        "backdrop bands vary through one named material instead of local colors");
+            SemanticMaterialToken.veil).id,
+            "material.veil") != 0,
+        "veil bands vary through one named material instead of local colors");
     expect(&state, bytes_equal(showcase_category_description(
         ShowcaseCategory.frame_pacing), showcase_category_description(
             ShowcaseCategory.semantics)) == 0 &&

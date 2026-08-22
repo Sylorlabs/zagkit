@@ -1,0 +1,12 @@
+@import("../../src/components/canvas.zag")
+
+fn main() i32 {
+    let canvas: Canvas = canvas_make(
+        canvas_spec(node_key(9901),
+            rect(0, 0, 120 * unit_scale(), 80 * unit_scale()),
+            CanvasSemanticsPolicy.decorative, ""),
+        canvas_limits_default());
+    canvas_free(&canvas);
+    canvas_free(&canvas);
+    return 0;
+}

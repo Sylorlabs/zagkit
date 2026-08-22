@@ -1,15 +1,15 @@
 # Zagkit live progress snapshot
 
-- Date: 2026-08-06T23:02:37-07:00
+- Date: 2026-08-09T13:03:05-07:00
 - Scope: /home/micah/Desktop/Sylorlabs/zagkit
 - Zag toolkit version: 0.1.0-experimental.0
 - Compiler commit: 43870455a07bf8e7d4adf38fad807fe3baee4e26
 
 ## Goal checklist
 
-- Total items: 97
-- Completed: 28
-- Blocked: 69
+- Total items: 100
+- Completed: 26
+- Blocked: 74
 
 ### Blocked checklist items (unchecked in GOAL.md)
 
@@ -21,6 +21,7 @@
 - G1-CONCURRENCY
 - G1-DARWIN
 - G1-DYNAMIC-LOAD
+- G1-FFI-LIFETIMES
 - G1-IOS
 - G1-JNI
 - G1-LINUX-ARM64
@@ -28,6 +29,7 @@
 - G1-PACKAGES
 - G1-RELOAD
 - G1-RESOURCES
+- G1-RUNTIME-RESOURCES
 - G1-SOURCE-FIRST
 - G1-WINDOWS
 - G3-ASSET-PIPELINE
@@ -50,12 +52,16 @@
 - G4-INPUT
 - G4-INSPECTORS
 - G4-PREVIEW
+- G4-TALKBACK-ACTIONS
+- G4-TALKBACK-INSPECT
+- G4-TALKBACK-PIXELS
 - G5-ATSPI
 - G5-LINUX-CPU
 - G5-LINUX-FIDELITY
 - G5-LINUX-GPU
 - G5-LINUX-PACKAGE
 - G5-LINUX-POLISH
+- G5-SHOWCASE-CONFORMANCE
 - G5-WAYLAND
 - G5-X11
 - G6-ACCESSIBILITY
@@ -63,7 +69,6 @@
 - G6-AUTOMATION
 - G6-DENSE-UI
 - G6-DESIGN
-- G6-INVENTORY
 - G6-MATERIALS
 - G6-PERFORMANCE
 - G6-POLISH
@@ -95,20 +100,17 @@
 
 - Required families: linux, macos, windows, ios, android
 - Total capability slots: 45
-- Unavailable capability slots: 45
+- Unavailable capability slots: 42
 
 ### Not-ready capability blockers
 
 ```
-platform_shell:Wayland and X11 shells are not implemented.
-cpu_renderer:A headless rectangle CPU-oracle subset exists, but full display-list coverage and Linux surface presentation are not implemented.
 gpu_transport:No Zagkit Linux GPU transport exists or has device evidence.
 text_input:No Linux IME bridge or editing engine exists.
 accessibility:No AT-SPI adapter exists or has assistive technology evidence.
 clipboard_drag_drop:Clipboard and drag and drop seams are not implemented.
 multi_window:Window, monitor, and scale lifecycle support is not implemented.
 packaging:No installable Linux artifact or packaging gate exists.
-auto_backend_selection:There are no eligible Zagkit backends for .auto to select.
 platform_shell:The AppKit shell and Darwin target are not implemented.
 cpu_renderer:A platform-independent headless rectangle CPU-oracle subset exists, but full display-list coverage and macOS presentation are not implemented.
 gpu_transport:No Zagkit Metal transport exists or has device evidence.

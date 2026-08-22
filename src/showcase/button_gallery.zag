@@ -361,20 +361,20 @@ fn button_gallery_surface(list: *DisplayList, owner: NodeKey, bounds: Rect,
     elevation_token: SemanticElevationToken) i32 {
     let elevation: ResolvedElevationToken = semantic_elevation(elevation_token);
     let radius: i64 = semantic_radius(radius_token);
-    if (elevation.shadow_alpha > 0) {
-        let spread: i64 = elevation.shadow_spread;
+    if (elevation.ambient_shadow_alpha > 0) {
+        let spread: i64 = elevation.ambient_shadow_blur;
         if (button_gallery_push_round(list, owner,
             rect(bounds.x - spread,
-                bounds.y + elevation.shadow_offset_y - spread,
+                bounds.y + elevation.ambient_shadow_y - spread,
                 bounds.width + spread * 2, bounds.height + spread * 2),
             radius + spread, semantic_color_with_alpha(
-                SemanticColorToken.shadow, elevation.shadow_alpha)) == 0) {
+                SemanticColorToken.shadow, elevation.ambient_shadow_alpha)) == 0) {
             return 0;
         }
     }
     if (button_gallery_push_round(list, owner, bounds, radius,
         semantic_color_with_alpha(SemanticColorToken.border_subtle,
-            elevation.border_alpha)) == 0) { return 0; }
+            elevation.edge_highlight_alpha)) == 0) { return 0; }
     let edge: i64 = unit_scale();
     return button_gallery_push_round(list, owner,
         rect(bounds.x + edge, bounds.y + edge,

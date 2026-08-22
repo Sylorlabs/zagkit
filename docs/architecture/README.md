@@ -28,7 +28,14 @@ Normative decisions:
 
 Detailed experimental contracts:
 
+- [semantic token role boundaries and inspector evidence](../design/semantic-tokens.md)
+- [experimental native token-inspector boundary](../showcase/token-inspector.md)
 - [shared Button identity, state, measurement, semantics, and Talkback](../components/button.md)
+- [Surface hierarchy tiers and actionable card state](../components/surface.md)
+- [single-selection SegmentedControl state and focus truth](../components/segmented-control.md)
+- [ScrollViewport clipping, axis ranges, stable-ID reveal, and atomic hosting](../components/scroll-viewport.md)
+- [accessible PerformanceChart anatomy and semantic table](../components/performance-chart.md)
+- [hostable thirteen-row typography specimen](../showcase/typography-specimen.md)
 - [retained Canvas immediate drawing escape hatch](canvas.md)
 - [intrinsic measurement and invalidation reasons](measurement.md)
 - [Flex placement and adaptive spacing](flex.md)

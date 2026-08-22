@@ -48,15 +48,15 @@ fn semantic_color_token_count() i32 { return 31; }
 fn semantic_color(token: SemanticColorToken) ResolvedColorToken {
     return switch (token) {
         .canvas => ResolvedColorToken{ .id = "color.canvas",
-            .paint = paint_rgba16(2200, 3100, 6500, 65535) },
+            .paint = paint_rgba16(2827, 3598, 5140, 65535) },
         .surface_base => ResolvedColorToken{ .id = "color.surface.base",
-            .paint = paint_rgba16(7200, 10500, 19000, 50000) },
+            .paint = paint_rgba16(4626, 5654, 7967, 65535) },
         .surface_panel => ResolvedColorToken{ .id = "color.surface.panel",
-            .paint = paint_rgba16(7000, 12000, 22500, 56000) },
+            .paint = paint_rgba16(5911, 7196, 10023, 65535) },
         .surface_raised => ResolvedColorToken{ .id = "color.surface.raised",
-            .paint = paint_rgba16(9000, 15500, 27500, 60000) },
+            .paint = paint_rgba16(7710, 9252, 12593, 65535) },
         .surface_inset => ResolvedColorToken{ .id = "color.surface.inset",
-            .paint = paint_rgba16(4500, 7600, 14500, 56000) },
+            .paint = paint_rgba16(3341, 4112, 6168, 65535) },
         .surface_interactive => ResolvedColorToken{ .id = "color.surface.interactive",
             .paint = paint_rgba16(9000, 18000, 34000, 56000) },
         .surface_selected => ResolvedColorToken{ .id = "color.surface.selected",
@@ -66,23 +66,23 @@ fn semantic_color(token: SemanticColorToken) ResolvedColorToken {
         .border_emphasis => ResolvedColorToken{ .id = "color.border.emphasis",
             .paint = paint_rgba16(32000, 47000, 65535, 21000) },
         .text_primary => ResolvedColorToken{ .id = "color.text.primary",
-            .paint = paint_rgba16(57000, 61000, 65535, 65535) },
+            .paint = paint_rgba16(61680, 62708, 64764, 65535) },
         .text_secondary => ResolvedColorToken{ .id = "color.text.secondary",
-            .paint = paint_rgba16(35000, 43000, 56000, 60000) },
+            .paint = paint_rgba16(43433, 46260, 51400, 60000) },
         .text_disabled => ResolvedColorToken{ .id = "color.text.disabled",
-            .paint = paint_rgba16(28000, 34000, 43000, 43000) },
+            .paint = paint_rgba16(23130, 25700, 30840, 43000) },
         .accent => ResolvedColorToken{ .id = "color.accent",
-            .paint = paint_rgba16(17000, 48500, 65535, 62000) },
+            .paint = paint_rgba16(23387, 23387, 61680, 65535) },
         .accent_emphasis => ResolvedColorToken{ .id = "color.accent.emphasis",
-            .paint = paint_rgba16(12500, 38500, 61000, 65535) },
+            .paint = paint_rgba16(31868, 31868, 62965, 65535) },
         .focus => ResolvedColorToken{ .id = "color.focus",
-            .paint = paint_rgba16(26000, 60000, 65535, 65535) },
+            .paint = paint_rgba16(14135, 54998, 61166, 65535) },
         .status_healthy => ResolvedColorToken{ .id = "color.status.healthy",
-            .paint = paint_rgba16(18000, 56000, 42000, 65535) },
+            .paint = paint_rgba16(16191, 49087, 31354, 65535) },
         .status_experimental => ResolvedColorToken{ .id = "color.status.experimental",
-            .paint = paint_rgba16(65535, 43000, 17000, 65535) },
+            .paint = paint_rgba16(59624, 41377, 15677, 65535) },
         .status_error => ResolvedColorToken{ .id = "color.status.error",
-            .paint = paint_rgba16(65535, 17500, 23500, 65535) },
+            .paint = paint_rgba16(61680, 21845, 19789, 65535) },
         .category_semantics => ResolvedColorToken{ .id = "color.category.semantics",
             .paint = paint_rgba16(15000, 48000, 65535, 65535) },
         .category_motion => ResolvedColorToken{ .id = "color.category.motion",
@@ -102,13 +102,13 @@ fn semantic_color(token: SemanticColorToken) ResolvedColorToken {
         .chart_series_tertiary => ResolvedColorToken{ .id = "color.chart.series.tertiary",
             .paint = paint_rgba16(65535, 43000, 17000, 59000) },
         .shadow => ResolvedColorToken{ .id = "color.shadow",
-            .paint = paint_rgba16(0, 0, 0, 12000) },
+            .paint = paint_rgba16(514, 1542, 4112, 27525) },
         .edge_highlight => ResolvedColorToken{ .id = "color.edge.highlight",
-            .paint = paint_rgba16(42000, 56000, 65535, 19000) },
+            .paint = paint_rgba16(48830, 53970, 65535, 10486) },
         .ambient_cool => ResolvedColorToken{ .id = "color.ambient.cool",
-            .paint = paint_rgba16(13000, 39000, 65535, 8000) },
+            .paint = paint_rgba16(20560, 35980, 65535, 3932) },
         .ambient_warm => ResolvedColorToken{ .id = "color.ambient.warm",
-            .paint = paint_rgba16(58000, 18000, 47000, 7000) },
+            .paint = paint_rgba16(59110, 30840, 48830, 3277) },
     };
 }
 
@@ -155,8 +155,8 @@ fn semantic_radius_name(token: SemanticRadiusToken) []u8 {
 
 fn semantic_radius(token: SemanticRadiusToken) i64 {
     return switch (token) {
-        .control => 12 * unit_scale(), .card => 18 * unit_scale(),
-        .panel => 24 * unit_scale(), .pill => 999 * unit_scale(),
+        .control => 10 * unit_scale(), .card => 14 * unit_scale(),
+        .panel => 16 * unit_scale(), .pill => 999 * unit_scale(),
     };
 }
 
@@ -164,35 +164,48 @@ enum SemanticElevationToken { base, panel, raised, overlay }
 
 struct ResolvedElevationToken {
     id: []u8,
-    shadow_offset_y: i64,
-    shadow_spread: i64,
-    shadow_alpha: i64,
-    border_alpha: i64,
+    contact_shadow_y: i64,
+    contact_shadow_blur: i64,
+    contact_shadow_alpha: i64,
+    ambient_shadow_y: i64,
+    ambient_shadow_blur: i64,
+    ambient_shadow_alpha: i64,
+    edge_highlight_alpha: i64,
 }
 
 fn semantic_elevation(token: SemanticElevationToken) ResolvedElevationToken {
     return switch (token) {
         .base => ResolvedElevationToken{ .id = "elevation.base",
-            .shadow_offset_y = 0, .shadow_spread = 0,
-            .shadow_alpha = 0, .border_alpha = 9000 },
+            .contact_shadow_y = 0, .contact_shadow_blur = 0,
+            .contact_shadow_alpha = 0,
+            .ambient_shadow_y = 0, .ambient_shadow_blur = 0,
+            .ambient_shadow_alpha = 0,
+            .edge_highlight_alpha = 6554 },
         .panel => ResolvedElevationToken{ .id = "elevation.panel",
-            .shadow_offset_y = 4 * unit_scale(), .shadow_spread = 3 * unit_scale(),
-            .shadow_alpha = 9000, .border_alpha = 13000 },
+            .contact_shadow_y = 1 * unit_scale(), .contact_shadow_blur = 4 * unit_scale(),
+            .contact_shadow_alpha = 19661,
+            .ambient_shadow_y = 6 * unit_scale(), .ambient_shadow_blur = 18 * unit_scale(),
+            .ambient_shadow_alpha = 10486,
+            .edge_highlight_alpha = 9175 },
         .raised => ResolvedElevationToken{ .id = "elevation.raised",
-            .shadow_offset_y = 7 * unit_scale(), .shadow_spread = 5 * unit_scale(),
-            .shadow_alpha = 13000, .border_alpha = 18000 },
+            .contact_shadow_y = 2 * unit_scale(), .contact_shadow_blur = 6 * unit_scale(),
+            .contact_shadow_alpha = 22282,
+            .ambient_shadow_y = 10 * unit_scale(), .ambient_shadow_blur = 28 * unit_scale(),
+            .ambient_shadow_alpha = 13107,
+            .edge_highlight_alpha = 11796 },
         .overlay => ResolvedElevationToken{ .id = "elevation.overlay",
-            .shadow_offset_y = 12 * unit_scale(), .shadow_spread = 8 * unit_scale(),
-            .shadow_alpha = 18000, .border_alpha = 23000 },
+            .contact_shadow_y = 3 * unit_scale(), .contact_shadow_blur = 8 * unit_scale(),
+            .contact_shadow_alpha = 24904,
+            .ambient_shadow_y = 16 * unit_scale(), .ambient_shadow_blur = 40 * unit_scale(),
+            .ambient_shadow_alpha = 17039,
+            .edge_highlight_alpha = 14418 },
     };
 }
 
 enum SemanticMaterialToken {
-    showcase_backdrop,
-    shell,
-    panel,
-    raised,
-    overlay,
+    solid,
+    veil,
+    glass,
 }
 
 struct ResolvedMaterialToken {
@@ -208,64 +221,42 @@ struct ResolvedMaterialToken {
     cpu_fallback_reason: []u8,
 }
 
-fn semantic_material_token_count() i32 { return 5; }
+fn semantic_material_token_count() i32 { return 3; }
 
 fn semantic_material(token: SemanticMaterialToken) ResolvedMaterialToken {
     return switch (token) {
-        .showcase_backdrop => ResolvedMaterialToken{
-            .id = "material.showcase.backdrop",
-            .fill_token = SemanticColorToken.canvas,
-            .tint_token = SemanticColorToken.ambient_cool,
-            .edge_token = SemanticColorToken.border_subtle,
-            .radius_token = SemanticRadiusToken.control,
-            .elevation_token = SemanticElevationToken.base,
-            .tint_alpha_start = 1500, .tint_alpha_end = 12500,
-            .blur_radius = 0,
-            .cpu_fallback_reason = "retained color bands are the deterministic CPU gradient oracle",
-        },
-        .shell => ResolvedMaterialToken{
-            .id = "material.glass.shell",
+        .solid => ResolvedMaterialToken{
+            .id = "material.solid",
             .fill_token = SemanticColorToken.surface_base,
             .tint_token = SemanticColorToken.ambient_cool,
-            .edge_token = SemanticColorToken.edge_highlight,
+            .edge_token = SemanticColorToken.border_subtle,
             .radius_token = SemanticRadiusToken.panel,
             .elevation_token = SemanticElevationToken.base,
             .tint_alpha_start = 0, .tint_alpha_end = 0,
-            .blur_radius = 18 * unit_scale(),
-            .cpu_fallback_reason = "translucent fill and edge remain authoritative until backdrop blur lands",
+            .blur_radius = 0,
+            .cpu_fallback_reason = "exact fill plus analytic gradient bands",
         },
-        .panel => ResolvedMaterialToken{
-            .id = "material.glass.panel",
+        .veil => ResolvedMaterialToken{
+            .id = "material.veil",
             .fill_token = SemanticColorToken.surface_panel,
             .tint_token = SemanticColorToken.ambient_cool,
             .edge_token = SemanticColorToken.edge_highlight,
             .radius_token = SemanticRadiusToken.panel,
             .elevation_token = SemanticElevationToken.panel,
-            .tint_alpha_start = 0, .tint_alpha_end = 0,
-            .blur_radius = 24 * unit_scale(),
-            .cpu_fallback_reason = "translucent fill edge and shadow are the current CPU material",
+            .tint_alpha_start = 0, .tint_alpha_end = 12000,
+            .blur_radius = 20 * unit_scale(),
+            .cpu_fallback_reason = "vertical ambient-tint band plus edge highlight, fallback reason recorded",
         },
-        .raised => ResolvedMaterialToken{
-            .id = "material.glass.raised",
-            .fill_token = SemanticColorToken.surface_raised,
-            .tint_token = SemanticColorToken.ambient_cool,
-            .edge_token = SemanticColorToken.edge_highlight,
-            .radius_token = SemanticRadiusToken.card,
-            .elevation_token = SemanticElevationToken.raised,
-            .tint_alpha_start = 0, .tint_alpha_end = 0,
-            .blur_radius = 30 * unit_scale(),
-            .cpu_fallback_reason = "translucent fill edge and raised shadow are the current CPU material",
-        },
-        .overlay => ResolvedMaterialToken{
-            .id = "material.glass.overlay",
+        .glass => ResolvedMaterialToken{
+            .id = "material.glass",
             .fill_token = SemanticColorToken.surface_raised,
             .tint_token = SemanticColorToken.ambient_warm,
             .edge_token = SemanticColorToken.edge_highlight,
             .radius_token = SemanticRadiusToken.card,
-            .elevation_token = SemanticElevationToken.overlay,
-            .tint_alpha_start = 0, .tint_alpha_end = 0,
+            .elevation_token = SemanticElevationToken.raised,
+            .tint_alpha_start = 0, .tint_alpha_end = 14000,
             .blur_radius = 36 * unit_scale(),
-            .cpu_fallback_reason = "translucent fill edge and overlay shadow are the current CPU material",
+            .cpu_fallback_reason = "warm ambient-tint band plus overlay shadow pair, fallback reason recorded",
         },
     };
 }

@@ -27,6 +27,9 @@ struct LinuxPreviewLayout {
     chart: Rect,
     segmented_control: Rect,
     compact_summary: Rect,
+    route_content: Rect,
+    status_heading: Rect,
+    status_list: Rect,
     navigation_is_column: i32,
     status_visible: i32,
     chart_visible: i32,
@@ -53,6 +56,9 @@ fn linux_preview_layout_empty(error: LinuxPreviewLayoutError)
         .chart = rect(0, 0, 0, 0),
         .segmented_control = rect(0, 0, 0, 0),
         .compact_summary = rect(0, 0, 0, 0),
+        .route_content = rect(0, 0, 0, 0),
+        .status_heading = rect(0, 0, 0, 0),
+        .status_list = rect(0, 0, 0, 0),
         .navigation_is_column = 0,
         .status_visible = 0,
         .chart_visible = 0,
@@ -237,6 +243,30 @@ fn linux_preview_layout(width: i32, height: i32) LinuxPreviewLayout {
     if (result.mode != LinuxPreviewLayoutMode.compact &&
         result.chart_visible == 0) {
         result.error = LinuxPreviewLayoutError.chart_contract_violation;
+    }
+    result.route_content = rect(result.main.x + result.panel_padding,
+        result.page_heading.y + result.page_heading.height +
+            result.section_gap,
+        inner_width,
+        result.main.y + result.main.height - result.panel_padding -
+            (result.page_heading.y + result.page_heading.height +
+                result.section_gap));
+    if (result.status_visible != 0) {
+        let status_inner_w: i64 = result.status.width -
+            result.panel_padding * 2;
+        let status_heading_h: i64 =
+            flex_spacing(FlexSpacingToken.xxlarge, density) +
+            flex_spacing(FlexSpacingToken.large, density);
+        result.status_heading = rect(result.status.x + result.panel_padding,
+            result.status.y + result.panel_padding,
+            status_inner_w, status_heading_h);
+        result.status_list = rect(result.status_heading.x,
+            result.status_heading.y + result.status_heading.height +
+                result.section_gap,
+            status_inner_w,
+            result.status.y + result.status.height - result.panel_padding -
+                (result.status_heading.y + result.status_heading.height +
+                    result.section_gap));
     }
     return result;
 }

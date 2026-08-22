@@ -18,7 +18,7 @@ fn main() i32 {
     expect(&state, tree.last_error == SemanticsError.none &&
         tree.nodes.len == linux_preview_semantic_node_count(1120, 720),
         "the native preview exposes one complete owned semantic tree");
-    let components_index: i32 = semantics_find_index(tree, linux_preview_nav_id(1));
+    let components_index: i32 = semantics_find_index(tree, linux_preview_nav_id(2));
     let overview_index: i32 = semantics_find_index(tree, linux_preview_nav_id(0));
     expect(&state, components_index >= 0 && overview_index >= 0 &&
         tree.nodes.data[components_index].selected == 0 &&
@@ -28,7 +28,7 @@ fn main() i32 {
         tree.nodes.data[overview_index].disabled == 0,
         "navigation selection truth uses stable semantic IDs");
     let expected_components: Rect = linux_preview_navigation_item_bounds(
-        medium_layout, 1, linux_preview_navigation_count());
+        medium_layout, 2, linux_preview_navigation_count());
     expect(&state,
         tree.nodes.data[components_index].bounds.x == expected_components.x &&
         tree.nodes.data[components_index].bounds.y == expected_components.y &&
@@ -39,7 +39,7 @@ fn main() i32 {
     let query: TalkbackResponse = talkback_dispatch(&session, tree,
         rect(0, 0, 1120 * unit_scale(), 720 * unit_scale()),
         talkback_request(1, TalkbackCommand.query,
-            linux_preview_nav_id(1), tree.revision));
+            linux_preview_nav_id(2), tree.revision));
     expect(&state, query.status == TalkbackStatus.accepted &&
         query.resolved_role == SemanticRole.tab && query.has_bounds == 1 &&
         (query.state_flags & 1) != 0,
@@ -47,7 +47,7 @@ fn main() i32 {
     let disabled_click: TalkbackResponse = talkback_dispatch(&session, tree,
         rect(0, 0, 1120 * unit_scale(), 720 * unit_scale()),
         talkback_request(3, TalkbackCommand.click,
-            linux_preview_nav_id(1), tree.revision));
+            linux_preview_nav_id(2), tree.revision));
     expect(&state, disabled_click.status == TalkbackStatus.action_unavailable,
         "unfinished navigation destinations fail closed instead of changing a highlight");
     let click: TalkbackResponse = talkback_dispatch(&session, tree,
@@ -101,9 +101,9 @@ fn main() i32 {
     let overview_bounds: Rect = linux_preview_navigation_item_bounds(
         medium_layout, 0, linux_preview_navigation_count());
     let component_bounds: Rect = linux_preview_navigation_item_bounds(
-        medium_layout, 1, linux_preview_navigation_count());
+        medium_layout, 2, linux_preview_navigation_count());
     let expanded_component_bounds: Rect = linux_preview_navigation_item_bounds(
-        expanded_layout, 1, linux_preview_navigation_count());
+        expanded_layout, 2, linux_preview_navigation_count());
     expect(&state, linux_preview_navigation_at_pixel(
             ((overview_bounds.x + overview_bounds.width / 2) / unit_scale()) as i32,
             ((overview_bounds.y + overview_bounds.height / 2) / unit_scale()) as i32,
@@ -111,7 +111,7 @@ fn main() i32 {
         linux_preview_navigation_hit_at_pixel(
             ((component_bounds.x + component_bounds.width / 2) / unit_scale()) as i32,
             ((component_bounds.y + component_bounds.height / 2) / unit_scale()) as i32,
-            1120, 720) == 1 &&
+            1120, 720) == 2 &&
         linux_preview_navigation_at_pixel(
             ((component_bounds.x + component_bounds.width / 2) / unit_scale()) as i32,
             ((component_bounds.y + component_bounds.height / 2) / unit_scale()) as i32,

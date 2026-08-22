@@ -144,17 +144,30 @@ fn preview_glass_panel(list: *DisplayList, id: i64, x: i64, y: i64,
     width: i64, height: i64, radius: i64) void {
     let elevation: ResolvedElevationToken = semantic_elevation(
         SemanticElevationToken.panel);
-    let spread: i64 = elevation.shadow_spread;
-    _ = preview_round_rect(list, id, x - spread, y + elevation.shadow_offset_y,
-        width + spread * 2, height + spread * 2, radius + spread,
+    // Ambient shadow: soft, larger offset.
+    let ambient_blur: i64 = elevation.ambient_shadow_blur;
+    _ = preview_round_rect(list, id,
+        x - ambient_blur, y + elevation.ambient_shadow_y,
+        width + ambient_blur * 2, height + ambient_blur * 2,
+        radius + ambient_blur,
         semantic_color_with_alpha(SemanticColorToken.shadow,
-            elevation.shadow_alpha));
-    _ = preview_round_rect(list, id + 1, x, y, width, height, radius,
+            elevation.ambient_shadow_alpha));
+    // Contact shadow: tight, small offset.
+    let contact_blur: i64 = elevation.contact_shadow_blur;
+    _ = preview_round_rect(list, id + 1,
+        x - contact_blur, y + elevation.contact_shadow_y,
+        width + contact_blur * 2, height + contact_blur * 2,
+        radius + contact_blur,
+        semantic_color_with_alpha(SemanticColorToken.shadow,
+            elevation.contact_shadow_alpha));
+    // Fill rect.
+    _ = preview_round_rect(list, id + 2, x, y, width, height, radius,
         semantic_color_paint(SemanticColorToken.surface_base));
-    _ = preview_round_rect(list, id + 2, x + unit_scale(), y + unit_scale(),
+    // Edge highlight: top edge hairline.
+    _ = preview_round_rect(list, id + 3, x + unit_scale(), y + unit_scale(),
         width - 2 * unit_scale(), 2 * unit_scale(), radius,
         semantic_color_with_alpha(SemanticColorToken.edge_highlight,
-            elevation.border_alpha));
+            elevation.edge_highlight_alpha));
 }
 
 fn linux_preview_scene_internal(width: i32, height: i32,

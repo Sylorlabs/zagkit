@@ -1,0 +1,1069 @@
+@import("../src/showcase/component_state_gallery.zag")
+@import("../src/render/cpu_raster.zag")
+
+struct TestState { passed: i32, failed: i32 }
+
+fn expect(state:  *TestState,
+    condition: i32, name: []u8) void {
+    if (condition != 0) {
+        state.*.passed = state.*.passed + 1;
+        _zag_print("ok  "); _zag_println(name);
+    } else {
+        state.*.failed = state.*.failed + 1;
+        _zag_print("FAIL "); _zag_println(name);
+    }
+}
+
+fn gallery_test_finish(state:  *TestState) i32 {
+    _zag_print("Component state gallery contract: pass=");
+    _zag_print_i64(state.*.passed as i64);
+    _zag_print(" fail="); _zag_print_i64(state.*.failed as i64);
+    _zag_println("");
+    if (state.*.failed == 0) { return 0; }
+    return 1;
+}
+
+fn gallery_test_rect_equal(left: Rect, right: Rect) i32 {
+    return (left.x == right.x && left.y == right.y &&
+        left.width == right.width && left.height == right.height) as i32;
+}
+
+fn gallery_test_face(path: []u8) OpenTypeFace {
+    let bytes: []u8 = _zag_read_file(path);
+    if (bytes.len <= 0) { return opentype_face_empty(); }
+    let face: OpenTypeFace = opentype_parse(bytes);
+    _zag_free(_zag_slice_ptr(bytes));
+    return face;
+}
+
+fn gallery_test_spec() ComponentStateGallerySpec {
+    return component_state_gallery_spec(node_key_scoped(8200, 6),
+        rect(0, 0, 1440 * unit_scale(), 1280 * unit_scale()));
+}
+
+fn gallery_test_owner_has_path(display:  *DisplayList,
+    owner: NodeKey) i32 {
+    let index: i32 = 0;
+    while (index < display.*.ops.len) {
+        if (display.*.ops.data[index].kind == DisplayOpKind.draw_path &&
+            node_key_equal(display.*.ops.data[index].owner, owner) != 0) {
+            return 1;
+        }
+        index = index + 1;
+    }
+    return 0;
+}
+
+fn gallery_test_owner_has_operation(display:  *DisplayList,
+    owner: NodeKey) i32 {
+    let index: i32 = 0;
+    while (index < display.*.ops.len) {
+        if (node_key_equal(display.*.ops.data[index].owner, owner) != 0) {
+            return 1;
+        }
+        index = index + 1;
+    }
+    return 0;
+}
+
+fn gallery_test_owner_range(display:  *DisplayList,
+    start: i32, end: i32, owner: NodeKey) i32 {
+    if (start < 0 || end <= start || end > display.*.ops.len) { return 0; }
+    let index: i32 = start;
+    while (index < end) {
+        if (node_key_equal(display.*.ops.data[index].owner, owner) == 0) {
+            return 0;
+        }
+        index = index + 1;
+    }
+    return 1;
+}
+
+fn gallery_test_structure_contract(state:  *TestState,
+    gallery:  *ComponentStateGalleryArtifact) void {
+    expect(state, component_state_gallery_valid(gallery) != 0 &&
+        gallery.*.tier_surfaces.len == 4 &&
+        gallery.*.state_surfaces.len == 8 && gallery.*.buttons.len == 8 &&
+        gallery.*.navigation_items.len == 6 &&
+        gallery.*.segmented.segment_count == 4 &&
+        gallery.*.frozen_conformance == 1 &&
+        gallery.*.runtime_hash == component_state_gallery_runtime_state_hash(
+            gallery.*.runtime_state),
+        "one reusable artifact owns every required canonical component fixture");
+    expect(state, gallery.*.display.ops.len == 407 &&
+        gallery.*.display.resources.resources.len == 61 &&
+        gallery.*.hits.nodes.len == 27 &&
+        gallery.*.semantics.nodes.len == 64 &&
+        gallery.*.text_artifact_count == 61 &&
+        gallery.*.text_semantic_count == 32,
+        "the complete gallery has exact retained display resource hit and semantic counts");
+    expect(state, gallery.*.layout.required_height == 1192 * unit_scale() &&
+        gallery.*.layout.minimum_width == 1072 * unit_scale() &&
+        component_state_gallery_required_height(FlexDensity.compact) ==
+            1119 * unit_scale() &&
+        component_state_gallery_minimum_width(FlexDensity.compact) ==
+            1044 * unit_scale() &&
+        component_state_gallery_required_height(FlexDensity.touch) ==
+            1265 * unit_scale() &&
+        component_state_gallery_minimum_width(FlexDensity.touch) ==
+            1100 * unit_scale() &&
+        gallery.*.bounds.height > gallery.*.layout.required_height &&
+        gallery.*.bounds.width > gallery.*.layout.minimum_width,
+        "every density has explicit fixed-column Flex useful bounds");
+    expect(state, gallery.*.display.sealed != 0 &&
+        display_list_verify(&gallery.*.display) == DisplayError.none &&
+        gallery.*.display_hash == gallery.*.display.content_hash &&
+        gallery.*.hit_hash != 0 && gallery.*.talkback_hash != 0 &&
+        gallery.*.evidence_hash != 0,
+        "the gallery seals into immutable deterministic display and automation evidence");
+}
+
+fn gallery_test_geometry_contract(state:  *TestState,
+    gallery:  *ComponentStateGalleryArtifact) void {
+    let exact: i32 = 1;
+    let caption_truth: i32 = 1;
+    let index: i32 = 0;
+    while (index < gallery.*.layout.tier_placements.len) {
+        let placement: ComponentStateGalleryPlacement =
+            gallery.*.layout.tier_placements.data[index];
+        let surface: SurfaceArtifact = gallery.*.tier_surfaces.data[index];
+        let semantic_index: i32 = semantics_find_index_borrowed(
+            &gallery.*.semantics, placement.id);
+        let caption_index: i32 = semantics_find_index_borrowed(
+            &gallery.*.semantics, placement.caption_id);
+        if (gallery_test_rect_equal(surface.bounds,
+                placement.control_bounds) == 0 || semantic_index < 0 ||
+            gallery_test_owner_range(&gallery.*.display,
+                surface.display_op_start, surface.display_op_end,
+                placement.id) == 0 ||
+            gallery_test_rect_equal(
+                gallery.*.semantics.nodes.data[semantic_index].bounds,
+                placement.control_bounds) == 0) { exact = 0; }
+        if (caption_index < 0 || gallery_test_rect_equal(
+            gallery.*.semantics.nodes.data[caption_index].bounds,
+            placement.caption_bounds) == 0 ||
+            gallery_test_owner_has_path(&gallery.*.display,
+                placement.caption_id) == 0) { caption_truth = 0; }
+        index = index + 1;
+    }
+    index = 0;
+    while (index < gallery.*.layout.surface_placements.len) {
+        let placement: ComponentStateGalleryPlacement =
+            gallery.*.layout.surface_placements.data[index];
+        let surface: SurfaceArtifact = gallery.*.state_surfaces.data[index];
+        let hit_index: i32 = hit_tree_find_index_borrowed(
+            &gallery.*.hits, placement.id);
+        let semantic_index: i32 = semantics_find_index_borrowed(
+            &gallery.*.semantics, placement.id);
+        let caption_index: i32 = semantics_find_index_borrowed(
+            &gallery.*.semantics, placement.caption_id);
+        if (gallery_test_rect_equal(surface.bounds,
+                placement.control_bounds) == 0 || hit_index < 0 ||
+            semantic_index < 0 || gallery_test_owner_range(
+                &gallery.*.display, surface.display_op_start,
+                surface.display_op_end, placement.id) == 0 ||
+            gallery_test_rect_equal(
+                gallery.*.hits.nodes.data[hit_index].bounds,
+                placement.control_bounds) == 0 ||
+            gallery_test_rect_equal(
+                gallery.*.semantics.nodes.data[semantic_index].bounds,
+                placement.control_bounds) == 0) { exact = 0; }
+        if (caption_index < 0 || gallery_test_rect_equal(
+            gallery.*.semantics.nodes.data[caption_index].bounds,
+            placement.caption_bounds) == 0) { caption_truth = 0; }
+        index = index + 1;
+    }
+    index = 0;
+    while (index < gallery.*.layout.button_placements.len) {
+        let placement: ComponentStateGalleryPlacement =
+            gallery.*.layout.button_placements.data[index];
+        let button: ButtonArtifact = gallery.*.buttons.data[index];
+        let hit_index: i32 = hit_tree_find_index_borrowed(
+            &gallery.*.hits, placement.id);
+        let semantic_index: i32 = semantics_find_index_borrowed(
+            &gallery.*.semantics, placement.id);
+        if (gallery_test_rect_equal(button.bounds,
+                placement.control_bounds) == 0 ||
+            hit_index < 0 || semantic_index < 0 ||
+            gallery_test_rect_equal(
+                gallery.*.hits.nodes.data[hit_index].bounds,
+                placement.control_bounds) == 0 ||
+            gallery_test_rect_equal(
+                gallery.*.semantics.nodes.data[semantic_index].bounds,
+                placement.control_bounds) == 0 ||
+            gallery_test_owner_range(&gallery.*.display,
+                button.display_op_start, button.display_op_end,
+                placement.id) == 0) { exact = 0; }
+        if (semantics_find_index_borrowed(&gallery.*.semantics,
+            placement.caption_id) < 0) { caption_truth = 0; }
+        index = index + 1;
+    }
+    index = 0;
+    while (index < gallery.*.layout.navigation_placements.len) {
+        let placement: ComponentStateGalleryPlacement =
+            gallery.*.layout.navigation_placements.data[index];
+        let navigation: NavigationItemArtifact =
+            gallery.*.navigation_items.data[index];
+        let hit_index: i32 = hit_tree_find_index_borrowed(
+            &gallery.*.hits, placement.id);
+        let semantic_index: i32 = semantics_find_index_borrowed(
+            &gallery.*.semantics, placement.id);
+        if (gallery_test_rect_equal(navigation.bounds,
+                placement.control_bounds) == 0 ||
+            hit_index < 0 || semantic_index < 0 ||
+            gallery_test_rect_equal(
+                gallery.*.hits.nodes.data[hit_index].bounds,
+                placement.control_bounds) == 0 ||
+            gallery_test_rect_equal(
+                gallery.*.semantics.nodes.data[semantic_index].bounds,
+                placement.control_bounds) == 0 ||
+            gallery_test_owner_range(&gallery.*.display,
+                navigation.display_op_start, navigation.display_op_end,
+                placement.id) == 0) { exact = 0; }
+        if (semantics_find_index_borrowed(&gallery.*.semantics,
+            placement.caption_id) < 0) { caption_truth = 0; }
+        index = index + 1;
+    }
+    expect(state, exact != 0,
+        "one Flex placement graph supplies exact component display hit and semantic geometry");
+    expect(state, caption_truth != 0,
+        "every fixture state caption is both a visible Text path and semantic node");
+}
+
+fn gallery_test_semantic_reading_order(state:  *TestState,
+    gallery:  *ComponentStateGalleryArtifact) void {
+    let title: i32 = semantics_find_index_borrowed(&gallery.*.semantics,
+        component_state_gallery_title_id(gallery.*.id));
+    let heading0: i32 = semantics_find_index_borrowed(&gallery.*.semantics,
+        component_state_gallery_heading_id(gallery.*.id, 0));
+    let tier_first: i32 = semantics_find_index_borrowed(&gallery.*.semantics,
+        component_state_gallery_tier_caption_id(gallery.*.id, 0));
+    let tier_last: i32 = semantics_find_index_borrowed(&gallery.*.semantics,
+        component_state_gallery_tier_id(gallery.*.id, 3));
+    let heading1: i32 = semantics_find_index_borrowed(&gallery.*.semantics,
+        component_state_gallery_heading_id(gallery.*.id, 1));
+    let surface_first: i32 = semantics_find_index_borrowed(
+        &gallery.*.semantics,
+        component_state_gallery_surface_caption_id(gallery.*.id, 0));
+    let surface_last: i32 = semantics_find_index_borrowed(
+        &gallery.*.semantics,
+        component_state_gallery_surface_id(gallery.*.id, 7));
+    let heading2: i32 = semantics_find_index_borrowed(&gallery.*.semantics,
+        component_state_gallery_heading_id(gallery.*.id, 2));
+    let button_first: i32 = semantics_find_index_borrowed(
+        &gallery.*.semantics,
+        component_state_gallery_button_caption_id(gallery.*.id, 0));
+    let button_last: i32 = semantics_find_index_borrowed(
+        &gallery.*.semantics,
+        component_state_gallery_button_id(gallery.*.id, 7));
+    let heading3: i32 = semantics_find_index_borrowed(&gallery.*.semantics,
+        component_state_gallery_heading_id(gallery.*.id, 3));
+    let navigation_first: i32 = semantics_find_index_borrowed(
+        &gallery.*.semantics,
+        component_state_gallery_navigation_caption_id(gallery.*.id, 0));
+    let navigation_last: i32 = semantics_find_index_borrowed(
+        &gallery.*.semantics,
+        component_state_gallery_navigation_id(gallery.*.id, 5));
+    let heading4: i32 = semantics_find_index_borrowed(&gallery.*.semantics,
+        component_state_gallery_heading_id(gallery.*.id, 4));
+    let segmented: i32 = semantics_find_index_borrowed(&gallery.*.semantics,
+        component_state_gallery_segmented_id(gallery.*.id));
+    expect(state, title >= 0 && title < heading0 &&
+        heading0 < tier_first && tier_first < tier_last &&
+        tier_last < heading1 && heading1 < surface_first &&
+        surface_first < surface_last && surface_last < heading2 &&
+        heading2 < button_first && button_first < button_last &&
+        button_last < heading3 && heading3 < navigation_first &&
+        navigation_first < navigation_last && navigation_last < heading4 &&
+        heading4 < segmented,
+        "semantic traversal interleaves each heading with its visual fixture section");
+}
+
+fn gallery_test_surface_contract(state:  *TestState,
+    gallery:  *ComponentStateGalleryArtifact) void {
+    let tier_truth: i32 = 1;
+    let index: i32 = 0;
+    while (index < 4) {
+        let surface: SurfaceArtifact = gallery.*.tier_surfaces.data[index];
+        let semantic_index: i32 = semantics_find_index_borrowed(
+            &gallery.*.semantics, surface.id);
+        if (surface.mode != SurfaceMode.group ||
+            surface.tier != component_state_gallery_tier(index) ||
+            surface.style.material_token != surface_material_token(surface.tier) ||
+            hit_tree_find_index_borrowed(&gallery.*.hits, surface.id) >= 0 ||
+            semantic_index < 0 ||
+            gallery.*.semantics.nodes.data[semantic_index].role !=
+                SemanticRole.group ||
+            gallery.*.semantics.nodes.data[semantic_index].action_mask != 0) {
+            tier_truth = 0;
+        }
+        index = index + 1;
+    }
+    expect(state, tier_truth != 0 &&
+        gallery.*.tier_surfaces.data[0].style.elevation_token ==
+            SemanticElevationToken.base &&
+        gallery.*.tier_surfaces.data[1].style.elevation_token ==
+            SemanticElevationToken.panel &&
+        gallery.*.tier_surfaces.data[2].style.elevation_token ==
+            SemanticElevationToken.raised &&
+        gallery.*.tier_surfaces.data[3].style.elevation_token ==
+            SemanticElevationToken.overlay,
+        "base panel raised and overlay are real read-only Surface tiers with no fake hits or actions");
+
+    let state_truth: i32 = 1;
+    index = 0;
+    while (index < 8) {
+        let surface: SurfaceArtifact = gallery.*.state_surfaces.data[index];
+        let hit_index: i32 = hit_tree_find_index_borrowed(
+            &gallery.*.hits, surface.id);
+        let semantic_index: i32 = semantics_find_index_borrowed(
+            &gallery.*.semantics, surface.id);
+        let expected_enabled: i32 = (index != 5 && index != 6) as i32;
+        if (surface.mode != SurfaceMode.actionable ||
+            surface.tier != SurfaceTier.panel ||
+            button_interaction_equal(surface.interaction,
+                surface_canonical_state(
+                    component_state_gallery_surface_state(index))) == 0 ||
+            surface.effectively_enabled != expected_enabled ||
+            hit_index < 0 || semantic_index < 0 ||
+            gallery.*.hits.nodes.data[hit_index].enabled != expected_enabled ||
+            gallery.*.hits.nodes.data[hit_index].focusable !=
+                expected_enabled ||
+            ((gallery.*.semantics.nodes.data[semantic_index].action_mask != 0)
+                as i32) != expected_enabled) {
+            state_truth = 0;
+        }
+        index = index + 1;
+    }
+    expect(state, state_truth != 0 &&
+        gallery.*.state_surfaces.data[1].hover_treatment_visible == 1 &&
+        gallery.*.state_surfaces.data[2].focus_ring_visible == 1 &&
+        gallery.*.state_surfaces.data[3].pressed_treatment_visible == 1 &&
+        gallery.*.state_surfaces.data[4].selected_marker_visible == 1 &&
+        gallery.*.state_surfaces.data[5].disabled_treatment_visible == 1 &&
+        gallery.*.state_surfaces.data[6].loading_treatment_visible == 1 &&
+        gallery.*.state_surfaces.data[7].error_treatment_visible == 1,
+        "the same actionable panel Surface exposes all eight canonical non-color state treatments");
+}
+
+fn gallery_test_control_state_contract(state:  *TestState,
+    gallery:  *ComponentStateGalleryArtifact) void {
+    let button_truth: i32 = 1;
+    let index: i32 = 0;
+    while (index < 8) {
+        let button: ButtonArtifact = gallery.*.buttons.data[index];
+        let hit_index: i32 = hit_tree_find_index_borrowed(
+            &gallery.*.hits, button.id);
+        let semantic_index: i32 = semantics_find_index_borrowed(
+            &gallery.*.semantics, button.id);
+        let expected_enabled: i32 = (index != 5 && index != 6) as i32;
+        if (button_interaction_equal(gallery.*.buttons.data[index].interaction,
+            button_canonical_state(
+                component_state_gallery_button_state(index))) == 0 ||
+            button.effectively_enabled != expected_enabled ||
+            hit_index < 0 || semantic_index < 0 ||
+            gallery.*.hits.nodes.data[hit_index].enabled != expected_enabled ||
+            gallery.*.hits.nodes.data[hit_index].focusable !=
+                expected_enabled ||
+            ((gallery.*.semantics.nodes.data[semantic_index].action_mask != 0)
+                as i32) != expected_enabled) {
+            button_truth = 0;
+        }
+        index = index + 1;
+    }
+    expect(state, button_truth != 0 &&
+        gallery.*.buttons.data[1].style.fill_token ==
+            SemanticColorToken.surface_selected &&
+        gallery.*.buttons.data[2].focus_ring_visible == 1 &&
+        gallery.*.buttons.data[3].style.elevation ==
+            SemanticElevationToken.base &&
+        gallery.*.buttons.data[4].interaction.selected == 1 &&
+        gallery.*.buttons.data[4].style.border_token ==
+            SemanticColorToken.accent &&
+        gallery.*.buttons.data[5].effectively_enabled == 0 &&
+        gallery.*.buttons.data[5].style.text_token ==
+            SemanticColorToken.text_disabled &&
+        gallery.*.buttons.data[6].content_visible == 0 &&
+        gallery.*.buttons.data[7].style.border_token ==
+            SemanticColorToken.status_error,
+        "one secondary Button exposes rest hover focus pressed selected disabled loading and error");
+    expect(state, gallery_test_owner_has_path(&gallery.*.display,
+            component_state_gallery_button_id(gallery.*.id, 0)) != 0 &&
+        gallery_test_owner_has_path(&gallery.*.display,
+            component_state_gallery_button_id(gallery.*.id, 6)) == 0 &&
+        gallery_test_owner_has_path(&gallery.*.display,
+            component_state_gallery_button_caption_id(
+                gallery.*.id, 6)) != 0,
+        "loading uses the real Button progress substitution while its visible state caption remains text");
+
+    let navigation_truth: i32 = 1;
+    index = 0;
+    while (index < 6) {
+        let navigation: NavigationItemArtifact =
+            gallery.*.navigation_items.data[index];
+        let hit_index: i32 = hit_tree_find_index_borrowed(
+            &gallery.*.hits, navigation.id);
+        let semantic_index: i32 = semantics_find_index_borrowed(
+            &gallery.*.semantics, navigation.id);
+        let expected_enabled: i32 = (index != 5) as i32;
+        if (button_interaction_equal(
+            gallery.*.navigation_items.data[index].interaction,
+            navigation_item_canonical_state(
+                component_state_gallery_navigation_state(index))) == 0 ||
+            navigation.effectively_enabled != expected_enabled ||
+            hit_index < 0 || semantic_index < 0 ||
+            gallery.*.hits.nodes.data[hit_index].enabled != expected_enabled ||
+            gallery.*.hits.nodes.data[hit_index].focusable !=
+                expected_enabled ||
+            ((gallery.*.semantics.nodes.data[semantic_index].action_mask != 0)
+                as i32) != expected_enabled) {
+            navigation_truth = 0;
+        }
+        index = index + 1;
+    }
+    expect(state, navigation_truth != 0 &&
+        gallery.*.navigation_items.data[1].style.fill_token ==
+            SemanticColorToken.surface_interactive &&
+        gallery.*.navigation_items.data[2].focus_ring_visible == 1 &&
+        gallery.*.navigation_items.data[3].style.fill_token ==
+            SemanticColorToken.accent_emphasis &&
+        gallery.*.navigation_items.data[4].selected_marker_visible == 1 &&
+        gallery.*.navigation_items.data[4].style.elevation ==
+            SemanticElevationToken.panel &&
+        gallery.*.navigation_items.data[5].label_color_token ==
+            SemanticColorToken.text_disabled,
+        "one NavigationItem exposes the required six canonical tab states");
+}
+
+fn gallery_test_focus_and_segment_contract(
+    state:  *TestState,
+    gallery:  *ComponentStateGalleryArtifact) void {
+    let surface_focus: i32 = semantics_find_index_borrowed(
+        &gallery.*.semantics,
+        component_state_gallery_surface_id(gallery.*.id, 2));
+    let button_focus: i32 = semantics_find_index_borrowed(
+        &gallery.*.semantics,
+        component_state_gallery_button_id(gallery.*.id, 2));
+    let navigation_focus: i32 = semantics_find_index_borrowed(
+        &gallery.*.semantics,
+        component_state_gallery_navigation_id(gallery.*.id, 2));
+    let live_focus: i32 = semantics_find_index_borrowed(
+        &gallery.*.semantics, gallery.*.live_focus_id);
+    expect(state, surface_focus >= 0 && button_focus >= 0 &&
+        navigation_focus >= 0 && live_focus >= 0 &&
+        gallery.*.semantics.nodes.data[surface_focus].focused == 0 &&
+        gallery.*.semantics.nodes.data[button_focus].focused == 0 &&
+        gallery.*.semantics.nodes.data[navigation_focus].focused == 0 &&
+        semantic_text_equal(
+            gallery.*.semantics.nodes.data[button_focus].value,
+            "Focus fixture") != 0 &&
+        gallery.*.semantics.nodes.data[live_focus].focused == 1 &&
+        component_state_gallery_focused_semantics_count(
+            &gallery.*.semantics) == 1,
+        "focus snapshots stay visibly labelled while one segmented option owns truthful live focus");
+
+    let model: SegmentedControlModel = gallery.*.runtime_state.segmented;
+    let segment_spec: SegmentedControlSpec = segmented_control_spec(
+        component_state_gallery_segmented_id(gallery.*.id),
+        semantic_root_key(), gallery.*.layout.segmented_bounds,
+        "Component state behavior", model);
+    segment_spec.density = gallery.*.density;
+    let next: SegmentedControlTransition = segmented_control_reduce(model,
+        segmented_control_event(SegmentedControlEventKind.key_next,
+            segmented_control_no_index()));
+    expect(state, gallery.*.segmented.selected_index == 0 &&
+        gallery.*.segmented.roving_index == 1 &&
+        gallery.*.segmented.has_focus == 1 &&
+        gallery.*.segmented.focus_visible == 1 &&
+        segmented_control_index_enabled(model, 2) == 0 &&
+        next.rejected == 0 && next.activated == 1 &&
+        next.model.selected_index == 3 && next.model.roving_index == 3,
+        "the live SegmentedControl shows selection focus-visible and disabled state and skips disabled input");
+    let option_truth: i32 = 1;
+    let option_index: i32 = 0;
+    while (option_index < component_state_gallery_segment_count()) {
+        let option_id: NodeKey = component_state_gallery_segment_id(
+            gallery.*.id, option_index);
+        let option_bounds: Rect = segmented_control_segment_bounds(
+            segment_spec, option_index);
+        let hit_index: i32 = hit_tree_find_index_borrowed(
+            &gallery.*.hits, option_id);
+        let semantic_index: i32 = semantics_find_index_borrowed(
+            &gallery.*.semantics, option_id);
+        let expected_enabled: i32 = (option_index != 2) as i32;
+        if (hit_index < 0 || semantic_index < 0 ||
+            gallery_test_rect_equal(
+                gallery.*.hits.nodes.data[hit_index].bounds,
+                option_bounds) == 0 ||
+            gallery_test_rect_equal(
+                gallery.*.semantics.nodes.data[semantic_index].bounds,
+                option_bounds) == 0 ||
+            gallery.*.hits.nodes.data[hit_index].enabled != expected_enabled ||
+            gallery.*.hits.nodes.data[hit_index].focusable !=
+                expected_enabled ||
+            ((gallery.*.semantics.nodes.data[semantic_index].action_mask != 0)
+                as i32) != expected_enabled ||
+            gallery_test_owner_has_operation(
+                &gallery.*.display, option_id) == 0) {
+            option_truth = 0;
+        }
+        option_index = option_index + 1;
+    }
+    let group_hit: i32 = hit_tree_find_index_borrowed(&gallery.*.hits,
+        component_state_gallery_segmented_id(gallery.*.id));
+    let group_semantic: i32 = semantics_find_index_borrowed(
+        &gallery.*.semantics,
+        component_state_gallery_segmented_id(gallery.*.id));
+    expect(state, option_truth != 0 && group_hit >= 0 &&
+        group_semantic >= 0 && gallery_test_rect_equal(
+            gallery.*.hits.nodes.data[group_hit].bounds,
+            gallery.*.layout.segmented_bounds) != 0 &&
+        gallery_test_rect_equal(
+            gallery.*.semantics.nodes.data[group_semantic].bounds,
+            gallery.*.layout.segmented_bounds) != 0 &&
+        gallery_test_owner_has_operation(&gallery.*.display,
+            component_state_gallery_segmented_id(gallery.*.id)) != 0,
+        "segmented group and option IDs share exact display hit and semantic geometry");
+    let disabled_bounds: Rect = segmented_control_segment_bounds(
+        segment_spec, 2);
+    let disabled_hit: HitResult = hit_test(gallery.*.hits,
+        disabled_bounds.x + disabled_bounds.width / 2,
+        disabled_bounds.y + disabled_bounds.height / 2);
+    expect(state, disabled_hit.found == 0,
+        "disabled segmented geometry stays discoverable semantically but never enters pointer routing");
+}
+
+fn gallery_test_talkback_contract(state:  *TestState,
+    gallery:  *ComponentStateGalleryArtifact) void {
+    let session: TalkbackSession = talkback_session_make(
+        talkback_capabilities());
+    let query_truth: i32 = 1;
+    let semantic_index: i32 = 0;
+    while (semantic_index < gallery.*.semantics.nodes.len) {
+        let semantic_id: NodeKey =
+            gallery.*.semantics.nodes.data[semantic_index].id;
+        let response: TalkbackResponse = talkback_dispatch(&session,
+            gallery.*.semantics, gallery.*.bounds,
+            talkback_request(1000 + semantic_index as i64,
+                TalkbackCommand.query, semantic_id,
+                gallery.*.semantics.revision));
+        if (response.status != TalkbackStatus.accepted ||
+            response.target_kind != TalkbackTargetKind.semantic_id ||
+            node_key_equal(response.target_id, semantic_id) == 0 ||
+            response.resolved_node_index != semantic_index) {
+            query_truth = 0;
+        }
+        semantic_index = semantic_index + 1;
+    }
+    expect(state, query_truth != 0,
+        "every published semantic node is queryable by its exact Talkback ID without pixels");
+    let rest_surface: TalkbackResponse = talkback_dispatch(&session,
+        gallery.*.semantics, gallery.*.bounds,
+        talkback_request(1, TalkbackCommand.click,
+            component_state_gallery_surface_id(gallery.*.id, 0),
+            gallery.*.semantics.revision));
+    let disabled_surface: TalkbackResponse = talkback_dispatch(&session,
+        gallery.*.semantics, gallery.*.bounds,
+        talkback_request(2, TalkbackCommand.click,
+            component_state_gallery_surface_id(gallery.*.id, 5),
+            gallery.*.semantics.revision));
+    let tier_click: TalkbackResponse = talkback_dispatch(&session,
+        gallery.*.semantics, gallery.*.bounds,
+        talkback_request(3, TalkbackCommand.click,
+            component_state_gallery_tier_id(gallery.*.id, 2),
+            gallery.*.semantics.revision));
+    let selected_navigation: TalkbackResponse = talkback_dispatch(&session,
+        gallery.*.semantics, gallery.*.bounds,
+        talkback_request(4, TalkbackCommand.query,
+            component_state_gallery_navigation_id(gallery.*.id, 4),
+            gallery.*.semantics.revision));
+    let focused_segment: TalkbackResponse = talkback_dispatch(&session,
+        gallery.*.semantics, gallery.*.bounds,
+        talkback_request(5, TalkbackCommand.query,
+            component_state_gallery_segment_id(gallery.*.id, 1),
+            gallery.*.semantics.revision));
+    let disabled_segment: TalkbackResponse = talkback_dispatch(&session,
+        gallery.*.semantics, gallery.*.bounds,
+        talkback_request(6, TalkbackCommand.click,
+            component_state_gallery_segment_id(gallery.*.id, 2),
+            gallery.*.semantics.revision));
+    let rest_button: TalkbackResponse = talkback_dispatch(&session,
+        gallery.*.semantics, gallery.*.bounds,
+        talkback_request(7, TalkbackCommand.click,
+            component_state_gallery_button_id(gallery.*.id, 0),
+            gallery.*.semantics.revision));
+    let disabled_button: TalkbackResponse = talkback_dispatch(&session,
+        gallery.*.semantics, gallery.*.bounds,
+        talkback_request(8, TalkbackCommand.click,
+            component_state_gallery_button_id(gallery.*.id, 5),
+            gallery.*.semantics.revision));
+    let loading_button: TalkbackResponse = talkback_dispatch(&session,
+        gallery.*.semantics, gallery.*.bounds,
+        talkback_request(9, TalkbackCommand.click,
+            component_state_gallery_button_id(gallery.*.id, 6),
+            gallery.*.semantics.revision));
+    let disabled_navigation: TalkbackResponse = talkback_dispatch(&session,
+        gallery.*.semantics, gallery.*.bounds,
+        talkback_request(10, TalkbackCommand.click,
+            component_state_gallery_navigation_id(gallery.*.id, 5),
+            gallery.*.semantics.revision));
+    expect(state, rest_surface.status == TalkbackStatus.accepted &&
+        rest_surface.emitted_action == 1 &&
+        disabled_surface.status == TalkbackStatus.action_unavailable &&
+        tier_click.status == TalkbackStatus.action_unavailable &&
+        rest_button.status == TalkbackStatus.accepted &&
+        rest_button.emitted_action == 1 &&
+        disabled_button.status == TalkbackStatus.action_unavailable &&
+        loading_button.status == TalkbackStatus.action_unavailable &&
+        disabled_navigation.status == TalkbackStatus.action_unavailable,
+        "Talkback emits explicit action requests while disabled loading and read-only fixtures fail closed");
+    expect(state, selected_navigation.status == TalkbackStatus.accepted &&
+        (selected_navigation.state_flags &
+            talkback_state_selected_bit()) != 0 &&
+        focused_segment.status == TalkbackStatus.accepted &&
+        (focused_segment.state_flags & talkback_state_focused_bit()) != 0 &&
+        disabled_segment.status == TalkbackStatus.action_unavailable,
+        "Talkback exposes selected focused and disabled state by stable IDs without pixels");
+    talkback_session_free(&session);
+}
+
+fn gallery_test_runtime_contract(state:  *TestState,
+    face:  *OpenTypeFace) void {
+    let spec: ComponentStateGallerySpec = gallery_test_spec();
+    let initial: ComponentStateGalleryRuntimeState =
+        component_state_gallery_runtime_state_default();
+    let resting: ComponentStateGalleryArtifact =
+        component_state_gallery_build_with_state(spec, face, initial);
+    let surface_snapshot: i32 = semantics_find_index_borrowed(
+        &resting.semantics,
+        component_state_gallery_surface_id(spec.id, 2));
+    let button_snapshot: i32 = semantics_find_index_borrowed(
+        &resting.semantics,
+        component_state_gallery_button_id(spec.id, 2));
+    let navigation_snapshot: i32 = semantics_find_index_borrowed(
+        &resting.semantics,
+        component_state_gallery_navigation_id(spec.id, 2));
+    expect(state, component_state_gallery_runtime_state_valid(
+            spec.id, initial) != 0 &&
+        component_state_gallery_valid(&resting) != 0 &&
+        resting.frozen_conformance == 0 &&
+        resting.display.ops.len == 407 &&
+        resting.segmented.has_focus == 0 &&
+        resting.segmented.focus_visible == 0 &&
+        node_key_equal(resting.live_focus_id,
+            semantic_none_key()) != 0 &&
+        component_state_gallery_focused_semantics_count(
+            &resting.semantics) == 0,
+        "the native-default gallery starts with no fabricated focus and keeps the exact retained fixture shape");
+    expect(state, surface_snapshot >= 0 && button_snapshot >= 0 &&
+        navigation_snapshot >= 0 &&
+        resting.semantics.nodes.data[surface_snapshot].focused == 0 &&
+        resting.semantics.nodes.data[button_snapshot].focused == 0 &&
+        resting.semantics.nodes.data[navigation_snapshot].focused == 0 &&
+        resting.state_surfaces.data[2].focus_ring_visible == 1 &&
+        resting.buttons.data[2].focus_ring_visible == 1 &&
+        resting.navigation_items.data[2].focus_ring_visible == 1,
+        "visual focus specimens retain rings while their semantic focus stays false");
+
+    let button_id: NodeKey = component_state_gallery_button_id(spec.id, 0);
+    let focused_transition: ComponentStateGalleryTransition =
+        component_state_gallery_reduce(initial, spec.id,
+            component_state_gallery_event(
+                ComponentStateGalleryEventKind.focus_gained_keyboard,
+                button_id));
+    let focused: ComponentStateGalleryArtifact =
+        component_state_gallery_build_with_state(
+            spec, face, focused_transition.state);
+    let focused_index: i32 = semantics_find_index_borrowed(
+        &focused.semantics, button_id);
+    expect(state, focused_transition.rejected == 0 &&
+        focused_transition.state_changed == 1 &&
+        focused_transition.focus_changed == 1 &&
+        focused_transition.activation_changed == 0 &&
+        focused_transition.state.revision == 1 &&
+        component_state_gallery_valid(&focused) != 0 &&
+        focused_index >= 0 &&
+        focused.semantics.nodes.data[focused_index].focused == 1 &&
+        focused.buttons.data[0].focus_ring_visible == 1 &&
+        node_key_equal(focused.live_focus_id, button_id) != 0 &&
+        component_state_gallery_focused_semantics_count(
+            &focused.semantics) == 1,
+        "one real enabled runtime target owns the only semantic focus and keyboard-visible ring");
+
+    let activated_button: ComponentStateGalleryTransition =
+        component_state_gallery_reduce(focused_transition.state, spec.id,
+            component_state_gallery_event(
+                ComponentStateGalleryEventKind.activate_target,
+                button_id));
+    let surface_id: NodeKey = component_state_gallery_surface_id(spec.id, 0);
+    let activated_surface: ComponentStateGalleryTransition =
+        component_state_gallery_reduce(activated_button.state, spec.id,
+            component_state_gallery_event(
+                ComponentStateGalleryEventKind.activate_target,
+                surface_id));
+    let navigation_id: NodeKey = component_state_gallery_navigation_id(
+        spec.id, 0);
+    let activated_navigation: ComponentStateGalleryTransition =
+        component_state_gallery_reduce(activated_surface.state, spec.id,
+            component_state_gallery_event(
+                ComponentStateGalleryEventKind.activate_target,
+                navigation_id));
+    let outcome: ComponentStateGalleryArtifact =
+        component_state_gallery_build_with_state(
+            spec, face, activated_navigation.state);
+    expect(state, activated_button.activation_changed == 1 &&
+        activated_surface.activation_changed == 1 &&
+        activated_navigation.activation_changed == 1 &&
+        activated_navigation.state.activation_count == 3 &&
+        activated_navigation.state.revision == 4 &&
+        node_key_equal(activated_navigation.state.last_activated,
+            navigation_id) != 0 &&
+        component_state_gallery_valid(&outcome) != 0 &&
+        outcome.runtime_hash == component_state_gallery_runtime_state_hash(
+            activated_navigation.state) &&
+        outcome.evidence_hash != focused.evidence_hash,
+        "enabled Button Surface and NavigationItem actions increment an inspectable outcome and revision");
+
+    let rejected_disabled: ComponentStateGalleryTransition =
+        component_state_gallery_reduce(activated_navigation.state, spec.id,
+            component_state_gallery_event(
+                ComponentStateGalleryEventKind.activate_target,
+                component_state_gallery_button_id(spec.id, 5)));
+    let rejected_loading: ComponentStateGalleryTransition =
+        component_state_gallery_reduce(activated_navigation.state, spec.id,
+            component_state_gallery_event(
+                ComponentStateGalleryEventKind.activate_target,
+                component_state_gallery_button_id(spec.id, 6)));
+    let rejected_read_only: ComponentStateGalleryTransition =
+        component_state_gallery_reduce(activated_navigation.state, spec.id,
+            component_state_gallery_event(
+                ComponentStateGalleryEventKind.activate_target,
+                component_state_gallery_tier_id(spec.id, 0)));
+    expect(state, rejected_disabled.rejected == 1 &&
+        rejected_loading.rejected == 1 &&
+        rejected_read_only.rejected == 1 &&
+        rejected_disabled.state_changed == 0 &&
+        rejected_disabled.activation_changed == 0 &&
+        rejected_disabled.state.activation_count == 3 &&
+        rejected_disabled.state.revision == 4 &&
+        component_state_gallery_runtime_state_hash(
+            rejected_disabled.state) ==
+            component_state_gallery_runtime_state_hash(
+                activated_navigation.state),
+        "disabled loading and read-only fixtures reject activation without fabricating an outcome");
+
+    let segment_one: NodeKey = component_state_gallery_segment_id(
+        spec.id, 1);
+    let segment_focus: ComponentStateGalleryTransition =
+        component_state_gallery_reduce(initial, spec.id,
+            component_state_gallery_event(
+                ComponentStateGalleryEventKind.focus_gained_keyboard,
+                segment_one));
+    let segment_next: ComponentStateGalleryTransition =
+        component_state_gallery_reduce(segment_focus.state, spec.id,
+            component_state_gallery_segmented_event(
+                SegmentedControlEventKind.key_next,
+                segmented_control_no_index()));
+    let segment_three: NodeKey = component_state_gallery_segment_id(
+        spec.id, 3);
+    let segmented: ComponentStateGalleryArtifact =
+        component_state_gallery_build_with_state(
+            spec, face, segment_next.state);
+    let segment_three_index: i32 = semantics_find_index_borrowed(
+        &segmented.semantics, segment_three);
+    let disabled_segment: ComponentStateGalleryTransition =
+        component_state_gallery_reduce(segment_next.state, spec.id,
+            component_state_gallery_event(
+                ComponentStateGalleryEventKind.activate_target,
+                component_state_gallery_segment_id(spec.id, 2)));
+    expect(state, segment_focus.rejected == 0 &&
+        segment_next.rejected == 0 && segment_next.state_changed == 1 &&
+        segment_next.focus_changed == 1 &&
+        segment_next.selection_changed == 1 &&
+        segment_next.activation_changed == 1 &&
+        segment_next.state.segmented.selected_index == 3 &&
+        segment_next.state.segmented.roving_index == 3 &&
+        segment_next.state.activation_count == 1 &&
+        node_key_equal(segment_next.state.focused,
+            segment_three) != 0 &&
+        node_key_equal(segment_next.state.last_activated,
+            segment_three) != 0 &&
+        component_state_gallery_valid(&segmented) != 0 &&
+        segment_three_index >= 0 &&
+        segmented.semantics.nodes.data[segment_three_index].focused == 1 &&
+        segmented.semantics.nodes.data[segment_three_index].selected == 1 &&
+        disabled_segment.rejected == 1 &&
+        disabled_segment.activation_changed == 0,
+        "SegmentedControl keyboard reduction skips the disabled option and records the selected activation");
+
+    let invalid: ComponentStateGalleryRuntimeState = initial;
+    invalid.focus_visible = 1;
+    let invalid_gallery: ComponentStateGalleryArtifact =
+        component_state_gallery_build_with_state(spec, face, invalid);
+    expect(state, component_state_gallery_runtime_state_valid(
+            spec.id, invalid) == 0 &&
+        invalid_gallery.error ==
+            ComponentStateGalleryError.invalid_runtime_state &&
+        invalid_gallery.display.ops.len == 0 &&
+        invalid_gallery.hits.nodes.len == 0 &&
+        invalid_gallery.semantics.nodes.len == 0,
+        "invalid runtime focus truth fails closed before retained publication");
+
+    component_state_gallery_free(&invalid_gallery);
+    component_state_gallery_free(&segmented);
+    component_state_gallery_free(&outcome);
+    component_state_gallery_free(&focused);
+    component_state_gallery_free(&resting);
+}
+
+fn gallery_test_adaptive_contract(state:  *TestState,
+    face:  *OpenTypeFace,
+    baseline:  *ComponentStateGalleryArtifact) void {
+    let rtl_spec: ComponentStateGallerySpec = gallery_test_spec();
+    rtl_spec.density = FlexDensity.touch;
+    rtl_spec.direction = LayoutDirection.rtl;
+    let rtl: ComponentStateGalleryArtifact =
+        component_state_gallery_build_frozen_conformance(rtl_spec, face);
+    expect(state, component_state_gallery_valid(&rtl) != 0 &&
+        rtl.layout.required_height == 1265 * unit_scale() &&
+        rtl.layout.tier_placements.data[0].cell_bounds.x >
+            rtl.layout.tier_placements.data[3].cell_bounds.x &&
+        baseline.*.layout.tier_placements.data[0].cell_bounds.x <
+            baseline.*.layout.tier_placements.data[3].cell_bounds.x &&
+        node_key_equal(rtl.buttons.data[4].id,
+            baseline.*.buttons.data[4].id) != 0,
+        "touch density and RTL mirror gallery Flex rows without replacing stable IDs");
+    component_state_gallery_free(&rtl);
+}
+
+fn gallery_test_determinism_contract(state:  *TestState,
+    face:  *OpenTypeFace,
+    first:  *ComponentStateGalleryArtifact) void {
+    let second: ComponentStateGalleryArtifact =
+        component_state_gallery_build_frozen_conformance(
+            gallery_test_spec(), face);
+    let first_raster: CpuRasterResult = cpu_rasterize(first.*.display,
+        1440, 1280);
+    let second_raster: CpuRasterResult = cpu_rasterize(second.display,
+        1440, 1280);
+    let first_hash: i64 = 0;
+    let second_hash: i64 = 0;
+    if (first_raster.error == CpuRasterError.none) {
+        first_hash = cpu_surface_hash(first_raster.surface);
+    }
+    if (second_raster.error == CpuRasterError.none) {
+        second_hash = cpu_surface_hash(second_raster.surface);
+    }
+    expect(state, component_state_gallery_valid(&second) != 0 &&
+        first.*.evidence_hash == second.evidence_hash &&
+        first.*.display_hash == second.display_hash &&
+        first.*.hit_hash == second.hit_hash &&
+        first.*.talkback_hash == second.talkback_hash,
+        "identical Flex state token and font inputs reproduce all retained evidence");
+    expect(state, first_raster.error == CpuRasterError.none &&
+        second_raster.error == CpuRasterError.none && first_hash != 0 &&
+        first_hash == second_hash && first_raster.pixels_touched > 0,
+        "the deterministic CPU oracle produces identical nonempty component pixels");
+    _zag_print("Component state gallery evidence hash: ");
+    _zag_print_i64(first.*.evidence_hash); _zag_println("");
+    _zag_print("Component state gallery CPU hash: ");
+    _zag_print_i64(first_hash); _zag_println("");
+    cpu_raster_free(&second_raster);
+    cpu_raster_free(&first_raster);
+    component_state_gallery_free(&second);
+}
+
+fn gallery_test_atomic_merge_contract(state:  *TestState) void {
+    let spec: ComponentStateGallerySpec = gallery_test_spec();
+    let destination: ComponentStateGalleryArtifact =
+        component_state_gallery_empty(spec);
+    _ = component_state_gallery_root_semantics(&destination, spec);
+    let collision_id: NodeKey = component_state_gallery_button_id(spec.id, 0);
+    let existing_hit: HitNode = hit_node(collision_id, hit_root_key(),
+        rect(0, 0, 100 * unit_scale(), 48 * unit_scale()));
+    _ = hit_tree_add(&destination.hits, existing_hit);
+    let existing_semantic: SemanticsSpec = semantics_spec(collision_id,
+        spec.id, SemanticRole.button, "Existing collision");
+    existing_semantic.has_bounds = 1;
+    existing_semantic.bounds = existing_hit.bounds;
+    _ = semantics_add(&destination.semantics, existing_semantic);
+
+    let scratch_display: DisplayList = display_list_make();
+    let scratch_hits: HitTree = hit_tree_make();
+    let scratch_semantics: SemanticsTree = semantics_tree_make();
+    let button: ButtonSpec = button_spec(collision_id, semantic_root_key(),
+        existing_hit.bounds, "Run build");
+    let built: ButtonBuildResult = button_emit(button, &scratch_display,
+        &scratch_hits, &scratch_semantics);
+    let ops_before: i32 = destination.display.ops.len;
+    let display_hash: i64 = destination.display.content_hash;
+    let hits_before: i32 = destination.hits.nodes.len;
+    let hit_revision: i64 = destination.hits.revision;
+    let semantics_before: i32 = destination.semantics.nodes.len;
+    let semantic_revision: i64 = destination.semantics.revision;
+    let merged: ComponentStateGalleryMergeResult =
+        component_state_gallery_merge_scratch(&destination,
+            &scratch_display, &scratch_hits, &scratch_semantics,
+            1, spec.id, semantic_none_key(), "Rest fixture", 1, 1);
+    expect(state, built.error == ButtonBuildError.none &&
+        merged.error == ComponentStateGalleryMergeError.hit_error &&
+        merged.hit_error == HitTreeError.duplicate_id &&
+        destination.display.ops.len == ops_before &&
+        destination.display.content_hash == display_hash &&
+        destination.hits.nodes.len == hits_before &&
+        destination.hits.revision == hit_revision &&
+        destination.semantics.nodes.len == semantics_before &&
+        destination.semantics.revision == semantic_revision,
+        "scratch hosting rolls display hit and semantics back atomically on stable-ID collision");
+
+    let late: ComponentStateGalleryArtifact =
+        component_state_gallery_empty(spec);
+    _ = component_state_gallery_root_semantics(&late, spec);
+    let late_existing: SemanticsSpec = semantics_spec(collision_id,
+        spec.id, SemanticRole.button, "Late semantic collision");
+    late_existing.has_bounds = 1;
+    late_existing.bounds = existing_hit.bounds;
+    _ = semantics_add(&late.semantics, late_existing);
+    let late_ops: i32 = late.display.ops.len;
+    let late_display_hash: i64 = late.display.content_hash;
+    let late_hits: i32 = late.hits.nodes.len;
+    let late_hit_revision: i64 = late.hits.revision;
+    let late_semantics: i32 = late.semantics.nodes.len;
+    let late_semantic_revision: i64 = late.semantics.revision;
+    let late_merged: ComponentStateGalleryMergeResult =
+        component_state_gallery_merge_scratch(&late,
+            &scratch_display, &scratch_hits, &scratch_semantics,
+            1, spec.id, semantic_none_key(), "Rest fixture", 1, 1);
+    expect(state,
+        late_merged.error == ComponentStateGalleryMergeError.semantics_error &&
+        late_merged.semantics_error == SemanticsError.duplicate_id &&
+        late.display.ops.len == late_ops &&
+        late.display.content_hash == late_display_hash &&
+        late.hits.nodes.len == late_hits &&
+        late.hits.revision == late_hit_revision &&
+        late.semantics.nodes.len == late_semantics &&
+        late.semantics.revision == late_semantic_revision,
+        "late semantic collision rolls earlier display and hit contributions back atomically");
+    component_state_gallery_free(&late);
+    semantics_tree_free(&scratch_semantics);
+    hit_tree_free(&scratch_hits);
+    display_list_free(&scratch_display);
+    component_state_gallery_free(&destination);
+}
+
+fn gallery_test_segmented_text_atomic_contract(
+    state:  *TestState,
+    face:  *OpenTypeFace) void {
+    let spec: ComponentStateGallerySpec = gallery_test_spec();
+    let destination: ComponentStateGalleryArtifact =
+        component_state_gallery_empty(spec);
+    display_list_free(&destination.display);
+    destination.display = display_list_make_with_resource_limits(
+        2, 268435456, 33554432);
+    destination.layout.segmented_bounds = rect(360 * unit_scale(),
+        40 * unit_scale(), 720 * unit_scale(), 50 * unit_scale());
+    _ = component_state_gallery_root_semantics(&destination, spec);
+    let display_hash: i64 = destination.display.content_hash;
+    let hit_revision: i64 = destination.hits.revision;
+    let semantic_revision: i64 = destination.semantics.revision;
+    let emitted: i32 = component_state_gallery_emit_segmented(
+        &destination, face);
+    expect(state, emitted == 0 &&
+        destination.error ==
+            ComponentStateGalleryError.text_contribution_error &&
+        destination.display.ops.len == 0 &&
+        destination.display.resources.resources.len == 0 &&
+        destination.display.content_hash == display_hash &&
+        destination.hits.nodes.len == 0 &&
+        destination.hits.revision == hit_revision &&
+        destination.semantics.nodes.len == 1 &&
+        destination.semantics.revision == semantic_revision &&
+        destination.text_artifact_count == 0 &&
+        destination.text_semantic_count == 0 &&
+        node_key_equal(destination.live_focus_id,
+            semantic_none_key()) != 0,
+        "segmented label resource failure rolls component chrome prior labels hits and semantics back");
+    component_state_gallery_free(&destination);
+}
+
+fn gallery_test_failure_contract(state:  *TestState,
+    face:  *OpenTypeFace) void {
+    let invalid_face: OpenTypeFace = opentype_face_empty();
+    let missing: ComponentStateGalleryArtifact = component_state_gallery_build(
+        gallery_test_spec(), &invalid_face);
+    expect(state, missing.error == ComponentStateGalleryError.missing_font &&
+        missing.display.ops.len == 0 && missing.hits.nodes.len == 0 &&
+        missing.semantics.nodes.len == 0 && missing.evidence_hash == 0,
+        "a missing font fails before layout publication or partial retained output");
+
+    let narrow_spec: ComponentStateGallerySpec = gallery_test_spec();
+    narrow_spec.bounds.width =
+        component_state_gallery_minimum_width(narrow_spec.density) - 1;
+    let narrow: ComponentStateGalleryArtifact =
+        component_state_gallery_build(narrow_spec, face);
+    let short_spec: ComponentStateGallerySpec = gallery_test_spec();
+    short_spec.bounds.height =
+        component_state_gallery_required_height(short_spec.density) - 1;
+    let short: ComponentStateGalleryArtifact =
+        component_state_gallery_build(short_spec, face);
+    expect(state, narrow.error == ComponentStateGalleryError.layout_overflow &&
+        short.error == ComponentStateGalleryError.layout_overflow &&
+        narrow.display.ops.len == 0 && short.display.ops.len == 0 &&
+        narrow.semantics.nodes.len == 0 && short.semantics.nodes.len == 0,
+        "one-unit width and height deficits fail closed before any component emission");
+
+    let invalid_spec: ComponentStateGallerySpec = gallery_test_spec();
+    invalid_spec.id = node_key(0);
+    let invalid: ComponentStateGalleryArtifact =
+        component_state_gallery_build(invalid_spec, face);
+    expect(state, invalid.error == ComponentStateGalleryError.invalid_spec &&
+        invalid.display.ops.len == 0 && invalid.semantics.nodes.len == 0,
+        "invalid root identity fails before font layout or retained mutation");
+
+    component_state_gallery_free(&invalid);
+    component_state_gallery_free(&short);
+    component_state_gallery_free(&narrow);
+    component_state_gallery_free(&missing);
+    opentype_face_free(&invalid_face);
+}
+
+fn main() i32 {
+    if (_zag_argc() != 2) {
+        _zag_eprintln("usage: component_state_gallery_contract <font.ttf>");
+        return 2;
+    }
+    let state: TestState = TestState{ .passed = 0, .failed = 0 };
+    let face: OpenTypeFace = gallery_test_face(_zag_arg(1));
+    expect(&state, face.error == OpenTypeError.none,
+        "fixture font parses through the Zag-owned OpenType reader");
+    if (face.error != OpenTypeError.none) {
+        opentype_face_free(&face);
+        return gallery_test_finish(&state);
+    }
+    let gallery: ComponentStateGalleryArtifact =
+        component_state_gallery_build_frozen_conformance(
+            gallery_test_spec(), &face);
+    expect(&state, component_state_gallery_valid(&gallery) != 0,
+        "the complete gallery builds before fixed fixture slots are inspected");
+    if (component_state_gallery_valid(&gallery) == 0) {
+        component_state_gallery_free(&gallery);
+        opentype_face_free(&face);
+        return gallery_test_finish(&state);
+    }
+    gallery_test_structure_contract(&state, &gallery);
+    gallery_test_geometry_contract(&state, &gallery);
+    gallery_test_semantic_reading_order(&state, &gallery);
+    gallery_test_surface_contract(&state, &gallery);
+    gallery_test_control_state_contract(&state, &gallery);
+    gallery_test_focus_and_segment_contract(&state, &gallery);
+    gallery_test_talkback_contract(&state, &gallery);
+    gallery_test_runtime_contract(&state, &face);
+    gallery_test_adaptive_contract(&state, &face, &gallery);
+    gallery_test_determinism_contract(&state, &face, &gallery);
+    gallery_test_atomic_merge_contract(&state);
+    gallery_test_segmented_text_atomic_contract(&state, &face);
+    gallery_test_failure_contract(&state, &face);
+    component_state_gallery_free(&gallery);
+    opentype_face_free(&face);
+    return gallery_test_finish(&state);
+}

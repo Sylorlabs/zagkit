@@ -23,6 +23,36 @@ Run the bounded native conformance capture with:
 ./tools/test-linux-preview.sh
 ```
 
+The reference client area is 1360 by 900 logical pixels so the expanded
+placement can host the chart, labelled status evidence, and the measured
+Typography specimen without clipping. The shell requires three distinct
+Zag-owned OpenType faces: `ZAGKIT_FONT_LIGHT_FILE`, `ZAGKIT_FONT_FILE`, and
+`ZAGKIT_FONT_BOLD_FILE`. The launcher resolves Fira Sans weights with
+Fontconfig when they are unset, validates that the files exist and differ, and
+otherwise stops before opening a window.
+
+The deeper native interaction gate is:
+
+```sh
+./tools/test-linux-interaction.sh --evidence-dir <directory>
+```
+
+It associates one exact-title window with the launched PID, resolves controls
+from stable Talkback IDs to recorded scale-aware pixel fallbacks, verifies
+disabled navigation, token-inspector state, segmented pointer and keyboard
+state, the real Typography route, unsupported-size and compact resize states,
+idle CPU work, native close, and cleanup. Screenshots from this runner remain
+review evidence, not a substitute for the semantic and lifecycle assertions.
+
+Primary navigation and the token-inspector Button consume one retained
+`LinuxPreviewInteractionState`. X11 pointer motion/down/up drives real hover
+and pressed styles; pointer focus is semantic without a keyboard ring. Tab and
+Shift-Tab traverse the semantic `focus_order` values, including the segmented
+control's single roving stop, while Enter and Space activate the focused
+destination. Resize clears a focus owner that becomes unavailable rather than
+leaving invisible focus behind. Rendering, semantics, hit testing, trace
+output, and Zagkit Talkback therefore observe one NodeKey-based state truth.
+
 `PlatformCapabilities` records `.auto` selection. When a Wayland endpoint is
 visible but the Wayland shell is unavailable, choosing X11 records a fallback
 event and reason. X11 window and CPU presentation report `experimental`; GPU,

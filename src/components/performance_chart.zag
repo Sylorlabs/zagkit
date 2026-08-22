@@ -207,6 +207,29 @@ fn performance_chart_series(id: NodeKey, name: []u8,
     };
 }
 
+// Series roles map to the three chart_series color tokens so that callers
+// express intent rather than raw color indices.
+//   reference  → chart_series_primary   (blue)   — the baseline metric
+//   comparison → chart_series_secondary (purple)  — compared against reference
+//   diagnostic → chart_series_tertiary  (orange)  — supplementary diagnostic
+// In the Linux preview the mapping is:
+//   State propagation → reference, Layout and paint → comparison,
+//   Motion scheduler → diagnostic, matching segment indices 0/1/2.
+enum PerformanceChartSeriesToken { reference, comparison, diagnostic }
+
+fn performance_chart_series_role(id: NodeKey, name: []u8,
+    points: ArrayList[PerformanceChartPoint],
+    role: PerformanceChartSeriesToken) PerformanceChartSeries {
+    let color: SemanticColorToken = SemanticColorToken.chart_series_primary;
+    if (role == PerformanceChartSeriesToken.comparison) {
+        color = SemanticColorToken.chart_series_secondary;
+    }
+    if (role == PerformanceChartSeriesToken.diagnostic) {
+        color = SemanticColorToken.chart_series_tertiary;
+    }
+    return performance_chart_series(id, name, points, color);
+}
+
 fn performance_chart_spec(id: NodeKey, bounds: Rect,
     series: ArrayList[PerformanceChartSeries],
     x_tick_labels: ArrayList[[]u8],
@@ -534,15 +557,15 @@ fn performance_chart_background(artifact: *PerformanceChartArtifact,
     let scale: i64 = unit_scale();
     let elevation: ResolvedElevationToken =
         semantic_elevation(SemanticElevationToken.raised);
-    let spread: i64 = elevation.shadow_spread;
+    let spread: i64 = elevation.ambient_shadow_blur;
     if (performance_chart_push_round(artifact,
         rect(spec.bounds.x - spread,
-            spec.bounds.y + elevation.shadow_offset_y - spread,
+            spec.bounds.y + elevation.ambient_shadow_y - spread,
             spec.bounds.width + spread * 2,
             spec.bounds.height + spread * 2),
         semantic_radius(SemanticRadiusToken.panel) + spread,
         semantic_color_with_alpha(SemanticColorToken.shadow,
-            elevation.shadow_alpha)) == 0) { return 0; }
+            elevation.ambient_shadow_alpha)) == 0) { return 0; }
     if (performance_chart_push_round(artifact, spec.bounds,
         semantic_radius(SemanticRadiusToken.panel),
         semantic_color_paint(SemanticColorToken.border_emphasis)) == 0) { return 0; }

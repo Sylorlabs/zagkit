@@ -1,0 +1,157 @@
+@import("../src/platform/linux/x11.zag")
+
+struct TestState { passed: i32, failed: i32 }
+fn expect(state: *TestState, condition: i32, name: []u8) void {
+    if (condition != 0) {
+        state.*.passed = state.*.passed + 1; _zag_print("ok  "); _zag_println(name);
+    } else {
+        state.*.failed = state.*.failed + 1; _zag_print("FAIL "); _zag_println(name);
+    }
+}
+
+fn main() i32 {
+    let state: TestState = TestState{ .passed = 0, .failed = 0 };
+    let layout_ok: i32 = 0;
+    let stride_ok: i32 = 0;
+    let decoded_ok: i32 = 0;
+    let released_ok: i32 = 0;
+    let motion_ok: i32 = 0;
+    let key_ok: i32 = 0;
+    let surface_ok: i32 = 0;
+    let store_ok: i32 = 0;
+    let identity_ok: i32 = 0;
+    let image_prefix_ok: i32 = 0;
+    let wheel_ok: i32 = 0;
+    let wheel_release_ok: i32 = 0;
+    unsafe {
+        let raw: *u8 = _zag_malloc(192) as *u8;
+        let i: i32 = 0;
+        while (i < 192) { raw[i] = 170; i = i + 1; }
+        let native: *LinuxX11ButtonEventLayout =
+            raw as *LinuxX11ButtonEventLayout;
+
+        layout_ok = (@sizeOf[LinuxX11ButtonEventLayout]() == 96 &&
+            ((&native.*.x) as i64) - (native as i64) == 64 &&
+            ((&native.*.y) as i64) - (native as i64) == 68 &&
+            ((&native.*.button) as i64) - (native as i64) == 84) as i32;
+        let next: *LinuxX11ButtonEventLayout = &native[1];
+        stride_ok = (((next as i64) - (native as i64)) == 96) as i32;
+
+        // Known little-endian bytes emulate one event written by Xlib.
+        raw[64] = 156; raw[65] = 1; raw[66] = 0; raw[67] = 0;
+        raw[68] = 233; raw[69] = 0; raw[70] = 0; raw[71] = 0;
+        raw[80] = 5; raw[81] = 0; raw[82] = 0; raw[83] = 0;
+        raw[84] = 1; raw[85] = 0; raw[86] = 0; raw[87] = 0;
+        let decoded: LinuxX11Event = linux_x11_button_event(native, 1120, 720);
+        decoded_ok = (decoded.kind == LinuxX11EventKind.pointer_down &&
+            decoded.x == 412 && decoded.y == 233 && decoded.button == 1 &&
+            decoded.modifiers == 5) as i32;
+        let released: LinuxX11Event = linux_x11_button_release_event(
+            native, 1120, 720);
+        released_ok = (released.kind == LinuxX11EventKind.pointer_up &&
+            released.x == 412 && released.y == 233 &&
+            released.button == 1 && released.modifiers == 5) as i32;
+        surface_ok = (decoded.width == 1120 && decoded.height == 720) as i32;
+
+        let motion_native: *LinuxX11MotionEventLayout =
+            raw as *LinuxX11MotionEventLayout;
+        motion_native.*.x = 201;
+        motion_native.*.y = 177;
+        motion_native.*.state = 64;
+        motion_native.*.is_hint = 0;
+        let motion: LinuxX11Event = linux_x11_motion_event(
+            motion_native, 900, 700);
+        motion_ok = (@sizeOf[LinuxX11MotionEventLayout]() == 96 &&
+            ((&motion_native.*.state) as i64) -
+                (motion_native as i64) == 80 &&
+            ((&motion_native.*.is_hint) as i64) -
+                (motion_native as i64) == 84 &&
+            motion.kind == LinuxX11EventKind.pointer_move &&
+            motion.x == 201 && motion.y == 177 &&
+            motion.modifiers == 64 && motion.width == 900) as i32;
+
+        let key_native: *LinuxX11KeyEventLayout =
+            raw as *LinuxX11KeyEventLayout;
+        key_native.*.keycode = 38;
+        key_native.*.state = 1;
+        let key_down: LinuxX11Event = linux_x11_key_event(
+            key_native, 800, 600, 1);
+        let key_up: LinuxX11Event = linux_x11_key_event(
+            key_native, 800, 600, 0);
+        key_ok = (@sizeOf[LinuxX11KeyEventLayout]() == 96 &&
+            ((&key_native.*.keycode) as i64) -
+                (key_native as i64) == 84 &&
+            key_down.kind == LinuxX11EventKind.key_down &&
+            key_up.kind == LinuxX11EventKind.key_up &&
+            key_down.keycode == 38 && key_down.modifiers == 1) as i32;
+
+        // Narrow field stores must not overwrite adjacent C fields or padding.
+        raw[63] = 91; raw[68] = 77;
+        native.*.x = 9;
+        let x_store_safe: i32 = (raw[63] == 91 && raw[68] == 77) as i32;
+        native.*.y = 17;
+        raw[83] = 92; raw[88] = 93;
+        native.*.button = 3;
+        store_ok = (x_store_safe != 0 && raw[83] == 92 && raw[88] == 93) as i32;
+        let secondary: LinuxX11Event = linux_x11_button_event(native, 800, 600);
+        identity_ok = (secondary.button == 3 && secondary.x == 9 &&
+            secondary.y == 17 && secondary.width == 800 &&
+            secondary.height == 600) as i32;
+
+        native.*.button = 4;
+        let wheel_up: LinuxX11Event = linux_x11_button_event(native, 800, 600);
+        let wheel_up_release: LinuxX11Event = linux_x11_button_release_event(
+            native, 800, 600);
+        native.*.button = 5;
+        let wheel_down: LinuxX11Event = linux_x11_button_event(native, 800, 600);
+        native.*.button = 6;
+        let wheel_left: LinuxX11Event = linux_x11_button_event(native, 800, 600);
+        native.*.button = 7;
+        let wheel_right: LinuxX11Event = linux_x11_button_event(native, 800, 600);
+        wheel_ok = (wheel_up.kind == LinuxX11EventKind.wheel &&
+            wheel_up.wheel_delta_x == 0 &&
+            wheel_up.wheel_delta_y == 0 - linux_x11_wheel_step() &&
+            wheel_down.wheel_delta_y == linux_x11_wheel_step() &&
+            wheel_left.wheel_delta_x == 0 - linux_x11_wheel_step() &&
+            wheel_right.wheel_delta_x == linux_x11_wheel_step() &&
+            wheel_right.wheel_delta_y == 0) as i32;
+        wheel_release_ok = (wheel_up_release.kind == LinuxX11EventKind.none &&
+            wheel_up_release.wheel_delta_x == 0 &&
+            wheel_up_release.wheel_delta_y == 0) as i32;
+
+        let image_prefix: *LinuxX11ImageDataPrefix =
+            raw as *LinuxX11ImageDataPrefix;
+        image_prefix_ok = (@sizeOf[LinuxX11ImageDataPrefix]() == 24 &&
+            ((&image_prefix.*.data) as i64) -
+                (image_prefix as i64) == 16) as i32;
+        _zag_free(raw);
+    }
+    expect(&state, layout_ok,
+        "Zag C layout matches XButtonEvent size and routed field offsets");
+    expect(&state, stride_ok,
+        "typed pointer indexing uses the complete XButtonEvent C stride");
+    expect(&state, decoded_ok,
+        "foreign XButtonEvent bytes preserve coordinates and pressed button");
+    expect(&state, released_ok,
+        "button release retains the same typed coordinate and identity layout");
+    expect(&state, motion_ok,
+        "XMotionEvent layout preserves pointer position and modifier state");
+    expect(&state, key_ok,
+        "XKeyEvent layout preserves keycode phase and modifier state");
+    expect(&state, surface_ok,
+        "decoded pointer events retain the active surface dimensions");
+    expect(&state, store_ok,
+        "i32 and u32 field stores stay within their C-width boundaries");
+    expect(&state, identity_ok,
+        "button identity is event-owned rather than queried after release");
+    expect(&state, wheel_ok,
+        "X11 buttons four through seven normalize to signed two-axis wheel deltas");
+    expect(&state, wheel_release_ok,
+        "X11 wheel releases are suppressed instead of becoming pointer-up actions");
+    expect(&state, image_prefix_ok,
+        "XImage data detachment uses the public C field at its ABI offset");
+    _zag_print("Linux X11 event ABI: pass="); _zag_print_i64(state.passed as i64);
+    _zag_print(" fail="); _zag_print_i64(state.failed as i64); _zag_println("");
+    if (state.failed == 0) { return 0; }
+    return 1;
+}

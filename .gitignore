@@ -3,6 +3,7 @@ zag-out/
 .zag-cache/
 .zagd.lock
 .zagd.semantic-ready
+.zagd.status
 .zagkit/
 
 # Contract and benchmark output

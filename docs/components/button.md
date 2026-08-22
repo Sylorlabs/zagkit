@@ -19,7 +19,7 @@ Call `button_emit` with the frame's mutable `DisplayList`, `HitTree`, and
 - the shared stable ID and exact bounds;
 - caller-owned text content bounds resolved from Flex spacing;
 - every semantic color and elevation token selected for the state;
-- effective enabled and content visibility truth;
+- effective enabled, content visibility, actual focus, and focus-ring truth;
 - display operation, hit-node, and semantic-node locations; and
 - a deterministic evidence hash over identity, geometry, state, and tokens.
 
@@ -55,14 +55,34 @@ loading, and error. Styling resolves with documented precedence:
 4. loading makes actions unavailable and substitutes a progress mark; and
 5. disabled overrides material, text, focus, hit, and action availability.
 
-Focus is a separate visible ring and never relies on fill color. Selection is
-also exposed through `SemanticsNode.selected`; loading and error expose text
-values. Color is therefore supplementary state evidence.
+Actual focus and focus-ring visibility are separate state. Pointer focus sets
+`focused = 1` and `focus_visible = 0`; keyboard focus sets both. Only
+`focus_visible` paints the retained ring, while `SemanticsNode.focused` and
+Talkback always report actual focus. A ring without actual focus is invalid.
+Selection is exposed through `SemanticsNode.selected`; loading and error expose
+text values. Color is therefore supplementary state evidence.
 
-`button_reduce` accepts pointer, focus, selection, availability, loading, and
-error events. It emits `activate` only for an enabled press followed by an
-inside release. It never mutates application state: state still flows down and
-the emitted action flows up.
+`button_reduce` accepts pointer, explicit pointer-focus, explicit
+keyboard-focus, focus-loss, selection, availability, loading, and error events.
+It emits `activate` only for an enabled press followed by an inside release.
+Loading and disabling relinquish focus before actions become unavailable. It
+never mutates application state: state still flows down and the emitted action
+flows up.
+
+## Motion
+
+Button is a pure per-frame emitter: it has no clock and cannot own a running
+animation. Instead, `button_motion_token(interaction)` names which semantic
+spring (`motion.snappy`, `motion.gentle`, or `motion.expressive`, resolved by
+`semantic_motion_spring` in `src/design/tokens.zag`) a host should drive
+toward the button's new `ButtonResolvedStyle` whenever `ButtonInteraction`
+changes. A host keeps one `MotionTrack` per button `NodeKey` in its
+`MotionScheduler`, retargets it on state change, and blends the interpolated
+value into `fill_alpha` and the elevation shadow offset before calling
+`button_emit` each frame. Because the underlying model is a physical spring
+rather than a fixed-duration curve, rapid re-presses or hover flicker
+continue from the current velocity instead of restarting or snapping, which
+is required for `reduced_motion` to substitute a plain snap-to-end safely.
 
 ## Variants and tokens
 
