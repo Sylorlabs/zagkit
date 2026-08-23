@@ -1,0 +1,88 @@
+@import("surface.zag")
+@import("../design/visual_system.zag")
+
+// Production surface styling for Zagkit v2.
+//
+// SurfaceTier remains hierarchy/elevation. Material meaning is resolved
+// separately so ordinary panels and raised cards remain solid. This module is
+// the compatibility bridge for existing retained Surface contracts while new
+// components move to explicit VisualSurfaceRole values.
+
+enum SurfaceV2PolicyError {
+    none,
+    invalid_tier,
+    invalid_chrome_role,
+    invalid_environment,
+}
+
+struct SurfaceV2Style {
+    tier: SurfaceTier,
+    role: VisualSurfaceRole,
+    material: ResolvedVisualMaterial,
+    content_spacing_token: FlexSpacingToken,
+    error: SurfaceV2PolicyError,
+}
+
+fn surface_v2_elevation(tier: SurfaceTier) SemanticElevationToken {
+    if (surface_tier_valid(tier) == 0) {
+        return SemanticElevationToken.base;
+    }
+    return switch (tier) {
+        .base => SemanticElevationToken.base,
+        .panel => SemanticElevationToken.panel,
+        .raised => SemanticElevationToken.raised,
+        .overlay => SemanticElevationToken.overlay,
+    };
+}
+
+fn surface_v2_role(tier: SurfaceTier,
+    floating_chrome: i32) VisualSurfaceRole {
+    if (tier == SurfaceTier.overlay) {
+        return VisualSurfaceRole.transient_overlay;
+    }
+    if (floating_chrome != 0) {
+        return VisualSurfaceRole.floating_chrome;
+    }
+    return VisualSurfaceRole.content;
+}
+
+fn surface_v2_style(tier: SurfaceTier,
+    floating_chrome: i32,
+    env: VisualEnvironment) SurfaceV2Style {
+    let error: SurfaceV2PolicyError = SurfaceV2PolicyError.none;
+    if (surface_tier_valid(tier) == 0) {
+        error = SurfaceV2PolicyError.invalid_tier;
+    } else if (floating_chrome != 0 && floating_chrome != 1) {
+        error = SurfaceV2PolicyError.invalid_chrome_role;
+    } else if (tier == SurfaceTier.overlay && floating_chrome != 0) {
+        error = SurfaceV2PolicyError.invalid_chrome_role;
+    } else if (visual_environment_valid(env) == 0) {
+        error = SurfaceV2PolicyError.invalid_environment;
+    }
+
+    let safe_tier: SurfaceTier = if (surface_tier_valid(tier) != 0)
+        tier else SurfaceTier.base;
+    let role: VisualSurfaceRole = surface_v2_role(safe_tier,
+        if (floating_chrome == 1) 1 else 0);
+    let elevation: SemanticElevationToken = surface_v2_elevation(safe_tier);
+    let material: ResolvedVisualMaterial = visual_resolve_material(
+        role, elevation, env);
+
+    return SurfaceV2Style{
+        .tier = safe_tier,
+        .role = role,
+        .material = material,
+        .content_spacing_token = surface_content_spacing_token(safe_tier),
+        .error = error,
+    };
+}
+
+fn surface_v2_content_style(tier: SurfaceTier,
+    env: VisualEnvironment) SurfaceV2Style {
+    return surface_v2_style(tier, 0, env);
+}
+
+fn surface_v2_chrome_style(tier: SurfaceTier,
+    env: VisualEnvironment) SurfaceV2Style {
+    return surface_v2_style(tier, 1, env);
+}
