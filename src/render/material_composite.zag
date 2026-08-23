@@ -1,0 +1,156 @@
+@import("analytic_shadow.zag")
+
+// Deterministic RGBA16 material composition shared by the CPU oracle and used
+// as the reference for accelerated backends. All operations are integer,
+// bounded, allocation-free, and explicit about applied tint and contrast.
+
+struct MaterialContrastResult {
+    paint: Paint,
+    tint_alpha_16: i64,
+    contrast_x1000: i64,
+    iterations: i32,
+    met_floor: i32,
+}
+
+fn material_channel(value: i64) i64 {
+    return analytic_clamp(value, 0, 65535);
+}
+
+fn material_paint(red: i64, green: i64,
+    blue: i64, alpha: i64) Paint {
+    return paint_rgba16(material_channel(red), material_channel(green),
+        material_channel(blue), material_channel(alpha));
+}
+
+fn material_mix_channel(base: i64, tint: i64, alpha_16: i64) i64 {
+    let alpha: i64 = material_channel(alpha_16);
+    return (material_channel(base) * (65535 - alpha) +
+        material_channel(tint) * alpha) / 65535;
+}
+
+fn material_tint(Paint backdrop, Paint tint,
+    alpha_16: i64) Paint {
+    let effective_alpha: i64 = (material_channel(alpha_16) *
+        material_channel(tint.alpha)) / 65535;
+    return material_paint(
+        material_mix_channel(backdrop.red, tint.red, effective_alpha),
+        material_mix_channel(backdrop.green, tint.green, effective_alpha),
+        material_mix_channel(backdrop.blue, tint.blue, effective_alpha),
+        backdrop.alpha);
+}
+
+fn material_source_over(Paint source, Paint destination) Paint {
+    let source_alpha: i64 = material_channel(source.alpha);
+    let destination_alpha: i64 = material_channel(destination.alpha);
+    let inverse: i64 = 65535 - source_alpha;
+    let output_alpha: i64 = source_alpha +
+        (destination_alpha * inverse) / 65535;
+    if (output_alpha <= 0) { return material_paint(0, 0, 0, 0); }
+
+    let red_premultiplied: i64 = source.red * source_alpha +
+        (destination.red * destination_alpha * inverse) / 65535;
+    let green_premultiplied: i64 = source.green * source_alpha +
+        (destination.green * destination_alpha * inverse) / 65535;
+    let blue_premultiplied: i64 = source.blue * source_alpha +
+        (destination.blue * destination_alpha * inverse) / 65535;
+
+    return material_paint(
+        red_premultiplied / output_alpha,
+        green_premultiplied / output_alpha,
+        blue_premultiplied / output_alpha,
+        output_alpha);
+}
+
+fn material_luminance_16(Paint paint) i64 {
+    // Deterministic Rec.709 luma reference. Full color-managed contrast uses
+    // Zagkit's color pipeline; this conservative fixed-point value is suitable
+    // for material adaptation before that pipeline's final validation.
+    return (material_channel(paint.red) * 13933 +
+        material_channel(paint.green) * 46871 +
+        material_channel(paint.blue) * 4731) / 65535;
+}
+
+fn material_contrast_x1000(Paint foreground,
+    Paint background) i64 {
+    let foreground_luminance: i64 = material_luminance_16(foreground);
+    let background_luminance: i64 = material_luminance_16(background);
+    let lighter: i64 = analytic_max(foreground_luminance,
+        background_luminance);
+    let darker: i64 = analytic_min(foreground_luminance,
+        background_luminance);
+    // (L1 + 0.05) / (L2 + 0.05), represented as ratio * 1000.
+    return ((lighter + 3277) * 1000) / (darker + 3277);
+}
+
+fn material_apply_edge_highlight(Paint base,
+    Paint edge, i64 alpha_16) Paint {
+    let highlight: Paint = edge;
+    highlight.alpha = (material_channel(edge.alpha) *
+        material_channel(alpha_16)) / 65535;
+    return material_source_over(highlight, base);
+}
+
+fn material_vignette(Paint base, i64 normalized_distance_16,
+    i64 maximum_alpha_16) Paint {
+    let distance: i64 = material_channel(normalized_distance_16);
+    let smooth: i64 = analytic_smoothstep_16(distance);
+    let alpha: i64 = (material_channel(maximum_alpha_16) * smooth) / 65535;
+    let shadow: Paint = material_paint(0, 0, 0, alpha);
+    return material_source_over(shadow, base);
+}
+
+fn material_adapt_tint(Paint backdrop, Paint tint,
+    Paint foreground, i64 initial_alpha_16,
+    i64 maximum_alpha_16, i64 contrast_floor_x1000) MaterialContrastResult {
+    let alpha: i64 = analytic_clamp(initial_alpha_16, 0,
+        material_channel(maximum_alpha_16));
+    let result: Paint = material_tint(backdrop, tint, alpha);
+    let contrast: i64 = material_contrast_x1000(foreground, result);
+    let iterations: i32 = 0;
+
+    // Eight deterministic steps cap work and avoid per-pixel convergence.
+    while (contrast < contrast_floor_x1000 &&
+        alpha < maximum_alpha_16 && iterations < 8) {
+        let remaining: i64 = maximum_alpha_16 - alpha;
+        let step: i64 = analytic_max(remaining / 2, 1);
+        alpha = analytic_min(alpha + step, maximum_alpha_16);
+        result = material_tint(backdrop, tint, alpha);
+        contrast = material_contrast_x1000(foreground, result);
+        iterations = iterations + 1;
+    }
+
+    return MaterialContrastResult{
+        .paint = result,
+        .tint_alpha_16 = alpha,
+        .contrast_x1000 = contrast,
+        .iterations = iterations,
+        .met_floor = (contrast >= contrast_floor_x1000) as i32,
+    };
+}
+
+fn material_resolve_sample(ResolvedVisualMaterial material,
+    Paint backdrop, Paint foreground,
+    i64 vertical_position_16) MaterialContrastResult {
+    let token: ResolvedMaterialToken = semantic_material(
+        material.material_token);
+    let fill: Paint = semantic_color_paint(token.fill_token);
+    if (material.translucent == 0 || material.cpu_fallback != 0) {
+        return MaterialContrastResult{
+            .paint = fill,
+            .tint_alpha_16 = 0,
+            .contrast_x1000 = material_contrast_x1000(foreground, fill),
+            .iterations = 0,
+            .met_floor = (material_contrast_x1000(foreground, fill) >=
+                4500) as i32,
+        };
+    }
+
+    let tint: Paint = semantic_color_paint(token.tint_token);
+    let position: i64 = material_channel(vertical_position_16);
+    let gradient_alpha: i64 = token.tint_alpha_start +
+        ((token.tint_alpha_end - token.tint_alpha_start) * position) / 65535;
+    let floor: i64 = if (material.material_token ==
+        SemanticMaterialToken.glass) 7000 else 4500;
+    return material_adapt_tint(backdrop, tint, foreground,
+        gradient_alpha, 32768, floor);
+}
