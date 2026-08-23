@@ -1,0 +1,176 @@
+@import("surface_v2_policy.zag")
+@import("../design/content_colors_v2.zag")
+
+// Production visual resolver for retained Surface. Identity, semantics, hit
+// testing, and Talkback remain owned by surface.zag; this module supplies the
+// modern v2 material, theme, state, lighting, and motion contract.
+
+struct SurfaceV2VisualStyle {
+    policy: SurfaceV2Style,
+    fill: Paint,
+    edge: Paint,
+    border: Paint,
+    content: Paint,
+    focus: Paint,
+    elevation_token: SemanticElevationToken,
+    radius: i64,
+    border_width: i64,
+    focus_ring_width: i64,
+    focus_separation_width: i64,
+    focus_ring_visible: i32,
+    material: ResolvedVisualMaterial,
+    motion: MaterialMotionTarget,
+    evidence_hash: i64,
+    valid: i32,
+}
+
+fn surface_v2_tier_fill(tier: SurfaceTier,
+    scheme: VisualColorScheme) Paint {
+    if (tier == SurfaceTier.base) {
+        return visual_theme_color(scheme,
+            SemanticColorToken.surface_base).paint;
+    }
+    if (tier == SurfaceTier.panel) {
+        return visual_theme_color(scheme,
+            SemanticColorToken.surface_panel).paint;
+    }
+    return visual_theme_color(scheme,
+        SemanticColorToken.surface_raised).paint;
+}
+
+fn surface_v2_radius(tier: SurfaceTier) i64 {
+    if (tier == SurfaceTier.base || tier == SurfaceTier.panel) {
+        return 16 * unit_scale();
+    }
+    if (tier == SurfaceTier.raised) { return 14 * unit_scale(); }
+    return 18 * unit_scale();
+}
+
+fn surface_v2_motion_event(interaction: ButtonInteraction) MaterialMotionEvent {
+    if (interaction.enabled == 0) { return MaterialMotionEvent.disabled; }
+    if (interaction.loading != 0) { return MaterialMotionEvent.loading; }
+    if (interaction.error != 0) { return MaterialMotionEvent.error; }
+    if (interaction.pressed != 0) { return MaterialMotionEvent.press; }
+    if (interaction.selected != 0) { return MaterialMotionEvent.selected; }
+    if (interaction.focused != 0) { return MaterialMotionEvent.focus; }
+    if (interaction.hovered != 0) { return MaterialMotionEvent.hover; }
+    return MaterialMotionEvent.rest;
+}
+
+fn surface_v2_resolve_visual(tier: SurfaceTier,
+    mode: SurfaceMode, floating_chrome: i32,
+    interaction: ButtonInteraction,
+    scheme: VisualColorScheme,
+    env: VisualEnvironment,
+    motion_preference: VisualMotionPreference) SurfaceV2VisualStyle {
+    let policy: SurfaceV2Style = surface_v2_style(tier,
+        floating_chrome, env);
+    let mode_valid: i32 = surface_mode_valid(mode);
+    let interaction_valid: i32 = if (mode == SurfaceMode.group)
+        surface_group_interaction_valid(interaction) else
+        surface_action_interaction_valid(interaction);
+    let valid: i32 = (policy.error == SurfaceV2PolicyError.none &&
+        mode_valid != 0 && interaction_valid != 0 &&
+        visual_color_scheme_valid(scheme) != 0) as i32;
+    let state: ButtonInteraction = if (valid != 0)
+        interaction else surface_interaction();
+
+    let fill: Paint = surface_v2_tier_fill(policy.tier, scheme);
+    let edge: Paint = visual_theme_color(scheme,
+        SemanticColorToken.edge_highlight).paint;
+    let border: Paint = visual_theme_color(scheme,
+        SemanticColorToken.border_subtle).paint;
+    let content: Paint = visual_theme_color(scheme,
+        SemanticColorToken.text_primary).paint;
+    let focus: Paint = visual_theme_color(scheme,
+        SemanticColorToken.focus).paint;
+    let elevation: SemanticElevationToken = surface_v2_elevation(policy.tier);
+    let event: MaterialMotionEvent = surface_v2_motion_event(state);
+    let motion: MaterialMotionTarget = material_motion_target(event,
+        elevation, motion_preference);
+
+    if (elevation != SemanticElevationToken.base) {
+        border.alpha = 0;
+        edge.alpha = visual_shadow_pair(elevation).edge_highlight_alpha_16;
+    } else {
+        edge.alpha = 0;
+    }
+
+    if (state.hovered != 0 && state.enabled != 0 && state.loading == 0) {
+        let hover: Paint = visual_theme_color(scheme,
+            SemanticColorToken.surface_interactive).paint;
+        fill = material_source_over(hover, fill);
+    }
+    if (state.selected != 0) {
+        let selected: Paint = visual_theme_color(scheme,
+            SemanticColorToken.surface_selected).paint;
+        fill = material_source_over(selected, fill);
+    }
+    if (state.pressed != 0) {
+        elevation = SemanticElevationToken.base;
+        let pressed: Paint = visual_theme_color(scheme,
+            SemanticColorToken.surface_interactive).paint;
+        pressed.alpha = analytic_max(pressed.alpha, 18000);
+        fill = material_source_over(pressed, fill);
+        edge.alpha = 0;
+        border.alpha = visual_theme_color(scheme,
+            SemanticColorToken.border_subtle).paint.alpha;
+    }
+    if (state.error != 0) {
+        border = visual_theme_color(scheme,
+            SemanticColorToken.status_error).paint;
+        border.alpha = 65535;
+    }
+    if (state.loading != 0) {
+        fill = button_v2_with_alpha(fill, 56000);
+        content = button_v2_with_alpha(content, 56000);
+    }
+    if (state.enabled == 0) {
+        elevation = SemanticElevationToken.base;
+        fill = button_v2_with_alpha(fill, 36044);
+        border = button_v2_with_alpha(border, 36044);
+        edge.alpha = 0;
+        content = visual_theme_color(scheme,
+            SemanticColorToken.text_disabled).paint;
+    }
+
+    let material: ResolvedVisualMaterial = visual_resolve_material(
+        policy.role, elevation, env);
+    let hash: i64 = visual_mix_hash(material.evidence_hash,
+        policy.tier as i64);
+    hash = visual_mix_hash(hash, mode as i64);
+    hash = visual_mix_hash(hash, fill.red);
+    hash = visual_mix_hash(hash, fill.green);
+    hash = visual_mix_hash(hash, fill.blue);
+    hash = visual_mix_hash(hash, fill.alpha);
+    hash = visual_mix_hash(hash, edge.alpha);
+    hash = visual_mix_hash(hash, border.red);
+    hash = visual_mix_hash(hash, border.alpha);
+    hash = visual_mix_hash(hash, content.red);
+    hash = visual_mix_hash(hash, state.hovered as i64);
+    hash = visual_mix_hash(hash, state.focus_visible as i64);
+    hash = visual_mix_hash(hash, state.pressed as i64);
+    hash = visual_mix_hash(hash, state.selected as i64);
+    hash = visual_mix_hash(hash, state.enabled as i64);
+    hash = visual_mix_hash(hash, state.loading as i64);
+    hash = visual_mix_hash(hash, state.error as i64);
+
+    return SurfaceV2VisualStyle{
+        .policy = policy,
+        .fill = fill,
+        .edge = edge,
+        .border = border,
+        .content = content,
+        .focus = focus,
+        .elevation_token = elevation,
+        .radius = surface_v2_radius(policy.tier),
+        .border_width = unit_scale(),
+        .focus_ring_width = 2 * unit_scale(),
+        .focus_separation_width = unit_scale(),
+        .focus_ring_visible = state.focus_visible,
+        .material = material,
+        .motion = motion,
+        .evidence_hash = hash,
+        .valid = valid,
+    };
+}
