@@ -1,0 +1,306 @@
+@import("tokens.zag")
+
+// Zagkit's native visual policy kernel.
+//
+// This module owns the semantic rules that must agree across the deterministic
+// CPU oracle and every accelerated renderer. It performs no allocation, IO,
+// platform calls, or hidden caching. Components select meaning; renderers
+// receive resolved, bounded work.
+
+enum VisualSurfaceRole {
+    content,
+    floating_chrome,
+    transient_overlay,
+}
+
+enum VisualTransparencyPreference {
+    normal,
+    reduced,
+}
+
+enum VisualQualityTier {
+    oracle,
+    balanced,
+    high,
+}
+
+enum VisualPolicyError {
+    none,
+    invalid_environment,
+    invalid_budget,
+}
+
+struct VisualEnvironment {
+    density: FlexDensity,
+    transparency: VisualTransparencyPreference,
+    quality: VisualQualityTier,
+    backdrop_blur_available: i32,
+}
+
+struct VisualSceneLight {
+    azimuth_degrees: i64,
+    zenith_degrees: i64,
+    shadow_direction_x_16: i64,
+    shadow_direction_y_16: i64,
+    ambient_intensity_16: i64,
+    rim_intensity_16: i64,
+}
+
+struct VisualShadowLayer {
+    offset_x: i64,
+    offset_y: i64,
+    blur_radius: i64,
+    spread: i64,
+    alpha_16: i64,
+}
+
+struct VisualShadowPair {
+    contact: VisualShadowLayer,
+    ambient: VisualShadowLayer,
+    edge_highlight_alpha_16: i64,
+}
+
+struct VisualEffectBudget {
+    viewport_width: i64,
+    viewport_height: i64,
+    veil_area: i64,
+    live_glass_layers: i32,
+}
+
+struct ResolvedVisualMaterial {
+    material_token: SemanticMaterialToken,
+    elevation_token: SemanticElevationToken,
+    blur_radius: i64,
+    backdrop_downsample: i32,
+    blur_passes: i32,
+    translucent: i32,
+    cpu_fallback: i32,
+    fallback_reason: []u8,
+    shadow: VisualShadowPair,
+    evidence_hash: i64,
+    error: VisualPolicyError,
+}
+
+fn visual_environment() VisualEnvironment {
+    return VisualEnvironment{
+        .density = FlexDensity.standard,
+        .transparency = VisualTransparencyPreference.normal,
+        .quality = VisualQualityTier.balanced,
+        .backdrop_blur_available = 0,
+    };
+}
+
+fn visual_scene_light() VisualSceneLight {
+    // 16-bit normalized physical direction. Lighting stays physical in RTL.
+    return VisualSceneLight{
+        .azimuth_degrees = 40,
+        .zenith_degrees = 60,
+        .shadow_direction_x_16 = 42125,
+        .shadow_direction_y_16 = 50000,
+        .ambient_intensity_16 = 27525,
+        .rim_intensity_16 = 11796,
+    };
+}
+
+fn visual_environment_valid(env: VisualEnvironment) i32 {
+    let density: i64 = env.density as i64;
+    let transparency: i64 = env.transparency as i64;
+    let quality: i64 = env.quality as i64;
+    if (density < FlexDensity.compact as i64 ||
+        density > FlexDensity.touch as i64) { return 0; }
+    if (transparency < VisualTransparencyPreference.normal as i64 ||
+        transparency > VisualTransparencyPreference.reduced as i64) { return 0; }
+    if (quality < VisualQualityTier.oracle as i64 ||
+        quality > VisualQualityTier.high as i64) { return 0; }
+    if (env.backdrop_blur_available != 0 &&
+        env.backdrop_blur_available != 1) { return 0; }
+    return 1;
+}
+
+fn visual_surface_role_valid(role: VisualSurfaceRole) i32 {
+    let value: i64 = role as i64;
+    return (value >= VisualSurfaceRole.content as i64 &&
+        value <= VisualSurfaceRole.transient_overlay as i64) as i32;
+}
+
+fn visual_material_token(role: VisualSurfaceRole,
+    env: VisualEnvironment) SemanticMaterialToken {
+    if (visual_surface_role_valid(role) == 0 ||
+        visual_environment_valid(env) == 0) {
+        return SemanticMaterialToken.solid;
+    }
+
+    if (role == VisualSurfaceRole.content) {
+        return SemanticMaterialToken.solid;
+    }
+
+    if (env.transparency == VisualTransparencyPreference.reduced) {
+        return SemanticMaterialToken.solid;
+    }
+
+    if (role == VisualSurfaceRole.floating_chrome) {
+        // Dense professional layouts never spend sampling work on persistent
+        // chrome. This is a semantic demotion, not a backend heuristic.
+        if (env.density == FlexDensity.compact) {
+            return SemanticMaterialToken.solid;
+        }
+        return SemanticMaterialToken.veil;
+    }
+
+    return SemanticMaterialToken.glass;
+}
+
+fn visual_shadow_layer(offset_x: i64, offset_y: i64,
+    blur_radius: i64, spread: i64, alpha_16: i64) VisualShadowLayer {
+    return VisualShadowLayer{
+        .offset_x = offset_x,
+        .offset_y = offset_y,
+        .blur_radius = blur_radius,
+        .spread = spread,
+        .alpha_16 = alpha_16,
+    };
+}
+
+fn visual_shadow_pair(elevation: SemanticElevationToken) VisualShadowPair {
+    if (elevation == SemanticElevationToken.base) {
+        return VisualShadowPair{
+            .contact = visual_shadow_layer(0, 0, 0, 0, 0),
+            .ambient = visual_shadow_layer(0, 0, 0, 0, 0),
+            .edge_highlight_alpha_16 = 6554,
+        };
+    }
+    if (elevation == SemanticElevationToken.panel) {
+        return VisualShadowPair{
+            .contact = visual_shadow_layer(1 * unit_scale(), 1 * unit_scale(),
+                4 * unit_scale(), 0, 19661),
+            .ambient = visual_shadow_layer(2 * unit_scale(), 6 * unit_scale(),
+                18 * unit_scale(), 1 * unit_scale(), 10486),
+            .edge_highlight_alpha_16 = 9175,
+        };
+    }
+    if (elevation == SemanticElevationToken.raised) {
+        return VisualShadowPair{
+            .contact = visual_shadow_layer(1 * unit_scale(), 2 * unit_scale(),
+                6 * unit_scale(), 0, 22282),
+            .ambient = visual_shadow_layer(3 * unit_scale(), 10 * unit_scale(),
+                28 * unit_scale(), 2 * unit_scale(), 13107),
+            .edge_highlight_alpha_16 = 11796,
+        };
+    }
+    return VisualShadowPair{
+        .contact = visual_shadow_layer(2 * unit_scale(), 3 * unit_scale(),
+            8 * unit_scale(), 0, 24904),
+        .ambient = visual_shadow_layer(5 * unit_scale(), 16 * unit_scale(),
+            40 * unit_scale(), 3 * unit_scale(), 17039),
+        .edge_highlight_alpha_16 = 14418,
+    };
+}
+
+fn visual_abs(value: i64) i64 {
+    if (value < 0) { return 0 - value; }
+    return value;
+}
+
+fn visual_max(left: i64, right: i64) i64 {
+    if (left > right) { return left; }
+    return right;
+}
+
+fn visual_shadow_layer_extent(layer: VisualShadowLayer) i64 {
+    let offset: i64 = visual_max(visual_abs(layer.offset_x),
+        visual_abs(layer.offset_y));
+    return offset + layer.blur_radius + layer.spread;
+}
+
+fn visual_shadow_extent(pair: VisualShadowPair) i64 {
+    return visual_max(visual_shadow_layer_extent(pair.contact),
+        visual_shadow_layer_extent(pair.ambient));
+}
+
+fn visual_effect_budget_valid(budget: VisualEffectBudget) i32 {
+    if (budget.viewport_width <= 0 || budget.viewport_height <= 0 ||
+        budget.veil_area < 0 || budget.live_glass_layers < 0) { return 0; }
+    let viewport_area: i64 = budget.viewport_width * budget.viewport_height;
+    if (budget.veil_area > viewport_area / 4) { return 0; }
+    if (budget.live_glass_layers > 1) { return 0; }
+    return 1;
+}
+
+fn visual_mix_hash(hash: i64, value: i64) i64 {
+    return (hash * 1099511627) ^ value;
+}
+
+fn visual_resolve_material(role: VisualSurfaceRole,
+    elevation: SemanticElevationToken,
+    env: VisualEnvironment) ResolvedVisualMaterial {
+    let invalid: i32 = (visual_surface_role_valid(role) == 0 ||
+        visual_environment_valid(env) == 0) as i32;
+    let token: SemanticMaterialToken = visual_material_token(role, env);
+    let material: ResolvedMaterialToken = semantic_material(token);
+    let shadow: VisualShadowPair = visual_shadow_pair(elevation);
+    let downsample: i32 = 1;
+    let passes: i32 = 0;
+    let translucent: i32 = 0;
+    let cpu_fallback: i32 = 0;
+    let reason: []u8 = "opaque semantic material";
+
+    if (token == SemanticMaterialToken.veil) {
+        downsample = 2;
+        passes = 3;
+        translucent = 1;
+        if (env.backdrop_blur_available == 0 ||
+            env.quality == VisualQualityTier.oracle) {
+            cpu_fallback = 1;
+            reason = "veil uses deterministic tint-band and edge-light fallback";
+        } else {
+            reason = "veil backdrop blur active";
+        }
+    }
+
+    if (token == SemanticMaterialToken.glass) {
+        downsample = 4;
+        passes = 4;
+        translucent = 1;
+        if (env.backdrop_blur_available == 0 ||
+            env.quality == VisualQualityTier.oracle) {
+            cpu_fallback = 1;
+            reason = "glass uses deterministic raised-surface fallback";
+        } else {
+            reason = "glass backdrop blur active";
+        }
+    }
+
+    let hash: i64 = 1469598103;
+    hash = visual_mix_hash(hash, role as i64);
+    hash = visual_mix_hash(hash, token as i64);
+    hash = visual_mix_hash(hash, elevation as i64);
+    hash = visual_mix_hash(hash, env.density as i64);
+    hash = visual_mix_hash(hash, env.transparency as i64);
+    hash = visual_mix_hash(hash, env.quality as i64);
+    hash = visual_mix_hash(hash, env.backdrop_blur_available as i64);
+    hash = visual_mix_hash(hash, material.blur_radius);
+    hash = visual_mix_hash(hash, visual_shadow_extent(shadow));
+
+    return ResolvedVisualMaterial{
+        .material_token = token,
+        .elevation_token = elevation,
+        .blur_radius = material.blur_radius,
+        .backdrop_downsample = downsample,
+        .blur_passes = passes,
+        .translucent = translucent,
+        .cpu_fallback = cpu_fallback,
+        .fallback_reason = reason,
+        .shadow = shadow,
+        .evidence_hash = hash,
+        .error = if (invalid != 0) VisualPolicyError.invalid_environment
+            else VisualPolicyError.none,
+    };
+}
+
+fn visual_glass_capture_inflate(material: ResolvedVisualMaterial) i64 {
+    if (material.translucent == 0) {
+        return visual_shadow_extent(material.shadow);
+    }
+    return visual_max(material.blur_radius * 2,
+        visual_shadow_extent(material.shadow));
+}
