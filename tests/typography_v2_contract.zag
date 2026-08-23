@@ -1,0 +1,57 @@
+@import("../src/design/typography_v2.zag")
+
+fn main() i32 {
+    let env: TypographyV2Environment = typography_v2_environment();
+    let body: ResolvedTypographyV2 = typography_v2_resolve(
+        SemanticTypeToken.body, env);
+    if (body.valid == 0 || body.size != 15 * unit_scale() ||
+        body.line_height < body.size ||
+        body.line_height % (4 * unit_scale()) != 0 ||
+        body.weight != 400 || body.tracking_1000 != 0) { return 1; }
+
+    let display: ResolvedTypographyV2 = typography_v2_resolve(
+        SemanticTypeToken.display, env);
+    if (display.size <= body.size || display.weight <= body.weight ||
+        display.tracking_1000 >= 0) { return 2; }
+
+    let large: TypographyV2Environment = env;
+    large.text_scale_16 = 131070;
+    let large_body: ResolvedTypographyV2 = typography_v2_resolve(
+        SemanticTypeToken.body, large);
+    if (large_body.size != body.size * 2 ||
+        large_body.line_height <= body.line_height) { return 3; }
+
+    let arabic: TypographyV2Environment = env;
+    arabic.script = VisualScriptClass.arabic;
+    let arabic_body: ResolvedTypographyV2 = typography_v2_resolve(
+        SemanticTypeToken.body, arabic);
+    if (arabic_body.line_height <= body.line_height ||
+        arabic_body.fallback_group != "Noto Sans Arabic") { return 4; }
+
+    let cjk: TypographyV2Environment = env;
+    cjk.script = VisualScriptClass.cjk;
+    let cjk_label: ResolvedTypographyV2 = typography_v2_resolve(
+        SemanticTypeToken.label, cjk);
+    if (cjk_label.fallback_group != "Noto Sans CJK") { return 5; }
+
+    let code: TypographyV2Environment = env;
+    code.script = VisualScriptClass.code;
+    let code_style: ResolvedTypographyV2 = typography_v2_resolve(
+        SemanticTypeToken.code, code);
+    if (code_style.tabular_numerals == 0 ||
+        code_style.fallback_group != "JetBrains Mono, Noto Sans Mono") {
+        return 6;
+    }
+
+    let tabular: TypographyV2Environment = env;
+    tabular.numerals = VisualNumeralStyle.tabular;
+    let chart_label: ResolvedTypographyV2 = typography_v2_resolve(
+        SemanticTypeToken.label, tabular);
+    if (chart_label.tabular_numerals == 0) { return 7; }
+
+    let repeat: ResolvedTypographyV2 = typography_v2_resolve(
+        SemanticTypeToken.body, env);
+    if (repeat.evidence_hash != body.evidence_hash) { return 8; }
+
+    return 0;
+}
