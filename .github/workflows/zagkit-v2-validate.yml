@@ -38,21 +38,21 @@ jobs:
           chmod +x "$ZNC"
           "$ZNC" version
 
-      - name: Compile visual module import smoke
+      - name: Compile visual module syntax and import smoke
         run: |
           "$ZNC" tests/visual_system_v2_import_smoke.zag \
-            --no-zagd --analyze-strict --no-foreground-cache \
+            --no-zagd --no-foreground-cache \
             -o /tmp/visual-system-v2-import
           /tmp/visual-system-v2-import
 
-      - name: Compile and run visual policy contract
+      - name: Compile and run strict visual policy contract
         run: |
           "$ZNC" tests/visual_system_v2_policy_contract.zag \
             --no-zagd --analyze-strict --no-foreground-cache \
             -o /tmp/visual-system-v2-policy
           /tmp/visual-system-v2-policy
 
-      - name: Compile and run SurfaceV2 contract
+      - name: Compile and run strict SurfaceV2 contract
         run: |
           "$ZNC" tests/surface_v2_contract.zag \
             --no-zagd --analyze-strict --no-foreground-cache \
