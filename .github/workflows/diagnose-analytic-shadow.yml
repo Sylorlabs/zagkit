@@ -1,0 +1,97 @@
+name: Diagnose analytic shadow launcher
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/diagnose-analytic-shadow.yml
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: write
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: Sylorlabs/zagkit
+      TARGET_WORKFLOW: zagkit-v2-analytic-shadow-launcher.yml
+    steps:
+      - name: Check out diagnostic branch
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Launch the native Zag v2 implementation run
+        id: launch
+        shell: bash
+        run: |
+          set -euo pipefail
+          before="$(gh run list --repo "$REPOSITORY" --workflow "$TARGET_WORKFLOW" --limit 1 --json databaseId --jq '.[0].databaseId // 0')"
+          gh workflow run "$TARGET_WORKFLOW" --repo "$REPOSITORY" --ref main
+          run_id=""
+          for attempt in $(seq 1 30); do
+            candidate="$(gh run list --repo "$REPOSITORY" --workflow "$TARGET_WORKFLOW" --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId // 0')"
+            if [ "$candidate" != "0" ] && [ "$candidate" != "$before" ]; then
+              run_id="$candidate"
+              break
+            fi
+            sleep 2
+          done
+          if [ -z "$run_id" ]; then
+            echo "The diagnostic could not resolve the dispatched workflow run." >&2
+            exit 1
+          fi
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for completion and capture complete log
+        id: capture
+        shell: bash
+        run: |
+          set +e
+          run_id="${{ steps.launch.outputs.run_id }}"
+          gh run watch "$run_id" --repo "$REPOSITORY" --exit-status
+          watch_status=$?
+          conclusion="$(gh run view "$run_id" --repo "$REPOSITORY" --json conclusion --jq '.conclusion // "unknown"')"
+          status="$(gh run view "$run_id" --repo "$REPOSITORY" --json status --jq '.status // "unknown"')"
+          url="$(gh run view "$run_id" --repo "$REPOSITORY" --json url --jq '.url // ""')"
+          mkdir -p docs/evidence
+          gh run view "$run_id" --repo "$REPOSITORY" --log > /tmp/analytic-shadow-run.log 2>&1
+          log_status=$?
+          {
+            echo "# Analytic shadow launcher diagnostic"
+            echo
+            echo "- Run ID: \`$run_id\`"
+            echo "- Status: \`$status\`"
+            echo "- Conclusion: \`$conclusion\`"
+            echo "- Watch exit status: \`$watch_status\`"
+            echo "- Log retrieval status: \`$log_status\`"
+            echo "- Run URL: $url"
+            echo
+            echo '```text'
+            if [ -s /tmp/analytic-shadow-run.log ]; then
+              cat /tmp/analytic-shadow-run.log
+            else
+              echo "No workflow log was returned."
+            fi
+            echo '```'
+          } > docs/evidence/analytic-shadow-launcher-latest.md
+          exit 0
+
+      - name: Publish diagnostic evidence on main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "zagkit-ci-diagnostics"
+          git config user.email "zagkit-ci-diagnostics@users.noreply.github.com"
+          git add docs/evidence/analytic-shadow-launcher-latest.md
+          if git diff --cached --quiet; then
+            echo "Diagnostic evidence is unchanged"
+            exit 0
+          fi
+          git commit -m "ci: record analytic shadow launcher result"
+          git push origin HEAD:main
