@@ -1,0 +1,152 @@
+@import("effect_plan.zag")
+
+// Deterministic analytic rounded-rectangle shadows for the CPU oracle.
+//
+// Coverage is evaluated from a signed distance field in Zagkit's fixed-point
+// logical units. The kernel requires no temporary bitmap or Gaussian pass and
+// produces the same contact/ambient composition on every target.
+
+struct VisualRoundedRect {
+    x: i64,
+    y: i64,
+    width: i64,
+    height: i64,
+    radius: i64,
+}
+
+struct AnalyticShadowSpec {
+    shape: VisualRoundedRect,
+    layer: VisualShadowLayer,
+}
+
+fn visual_rounded_rect(x: i64, y: i64, width: i64,
+    height: i64, radius: i64) VisualRoundedRect {
+    let resolved_radius: i64 = radius;
+    let half_width: i64 = if (width > 0) width / 2 else 0;
+    let half_height: i64 = if (height > 0) height / 2 else 0;
+    if (resolved_radius < 0) { resolved_radius = 0; }
+    if (resolved_radius > half_width) { resolved_radius = half_width; }
+    if (resolved_radius > half_height) { resolved_radius = half_height; }
+    return VisualRoundedRect{
+        .x = x, .y = y, .width = width, .height = height,
+        .radius = resolved_radius,
+    };
+}
+
+fn visual_rounded_rect_valid(shape: VisualRoundedRect) i32 {
+    if (shape.width <= 0 || shape.height <= 0 || shape.radius < 0) {
+        return 0;
+    }
+    if (shape.radius > shape.width / 2 ||
+        shape.radius > shape.height / 2) { return 0; }
+    return 1;
+}
+
+fn analytic_max_zero(value: i64) i64 {
+    if (value > 0) { return value; }
+    return 0;
+}
+
+fn analytic_min(left: i64, right: i64) i64 {
+    if (left < right) { return left; }
+    return right;
+}
+
+fn analytic_max(left: i64, right: i64) i64 {
+    if (left > right) { return left; }
+    return right;
+}
+
+fn analytic_clamp(value: i64, minimum: i64, maximum: i64) i64 {
+    if (value < minimum) { return minimum; }
+    if (value > maximum) { return maximum; }
+    return value;
+}
+
+fn analytic_isqrt(value: i64) i64 {
+    if (value <= 0) { return 0; }
+    let result: i64 = 0;
+    let bit: i64 = 1 << 62;
+    while (bit > value) { bit = bit >> 2; }
+    let remaining: i64 = value;
+    while (bit != 0) {
+        if (remaining >= result + bit) {
+            remaining = remaining - result - bit;
+            result = (result >> 1) + bit;
+        } else {
+            result = result >> 1;
+        }
+        bit = bit >> 2;
+    }
+    return result;
+}
+
+fn analytic_rounded_rect_distance(shape: VisualRoundedRect,
+    point_x: i64, point_y: i64) i64 {
+    if (visual_rounded_rect_valid(shape) == 0) {
+        return 0x3fffffffffffffff;
+    }
+
+    let center_x: i64 = shape.x + shape.width / 2;
+    let center_y: i64 = shape.y + shape.height / 2;
+    let inner_half_width: i64 = shape.width / 2 - shape.radius;
+    let inner_half_height: i64 = shape.height / 2 - shape.radius;
+    let qx: i64 = visual_abs(point_x - center_x) - inner_half_width;
+    let qy: i64 = visual_abs(point_y - center_y) - inner_half_height;
+    let outside_x: i64 = analytic_max_zero(qx);
+    let outside_y: i64 = analytic_max_zero(qy);
+    let outside_squared: i64 = outside_x * outside_x +
+        outside_y * outside_y;
+    let outside: i64 = analytic_isqrt(outside_squared);
+    let inside: i64 = analytic_min(analytic_max(qx, qy), 0);
+    return outside + inside - shape.radius;
+}
+
+fn analytic_smoothstep_16(value_16: i64) i64 {
+    let value: i64 = analytic_clamp(value_16, 0, 65535);
+    // t²(3 - 2t), all in a 16-bit normalized domain.
+    let squared: i64 = (value * value) / 65535;
+    return (squared * (196605 - value * 2)) / 65535;
+}
+
+fn analytic_shadow_coverage_16(spec: AnalyticShadowSpec,
+    point_x: i64, point_y: i64) i64 {
+    if (visual_rounded_rect_valid(spec.shape) == 0 ||
+        spec.layer.alpha_16 <= 0) { return 0; }
+
+    let shifted_x: i64 = point_x - spec.layer.offset_x;
+    let shifted_y: i64 = point_y - spec.layer.offset_y;
+    let distance: i64 = analytic_rounded_rect_distance(spec.shape,
+        shifted_x, shifted_y) - spec.layer.spread;
+    let blur: i64 = spec.layer.blur_radius;
+
+    if (blur <= 0) {
+        if (distance <= 0) { return spec.layer.alpha_16; }
+        return 0;
+    }
+
+    // The transition spans two blur radii around the geometric edge.
+    let numerator: i64 = blur - distance;
+    if (numerator <= 0) { return 0; }
+    if (numerator >= blur * 2) { return spec.layer.alpha_16; }
+    let normalized: i64 = (numerator * 65535) / (blur * 2);
+    let smooth: i64 = analytic_smoothstep_16(normalized);
+    return (spec.layer.alpha_16 * smooth) / 65535;
+}
+
+fn analytic_source_over_alpha_16(source: i64, destination: i64) i64 {
+    let src: i64 = analytic_clamp(source, 0, 65535);
+    let dst: i64 = analytic_clamp(destination, 0, 65535);
+    return src + (dst * (65535 - src)) / 65535;
+}
+
+fn analytic_shadow_pair_coverage_16(shape: VisualRoundedRect,
+    pair: VisualShadowPair, point_x: i64, point_y: i64) i64 {
+    let ambient: i64 = analytic_shadow_coverage_16(AnalyticShadowSpec{
+        .shape = shape, .layer = pair.ambient,
+    }, point_x, point_y);
+    let contact: i64 = analytic_shadow_coverage_16(AnalyticShadowSpec{
+        .shape = shape, .layer = pair.contact,
+    }, point_x, point_y);
+    return analytic_source_over_alpha_16(contact, ambient);
+}
