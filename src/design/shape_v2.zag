@@ -1,0 +1,81 @@
+@import("typography_v2.zag")
+
+// Continuous-curvature shape resolution. Components select semantic shape
+// roles; the path renderer owns exact superellipse tessellation/rasterization.
+
+enum VisualShapeRole {
+    inset,
+    control,
+    card,
+    panel,
+    overlay,
+    pill,
+}
+
+struct ResolvedShapeV2 {
+    role: VisualShapeRole,
+    radius: i64,
+    inner_radius: i64,
+    focus_radius: i64,
+    superellipse_power_16: i64,
+    evidence_hash: i64,
+    valid: i32,
+}
+
+fn shape_v2_role_valid(role: VisualShapeRole) i32 {
+    let value: i64 = role as i64;
+    return (value >= VisualShapeRole.inset as i64 &&
+        value <= VisualShapeRole.pill as i64) as i32;
+}
+
+fn shape_v2_base_radius(role: VisualShapeRole) i64 {
+    return switch (role) {
+        .inset => 8 * unit_scale(),
+        .control => 10 * unit_scale(),
+        .card => 14 * unit_scale(),
+        .panel => 16 * unit_scale(),
+        .overlay => 18 * unit_scale(),
+        .pill => 999 * unit_scale(),
+    };
+}
+
+fn shape_v2_resolve(role: VisualShapeRole,
+    width: i64, height: i64, padding: i64,
+    density: FlexDensity) ResolvedShapeV2 {
+    let valid: i32 = (shape_v2_role_valid(role) != 0 &&
+        width > 0 && height > 0 && padding >= 0) as i32;
+    let safe_role: VisualShapeRole = if (shape_v2_role_valid(role) != 0)
+        role else VisualShapeRole.control;
+    let radius: i64 = shape_v2_base_radius(safe_role);
+
+    // Dense professional layouts reduce radius one semantic step without
+    // falling back to square, legacy-looking controls.
+    if (density == FlexDensity.compact &&
+        safe_role != VisualShapeRole.inset &&
+        safe_role != VisualShapeRole.pill) {
+        radius = analytic_max(radius - 2 * unit_scale(), 0);
+    }
+
+    let maximum: i64 = analytic_min(width / 2, height / 2);
+    if (radius > maximum) { radius = maximum; }
+    let inner: i64 = analytic_max(radius - padding, 0);
+    let focus: i64 = radius + 4 * unit_scale();
+    let hash: i64 = visual_mix_hash(1469598103, safe_role as i64);
+    hash = visual_mix_hash(hash, width);
+    hash = visual_mix_hash(hash, height);
+    hash = visual_mix_hash(hash, padding);
+    hash = visual_mix_hash(hash, density as i64);
+    hash = visual_mix_hash(hash, radius);
+
+    return ResolvedShapeV2{
+        .role = safe_role,
+        .radius = radius,
+        .inner_radius = inner,
+        .focus_radius = focus,
+        // n = 4.0 in 16-bit fixed point: visibly softer than a circular
+        // rounded rectangle while remaining restrained and professional.
+        .superellipse_power_16 = 262140,
+        .evidence_hash = hash,
+        .valid = valid,
+    };
+}
