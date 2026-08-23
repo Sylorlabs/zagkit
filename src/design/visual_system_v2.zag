@@ -1,0 +1,282 @@
+@import("tokens.zag")
+
+// ZagKit v2 visual-system contract.
+//
+// Material role and elevation are intentionally independent. Content-bearing
+// surfaces remain solid even when elevated; veil and glass are reserved for
+// surfaces that genuinely float over live content. Every shadow derives from
+// one scene light and resolves to deterministic fixed-point data shared by CPU
+// and future GPU backends.
+
+enum VisualMaterialRole { automatic, solid, veil, glass }
+enum VisualSurfaceKind {
+    canvas,
+    content_panel,
+    raised_card,
+    floating_chrome,
+    transient_overlay,
+}
+enum VisualTransparency { normal, reduced }
+
+struct VisualEnvironment {
+    density: FlexDensity,
+    transparency: VisualTransparency,
+    high_contrast: i32,
+    backdrop_available: i32,
+}
+
+struct VisualSceneLight {
+    key_azimuth_degrees: i64,
+    key_zenith_degrees: i64,
+    shadow_direction_x: i64,
+    shadow_direction_y: i64,
+    ambient_alpha: i64,
+    rim_alpha: i64,
+}
+
+struct VisualShadowSpec {
+    offset_x: i64,
+    offset_y: i64,
+    blur_radius: i64,
+    spread: i64,
+    alpha: i64,
+}
+
+struct VisualShadowPair {
+    contact: VisualShadowSpec,
+    ambient: VisualShadowSpec,
+}
+
+struct VisualSurfaceEffects {
+    requested_role: VisualMaterialRole,
+    effective_role: VisualMaterialRole,
+    material_token: SemanticMaterialToken,
+    fill_token: SemanticColorToken,
+    tint_token: SemanticColorToken,
+    edge_token: SemanticColorToken,
+    radius_token: SemanticRadiusToken,
+    elevation_token: SemanticElevationToken,
+    tint_alpha: i64,
+    blur_radius: i64,
+    backdrop_blur_enabled: i32,
+    cpu_fallback_reason: []u8,
+    shadows: VisualShadowPair,
+}
+
+fn visual_flag_valid(value: i32) i32 {
+    return (value == 0 || value == 1) as i32;
+}
+
+fn visual_material_role_valid(role: VisualMaterialRole) i32 {
+    let value: i64 = role as i64;
+    return (value >= VisualMaterialRole.automatic as i64 &&
+        value <= VisualMaterialRole.glass as i64) as i32;
+}
+
+fn visual_surface_kind_valid(kind: VisualSurfaceKind) i32 {
+    let value: i64 = kind as i64;
+    return (value >= VisualSurfaceKind.canvas as i64 &&
+        value <= VisualSurfaceKind.transient_overlay as i64) as i32;
+}
+
+fn visual_transparency_valid(value: VisualTransparency) i32 {
+    let raw: i64 = value as i64;
+    return (raw >= VisualTransparency.normal as i64 &&
+        raw <= VisualTransparency.reduced as i64) as i32;
+}
+
+fn visual_density_valid(value: FlexDensity) i32 {
+    let raw: i64 = value as i64;
+    return (raw >= FlexDensity.compact as i64 &&
+        raw <= FlexDensity.touch as i64) as i32;
+}
+
+fn visual_environment(density: FlexDensity) VisualEnvironment {
+    let resolved: FlexDensity = density;
+    if (visual_density_valid(resolved) == 0) {
+        resolved = FlexDensity.standard;
+    }
+    return VisualEnvironment{
+        .density = resolved,
+        .transparency = VisualTransparency.normal,
+        .high_contrast = 0,
+        .backdrop_available = 0,
+    };
+}
+
+fn visual_environment_valid(environment: VisualEnvironment) i32 {
+    return (visual_density_valid(environment.density) != 0 &&
+        visual_transparency_valid(environment.transparency) != 0 &&
+        visual_flag_valid(environment.high_contrast) != 0 &&
+        visual_flag_valid(environment.backdrop_available) != 0) as i32;
+}
+
+fn visual_scene_light() VisualSceneLight {
+    return VisualSceneLight{
+        .key_azimuth_degrees = 40,
+        .key_zenith_degrees = 60,
+        .shadow_direction_x = (unit_scale() * 3) / 4,
+        .shadow_direction_y = unit_scale(),
+        .ambient_alpha = 27525,
+        .rim_alpha = 11796,
+    };
+}
+
+fn visual_default_role(kind: VisualSurfaceKind) VisualMaterialRole {
+    if (kind == VisualSurfaceKind.floating_chrome) {
+        return VisualMaterialRole.veil;
+    }
+    if (kind == VisualSurfaceKind.transient_overlay) {
+        return VisualMaterialRole.glass;
+    }
+    return VisualMaterialRole.solid;
+}
+
+fn visual_effective_role(kind: VisualSurfaceKind,
+    requested: VisualMaterialRole,
+    environment: VisualEnvironment) VisualMaterialRole {
+    let role: VisualMaterialRole = requested;
+    if (visual_material_role_valid(role) == 0 ||
+        role == VisualMaterialRole.automatic) {
+        role = visual_default_role(kind);
+    }
+    if (environment.transparency == VisualTransparency.reduced ||
+        environment.high_contrast != 0) {
+        return VisualMaterialRole.solid;
+    }
+    if (environment.density == FlexDensity.compact &&
+        role == VisualMaterialRole.veil) {
+        return VisualMaterialRole.solid;
+    }
+    return role;
+}
+
+fn visual_material_token(role: VisualMaterialRole) SemanticMaterialToken {
+    if (role == VisualMaterialRole.veil) {
+        return SemanticMaterialToken.veil;
+    }
+    if (role == VisualMaterialRole.glass) {
+        return SemanticMaterialToken.glass;
+    }
+    return SemanticMaterialToken.solid;
+}
+
+fn visual_surface_fill_token(kind: VisualSurfaceKind) SemanticColorToken {
+    return switch (kind) {
+        .canvas => SemanticColorToken.surface_base,
+        .content_panel => SemanticColorToken.surface_panel,
+        .raised_card => SemanticColorToken.surface_raised,
+        .floating_chrome => SemanticColorToken.surface_panel,
+        .transient_overlay => SemanticColorToken.surface_raised,
+    };
+}
+
+fn visual_surface_radius_token(kind: VisualSurfaceKind) SemanticRadiusToken {
+    return switch (kind) {
+        .canvas => SemanticRadiusToken.panel,
+        .content_panel => SemanticRadiusToken.panel,
+        .raised_card => SemanticRadiusToken.card,
+        .floating_chrome => SemanticRadiusToken.panel,
+        .transient_overlay => SemanticRadiusToken.card,
+    };
+}
+
+fn visual_surface_edge_token(kind: VisualSurfaceKind,
+    elevation: SemanticElevationToken) SemanticColorToken {
+    if (kind == VisualSurfaceKind.canvas ||
+        elevation == SemanticElevationToken.base) {
+        return SemanticColorToken.border_subtle;
+    }
+    return SemanticColorToken.edge_highlight;
+}
+
+fn visual_shadow_spec(offset: i64, blur: i64,
+    alpha: i64, light: VisualSceneLight) VisualShadowSpec {
+    return VisualShadowSpec{
+        .offset_x = (offset * light.shadow_direction_x) / unit_scale(),
+        .offset_y = (offset * light.shadow_direction_y) / unit_scale(),
+        .blur_radius = blur,
+        .spread = 0,
+        .alpha = alpha,
+    };
+}
+
+fn visual_shadow_pair(token: SemanticElevationToken) VisualShadowPair {
+    let elevation: ResolvedElevationToken = semantic_elevation(token);
+    let light: VisualSceneLight = visual_scene_light();
+    return VisualShadowPair{
+        .contact = visual_shadow_spec(elevation.contact_shadow_y,
+            elevation.contact_shadow_blur,
+            elevation.contact_shadow_alpha, light),
+        .ambient = visual_shadow_spec(elevation.ambient_shadow_y,
+            elevation.ambient_shadow_blur,
+            elevation.ambient_shadow_alpha, light),
+    };
+}
+
+fn visual_surface_effects(kind: VisualSurfaceKind,
+    requested: VisualMaterialRole,
+    elevation_token: SemanticElevationToken,
+    raw_environment: VisualEnvironment) VisualSurfaceEffects {
+    let environment: VisualEnvironment = raw_environment;
+    if (visual_environment_valid(environment) == 0) {
+        environment = visual_environment(FlexDensity.standard);
+    }
+    let safe_kind: VisualSurfaceKind = kind;
+    if (visual_surface_kind_valid(safe_kind) == 0) {
+        safe_kind = VisualSurfaceKind.content_panel;
+    }
+    let safe_requested: VisualMaterialRole = requested;
+    if (visual_material_role_valid(safe_requested) == 0) {
+        safe_requested = VisualMaterialRole.automatic;
+    }
+    let role: VisualMaterialRole = visual_effective_role(
+        safe_kind, safe_requested, environment);
+    let material_token: SemanticMaterialToken = visual_material_token(role);
+    let material: ResolvedMaterialToken = semantic_material(material_token);
+    let tint_alpha: i64 = material.tint_alpha_end;
+    let blur_radius: i64 = material.blur_radius;
+    if (role == VisualMaterialRole.solid) {
+        tint_alpha = 0;
+        blur_radius = 0;
+    }
+    let backdrop: i32 = (role != VisualMaterialRole.solid &&
+        environment.backdrop_available != 0) as i32;
+    return VisualSurfaceEffects{
+        .requested_role = safe_requested,
+        .effective_role = role,
+        .material_token = material_token,
+        .fill_token = visual_surface_fill_token(safe_kind),
+        .tint_token = material.tint_token,
+        .edge_token = visual_surface_edge_token(safe_kind, elevation_token),
+        .radius_token = visual_surface_radius_token(safe_kind),
+        .elevation_token = elevation_token,
+        .tint_alpha = tint_alpha,
+        .blur_radius = blur_radius,
+        .backdrop_blur_enabled = backdrop,
+        .cpu_fallback_reason = material.cpu_fallback_reason,
+        .shadows = visual_shadow_pair(elevation_token),
+    };
+}
+
+fn visual_viewport_area(viewport: Size) i64 {
+    if (viewport.width <= 0 || viewport.height <= 0) { return 0; }
+    if (viewport.width > 1000000 * unit_scale() ||
+        viewport.height > 1000000 * unit_scale()) { return 0; }
+    return (viewport.width / unit_scale()) *
+        (viewport.height / unit_scale());
+}
+
+fn visual_veil_area_budget(viewport: Size) i64 {
+    return visual_viewport_area(viewport) / 4;
+}
+
+fn visual_glass_layer_budget() i32 { return 1; }
+
+// Values are contrast ratios multiplied by 1000.
+fn visual_text_contrast_floor(role: VisualMaterialRole) i64 {
+    if (role == VisualMaterialRole.veil || role == VisualMaterialRole.glass) {
+        return 7000;
+    }
+    return 4500;
+}
