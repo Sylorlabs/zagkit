@@ -1,0 +1,1131 @@
+name: ZagKit v2 visual system
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  visual-foundation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      ZNC: ${{ github.workspace }}/.toolchain/zag/zag-poc/znc
+    steps:
+      - name: Check out ZagKit master
+        uses: actions/checkout@v6
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - name: Resolve pinned Zag revision
+        id: toolchain
+        run: echo "zag_sha=$(jq -r '.zag.commit' contracts/toolchain.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Check out pinned Zag toolchain
+        uses: actions/checkout@v6
+        with:
+          repository: Sylorlabs/zag
+          ref: ${{ steps.toolchain.outputs.zag_sha }}
+          path: .toolchain/zag
+
+      - name: Restore fixed-point Zag compiler
+        id: zag-cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            .toolchain/zag/zag-poc/znc
+            .toolchain/zag/zag-poc/zagd
+          key: zag-fixed-${{ runner.os }}-${{ steps.toolchain.outputs.zag_sha }}
+
+      - name: Bootstrap pinned Zag source
+        if: steps.zag-cache.outputs.cache-hit != 'true'
+        run: |
+          chmod +x .toolchain/zag/zag-poc/znc .toolchain/zag/zag-poc/bootstrap.sh
+          ZAG_BOOTSTRAP_MEMORY_GUARD=off .toolchain/zag/zag-poc/bootstrap.sh
+
+      - name: Detect foundation state
+        id: foundation
+        run: |
+          if [ -f contracts/visual-system-v2.json ]; then
+            echo "apply=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "apply=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Apply v2 visual foundation
+        if: steps.foundation.outputs.apply == 'true'
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          import json
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              file = Path(path)
+              text = file.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one replacement, found {count}: {old[:120]!r}")
+              file.write_text(text.replace(old, new, 1))
+
+          visual_system = r'''@import("tokens.zag")
+
+// ZagKit v2 visual-system contract.
+//
+// Material role and elevation are intentionally independent. Content-bearing
+// surfaces remain solid even when elevated; veil and glass are reserved for
+// surfaces that genuinely float over live content. Every shadow derives from
+// one scene light and resolves to deterministic fixed-point data shared by CPU
+// and future GPU backends.
+
+enum VisualMaterialRole { automatic, solid, veil, glass }
+enum VisualSurfaceKind {
+    canvas,
+    content_panel,
+    raised_card,
+    floating_chrome,
+    transient_overlay,
+}
+enum VisualTransparency { normal, reduced }
+
+struct VisualEnvironment {
+    density: FlexDensity,
+    transparency: VisualTransparency,
+    high_contrast: i32,
+    backdrop_available: i32,
+}
+
+struct VisualSceneLight {
+    key_azimuth_degrees: i64,
+    key_zenith_degrees: i64,
+    shadow_direction_x: i64,
+    shadow_direction_y: i64,
+    ambient_alpha: i64,
+    rim_alpha: i64,
+}
+
+struct VisualShadowSpec {
+    offset_x: i64,
+    offset_y: i64,
+    blur_radius: i64,
+    spread: i64,
+    alpha: i64,
+}
+
+struct VisualShadowPair {
+    contact: VisualShadowSpec,
+    ambient: VisualShadowSpec,
+}
+
+struct VisualSurfaceEffects {
+    requested_role: VisualMaterialRole,
+    effective_role: VisualMaterialRole,
+    material_token: SemanticMaterialToken,
+    fill_token: SemanticColorToken,
+    tint_token: SemanticColorToken,
+    edge_token: SemanticColorToken,
+    radius_token: SemanticRadiusToken,
+    elevation_token: SemanticElevationToken,
+    tint_alpha: i64,
+    blur_radius: i64,
+    backdrop_blur_enabled: i32,
+    cpu_fallback_reason: []u8,
+    shadows: VisualShadowPair,
+}
+
+fn visual_flag_valid(value: i32) i32 {
+    return (value == 0 || value == 1) as i32;
+}
+
+fn visual_material_role_valid(role: VisualMaterialRole) i32 {
+    let value: i64 = role as i64;
+    return (value >= VisualMaterialRole.automatic as i64 &&
+        value <= VisualMaterialRole.glass as i64) as i32;
+}
+
+fn visual_surface_kind_valid(kind: VisualSurfaceKind) i32 {
+    let value: i64 = kind as i64;
+    return (value >= VisualSurfaceKind.canvas as i64 &&
+        value <= VisualSurfaceKind.transient_overlay as i64) as i32;
+}
+
+fn visual_transparency_valid(value: VisualTransparency) i32 {
+    let raw: i64 = value as i64;
+    return (raw >= VisualTransparency.normal as i64 &&
+        raw <= VisualTransparency.reduced as i64) as i32;
+}
+
+fn visual_density_valid(value: FlexDensity) i32 {
+    let raw: i64 = value as i64;
+    return (raw >= FlexDensity.compact as i64 &&
+        raw <= FlexDensity.touch as i64) as i32;
+}
+
+fn visual_environment(density: FlexDensity) VisualEnvironment {
+    let resolved: FlexDensity = density;
+    if (visual_density_valid(resolved) == 0) {
+        resolved = FlexDensity.standard;
+    }
+    return VisualEnvironment{
+        .density = resolved,
+        .transparency = VisualTransparency.normal,
+        .high_contrast = 0,
+        .backdrop_available = 0,
+    };
+}
+
+fn visual_environment_valid(environment: VisualEnvironment) i32 {
+    return (visual_density_valid(environment.density) != 0 &&
+        visual_transparency_valid(environment.transparency) != 0 &&
+        visual_flag_valid(environment.high_contrast) != 0 &&
+        visual_flag_valid(environment.backdrop_available) != 0) as i32;
+}
+
+fn visual_scene_light() VisualSceneLight {
+    return VisualSceneLight{
+        .key_azimuth_degrees = 40,
+        .key_zenith_degrees = 60,
+        .shadow_direction_x = (unit_scale() * 3) / 4,
+        .shadow_direction_y = unit_scale(),
+        .ambient_alpha = 27525,
+        .rim_alpha = 11796,
+    };
+}
+
+fn visual_default_role(kind: VisualSurfaceKind) VisualMaterialRole {
+    if (kind == VisualSurfaceKind.floating_chrome) {
+        return VisualMaterialRole.veil;
+    }
+    if (kind == VisualSurfaceKind.transient_overlay) {
+        return VisualMaterialRole.glass;
+    }
+    return VisualMaterialRole.solid;
+}
+
+fn visual_effective_role(kind: VisualSurfaceKind,
+    requested: VisualMaterialRole,
+    environment: VisualEnvironment) VisualMaterialRole {
+    let role: VisualMaterialRole = requested;
+    if (visual_material_role_valid(role) == 0 ||
+        role == VisualMaterialRole.automatic) {
+        role = visual_default_role(kind);
+    }
+    if (environment.transparency == VisualTransparency.reduced ||
+        environment.high_contrast != 0) {
+        return VisualMaterialRole.solid;
+    }
+    if (environment.density == FlexDensity.compact &&
+        role == VisualMaterialRole.veil) {
+        return VisualMaterialRole.solid;
+    }
+    return role;
+}
+
+fn visual_material_token(role: VisualMaterialRole) SemanticMaterialToken {
+    if (role == VisualMaterialRole.veil) {
+        return SemanticMaterialToken.veil;
+    }
+    if (role == VisualMaterialRole.glass) {
+        return SemanticMaterialToken.glass;
+    }
+    return SemanticMaterialToken.solid;
+}
+
+fn visual_surface_fill_token(kind: VisualSurfaceKind) SemanticColorToken {
+    return switch (kind) {
+        .canvas => SemanticColorToken.surface_base,
+        .content_panel => SemanticColorToken.surface_panel,
+        .raised_card => SemanticColorToken.surface_raised,
+        .floating_chrome => SemanticColorToken.surface_panel,
+        .transient_overlay => SemanticColorToken.surface_raised,
+    };
+}
+
+fn visual_surface_radius_token(kind: VisualSurfaceKind) SemanticRadiusToken {
+    return switch (kind) {
+        .canvas => SemanticRadiusToken.panel,
+        .content_panel => SemanticRadiusToken.panel,
+        .raised_card => SemanticRadiusToken.card,
+        .floating_chrome => SemanticRadiusToken.panel,
+        .transient_overlay => SemanticRadiusToken.card,
+    };
+}
+
+fn visual_surface_edge_token(kind: VisualSurfaceKind,
+    elevation: SemanticElevationToken) SemanticColorToken {
+    if (kind == VisualSurfaceKind.canvas ||
+        elevation == SemanticElevationToken.base) {
+        return SemanticColorToken.border_subtle;
+    }
+    return SemanticColorToken.edge_highlight;
+}
+
+fn visual_shadow_spec(offset: i64, blur: i64,
+    alpha: i64, light: VisualSceneLight) VisualShadowSpec {
+    return VisualShadowSpec{
+        .offset_x = (offset * light.shadow_direction_x) / unit_scale(),
+        .offset_y = (offset * light.shadow_direction_y) / unit_scale(),
+        .blur_radius = blur,
+        .spread = 0,
+        .alpha = alpha,
+    };
+}
+
+fn visual_shadow_pair(token: SemanticElevationToken) VisualShadowPair {
+    let elevation: ResolvedElevationToken = semantic_elevation(token);
+    let light: VisualSceneLight = visual_scene_light();
+    return VisualShadowPair{
+        .contact = visual_shadow_spec(elevation.contact_shadow_y,
+            elevation.contact_shadow_blur,
+            elevation.contact_shadow_alpha, light),
+        .ambient = visual_shadow_spec(elevation.ambient_shadow_y,
+            elevation.ambient_shadow_blur,
+            elevation.ambient_shadow_alpha, light),
+    };
+}
+
+fn visual_surface_effects(kind: VisualSurfaceKind,
+    requested: VisualMaterialRole,
+    elevation_token: SemanticElevationToken,
+    raw_environment: VisualEnvironment) VisualSurfaceEffects {
+    let environment: VisualEnvironment = raw_environment;
+    if (visual_environment_valid(environment) == 0) {
+        environment = visual_environment(FlexDensity.standard);
+    }
+    let safe_kind: VisualSurfaceKind = kind;
+    if (visual_surface_kind_valid(safe_kind) == 0) {
+        safe_kind = VisualSurfaceKind.content_panel;
+    }
+    let safe_requested: VisualMaterialRole = requested;
+    if (visual_material_role_valid(safe_requested) == 0) {
+        safe_requested = VisualMaterialRole.automatic;
+    }
+    let role: VisualMaterialRole = visual_effective_role(
+        safe_kind, safe_requested, environment);
+    let material_token: SemanticMaterialToken = visual_material_token(role);
+    let material: ResolvedMaterialToken = semantic_material(material_token);
+    let tint_alpha: i64 = material.tint_alpha_end;
+    let blur_radius: i64 = material.blur_radius;
+    if (role == VisualMaterialRole.solid) {
+        tint_alpha = 0;
+        blur_radius = 0;
+    }
+    let backdrop: i32 = (role != VisualMaterialRole.solid &&
+        environment.backdrop_available != 0) as i32;
+    return VisualSurfaceEffects{
+        .requested_role = safe_requested,
+        .effective_role = role,
+        .material_token = material_token,
+        .fill_token = visual_surface_fill_token(safe_kind),
+        .tint_token = material.tint_token,
+        .edge_token = visual_surface_edge_token(safe_kind, elevation_token),
+        .radius_token = visual_surface_radius_token(safe_kind),
+        .elevation_token = elevation_token,
+        .tint_alpha = tint_alpha,
+        .blur_radius = blur_radius,
+        .backdrop_blur_enabled = backdrop,
+        .cpu_fallback_reason = material.cpu_fallback_reason,
+        .shadows = visual_shadow_pair(elevation_token),
+    };
+}
+
+fn visual_viewport_area(viewport: Size) i64 {
+    if (viewport.width <= 0 || viewport.height <= 0) { return 0; }
+    if (viewport.width > 1000000 * unit_scale() ||
+        viewport.height > 1000000 * unit_scale()) { return 0; }
+    return (viewport.width / unit_scale()) *
+        (viewport.height / unit_scale());
+}
+
+fn visual_veil_area_budget(viewport: Size) i64 {
+    return visual_viewport_area(viewport) / 4;
+}
+
+fn visual_glass_layer_budget() i32 { return 1; }
+
+// Values are contrast ratios multiplied by 1000.
+fn visual_text_contrast_floor(role: VisualMaterialRole) i64 {
+    if (role == VisualMaterialRole.veil || role == VisualMaterialRole.glass) {
+        return 7000;
+    }
+    return 4500;
+}
+'''
+
+          visual_test = r'''@import("../src/design/visual_system_v2.zag")
+@import("../src/render/cpu_raster.zag")
+@import("../src/render/display_list_codec.zag")
+
+struct TestState { passed: i32, failed: i32 }
+
+fn expect(state: *TestState, condition: i32, name: []u8) void {
+    if (condition != 0) {
+        state.*.passed = state.*.passed + 1;
+        _zag_print("ok  "); _zag_println(name);
+    } else {
+        state.*.failed = state.*.failed + 1;
+        _zag_print("FAIL "); _zag_println(name);
+    }
+}
+
+fn pixel(surface: CpuSurface, x: i32, y: i32, channel: i32) i64 {
+    return surface.pixels.data[(y * surface.width + x) * 4 + channel] as i64;
+}
+
+fn material_contract(state: *TestState) void {
+    let standard: VisualEnvironment = visual_environment(FlexDensity.standard);
+    let compact: VisualEnvironment = visual_environment(FlexDensity.compact);
+    let panel: VisualSurfaceEffects = visual_surface_effects(
+        VisualSurfaceKind.content_panel, VisualMaterialRole.automatic,
+        SemanticElevationToken.panel, standard);
+    let card: VisualSurfaceEffects = visual_surface_effects(
+        VisualSurfaceKind.raised_card, VisualMaterialRole.automatic,
+        SemanticElevationToken.raised, standard);
+    let chrome: VisualSurfaceEffects = visual_surface_effects(
+        VisualSurfaceKind.floating_chrome, VisualMaterialRole.automatic,
+        SemanticElevationToken.panel, standard);
+    let compact_chrome: VisualSurfaceEffects = visual_surface_effects(
+        VisualSurfaceKind.floating_chrome, VisualMaterialRole.automatic,
+        SemanticElevationToken.panel, compact);
+    let overlay: VisualSurfaceEffects = visual_surface_effects(
+        VisualSurfaceKind.transient_overlay, VisualMaterialRole.automatic,
+        SemanticElevationToken.overlay, standard);
+
+    expect(state, panel.effective_role == VisualMaterialRole.solid &&
+        panel.fill_token == SemanticColorToken.surface_panel &&
+        panel.material_token == SemanticMaterialToken.solid,
+        "content panels remain solid while preserving panel luminance");
+    expect(state, card.effective_role == VisualMaterialRole.solid &&
+        card.fill_token == SemanticColorToken.surface_raised &&
+        card.radius_token == SemanticRadiusToken.card,
+        "raised cards use elevation without pretending to be translucent");
+    expect(state, chrome.effective_role == VisualMaterialRole.veil &&
+        chrome.blur_radius == 20 * unit_scale() &&
+        chrome.tint_alpha > 0,
+        "floating chrome resolves to bounded veil material");
+    expect(state, compact_chrome.effective_role == VisualMaterialRole.solid &&
+        compact_chrome.blur_radius == 0,
+        "compact density demotes persistent veil to efficient solid chrome");
+    expect(state, overlay.effective_role == VisualMaterialRole.glass &&
+        overlay.blur_radius == 36 * unit_scale() &&
+        visual_text_contrast_floor(overlay.effective_role) == 7000,
+        "transient overlays alone receive full glass treatment and stronger contrast");
+
+    let reduced: VisualEnvironment = standard;
+    reduced.transparency = VisualTransparency.reduced;
+    let reduced_overlay: VisualSurfaceEffects = visual_surface_effects(
+        VisualSurfaceKind.transient_overlay, VisualMaterialRole.automatic,
+        SemanticElevationToken.overlay, reduced);
+    expect(state, reduced_overlay.effective_role == VisualMaterialRole.solid &&
+        reduced_overlay.blur_radius == 0 && reduced_overlay.tint_alpha == 0,
+        "reduced transparency is a deterministic material demotion");
+
+    let high: VisualEnvironment = standard;
+    high.high_contrast = 1;
+    let high_chrome: VisualSurfaceEffects = visual_surface_effects(
+        VisualSurfaceKind.floating_chrome, VisualMaterialRole.automatic,
+        SemanticElevationToken.panel, high);
+    expect(state, high_chrome.effective_role == VisualMaterialRole.solid,
+        "high contrast removes variable translucent backdrops");
+
+    let shadows: VisualShadowPair = visual_shadow_pair(
+        SemanticElevationToken.raised);
+    expect(state, shadows.contact.offset_x > 0 &&
+        shadows.contact.offset_y > shadows.contact.offset_x &&
+        shadows.ambient.blur_radius > shadows.contact.blur_radius &&
+        shadows.ambient.alpha < shadows.contact.alpha,
+        "one scene light derives coherent contact and ambient shadows");
+    expect(state, visual_veil_area_budget(size(1200 * unit_scale(),
+            800 * unit_scale())) == 240000 &&
+        visual_glass_layer_budget() == 1,
+        "veil area and glass-layer work remain explicitly bounded");
+}
+
+fn shadow_scene() DisplayList {
+    let list: DisplayList = display_list_make();
+    let shadow: DisplayOp = display_op(
+        DisplayOpKind.fill_rounded_shadow, node_key(700));
+    shadow.bounds = rect(10 * unit_scale(), 10 * unit_scale(),
+        20 * unit_scale(), 20 * unit_scale());
+    shadow.parameter = 6 * unit_scale();
+    shadow.paint = paint_rgba16(0, 0, 0, 36000);
+    shadow.paint.stroke_width = 6 * unit_scale();
+    _ = display_list_push(&list, shadow);
+
+    let fill: DisplayOp = display_op(
+        DisplayOpKind.fill_rounded_rect, node_key(700));
+    fill.bounds = shadow.bounds;
+    fill.parameter = shadow.parameter;
+    fill.paint = paint_rgba16(56000, 58000, 62000, 65535);
+    _ = display_list_push(&list, fill);
+    _ = display_list_seal(&list);
+    return list;
+}
+
+fn analytic_shadow_contract(state: *TestState) void {
+    let list: DisplayList = shadow_scene();
+    let first: CpuRasterResult = cpu_rasterize(list, 40, 40);
+    let second: CpuRasterResult = cpu_rasterize(list, 40, 40);
+    expect(state, first.error == CpuRasterError.none &&
+        first.rendered_ops == 2 && first.pixels_touched > 400,
+        "CPU oracle executes analytic rounded shadows as bounded display work");
+    expect(state, pixel(first.surface, 20, 20, 3) == 255 &&
+        pixel(first.surface, 20, 34, 3) > 0 &&
+        pixel(first.surface, 20, 34, 3) < 255 &&
+        pixel(first.surface, 20, 39, 3) == 0,
+        "shadow falloff is soft near the surface and reaches exact zero outside support");
+    expect(state, cpu_surface_hash(first.surface) ==
+        cpu_surface_hash(second.surface),
+        "analytic shadow pixels are deterministic across identical renders");
+
+    let encoded: DisplayEncodeResult = display_list_encode(list);
+    let decoded: DisplayDecodeResult = display_list_decode(encoded.bytes);
+    expect(state, encoded.error == DisplayCodecError.none &&
+        decoded.error == DisplayCodecError.none &&
+        decoded.list.ops.data[0].kind == DisplayOpKind.fill_rounded_shadow &&
+        decoded.list.ops.data[0].paint.stroke_width == 6 * unit_scale(),
+        "display-list transport preserves shadow kind radius blur and identity");
+
+    display_decode_free(&decoded);
+    display_encode_free(&encoded);
+    cpu_raster_free(&second);
+    cpu_raster_free(&first);
+    display_list_free(&list);
+}
+
+fn rejection_contract(state: *TestState) void {
+    let list: DisplayList = display_list_make();
+    let shadow: DisplayOp = display_op(
+        DisplayOpKind.fill_rounded_shadow, node_key(701));
+    shadow.bounds = rect(0, 0, 20 * unit_scale(), 20 * unit_scale());
+    shadow.parameter = 6 * unit_scale();
+    shadow.paint.stroke_width = 0;
+    expect(state, display_list_push(&list, shadow) ==
+        DisplayError.invalid_parameter && list.ops.len == 0,
+        "zero-blur shadow operations fail before display-list mutation");
+    shadow.paint.stroke_width = 300 * unit_scale();
+    expect(state, display_list_push(&list, shadow) ==
+        DisplayError.invalid_parameter && list.ops.len == 0,
+        "unbounded shadow support is rejected before raster work");
+    display_list_free(&list);
+}
+
+fn main() i32 {
+    let state: TestState = TestState{ .passed = 0, .failed = 0 };
+    material_contract(&state);
+    analytic_shadow_contract(&state);
+    rejection_contract(&state);
+    let passed: []u8 = _zag_i64_to_str(state.passed as i64);
+    let failed: []u8 = _zag_i64_to_str(state.failed as i64);
+    _zag_print("ZagKit v2 visual contract: pass="); _zag_print(passed);
+    _zag_print(" fail="); _zag_println(failed);
+    _zag_str_free(passed);
+    _zag_str_free(failed);
+    if (state.failed == 0) { return 0; }
+    return 1;
+}
+'''
+
+          visual_doc = r'''# ZagKit v2 visual-system contract
+
+Status: **active foundation**
+
+This contract upgrades ZagKit's visual layer without replacing its retained
+identity, state, reconciliation, Flex, semantics, input, replay, or display-list
+architecture.
+
+## Product rule
+
+ZagKit v2 separates **material role** from **elevation**:
+
+- canvases, content panels, cards, tables, editors, and form fields are solid;
+- persistent chrome may use a bounded veil only while floating over live content;
+- transient menus, popovers, command palettes, and dialogs may use glass;
+- compact density demotes veil to solid;
+- reduced transparency and high contrast demote all translucency to solid;
+- one scene light derives every contact shadow, ambient shadow, and edge cue.
+
+## Rendering contract
+
+`fill_rounded_shadow` is the first native analytic effect operation. Its
+`bounds` and `parameter` describe the source rounded rectangle; paint alpha owns
+shadow opacity and `paint.stroke_width` owns the finite blur support radius.
+The operation allocates no temporary image, has a hard blur limit, participates
+in deterministic display identity and codec transport, and is implemented by
+the CPU oracle with fixed-point signed-distance falloff.
+
+Future GPU backends must consume the same operation and remain within the
+published CPU tolerance. They may accelerate evaluation but may not reinterpret
+the material system.
+
+## Efficiency gates
+
+- veil area is limited to 25% of the viewport;
+- one live glass layer is allowed per interaction;
+- shadow work is clipped to blur-expanded damage bounds;
+- dense compact interfaces pay no persistent backdrop-sampling cost;
+- unsupported backdrop blur uses the explicit deterministic CPU fallback;
+- idle material and shadow state requests no frames.
+'''
+
+          contract = {
+              "schema_version": 1,
+              "product": "ZagKit",
+              "language_target": "Zag v2",
+              "status": "active-foundation",
+              "principles": [
+                  "material-role-independent-of-elevation",
+                  "solid-content-surfaces",
+                  "bounded-veil-and-glass",
+                  "single-scene-light",
+                  "deterministic-analytic-shadow",
+                  "shared-cpu-gpu-render-ir",
+              ],
+              "budgets": {
+                  "veil_viewport_area_fraction": 0.25,
+                  "live_glass_layers_per_interaction": 1,
+                  "max_shadow_blur_dp": 256,
+              },
+              "required_modes": [
+                  "light", "dark", "high-contrast",
+                  "reduced-transparency", "reduced-motion",
+                  "compact", "standard", "touch",
+              ],
+          }
+
+          Path("src/design/visual_system_v2.zag").write_text(visual_system)
+          Path("tests/visual_system_v2_contract.zag").write_text(visual_test)
+          Path("docs/architecture/visual-system-v2.md").write_text(visual_doc)
+          Path("contracts/visual-system-v2.json").write_text(
+              json.dumps(contract, indent=2) + "\n")
+
+          # Display-list IR: append the new kind to preserve all existing codes.
+          replace_once(
+              "src/render/display_list.zag",
+              "    apply_effect,\n    fill_rounded_rect,\n}",
+              "    apply_effect,\n    fill_rounded_rect,\n    fill_rounded_shadow,\n}",
+          )
+          replace_once(
+              "src/render/display_list.zag",
+              "        .fill_rounded_rect => 0 - 1,\n    };",
+              "        .fill_rounded_rect => 0 - 1,\n        .fill_rounded_shadow => 0 - 1,\n    };",
+          )
+          replace_once(
+              "src/render/display_list.zag",
+              "    return (kind == DisplayOpKind.clip_rect || kind == DisplayOpKind.fill_rect ||\n        kind == DisplayOpKind.fill_rounded_rect ||\n        kind == DisplayOpKind.stroke_rect || kind == DisplayOpKind.draw_image ||\n        kind == DisplayOpKind.begin_layer) as i32;",
+              "    return (kind == DisplayOpKind.clip_rect || kind == DisplayOpKind.fill_rect ||\n        kind == DisplayOpKind.fill_rounded_rect ||\n        kind == DisplayOpKind.fill_rounded_shadow ||\n        kind == DisplayOpKind.stroke_rect || kind == DisplayOpKind.draw_image ||\n        kind == DisplayOpKind.begin_layer) as i32;",
+          )
+          replace_once(
+              "src/render/display_list.zag",
+              "    if (op.kind == DisplayOpKind.fill_rounded_rect &&\n        (op.parameter <= 0 || op.parameter * 2 > op.bounds.width ||\n         op.parameter * 2 > op.bounds.height)) {\n        return display_fail(list, DisplayError.invalid_parameter);\n    }",
+              "    if (op.kind == DisplayOpKind.fill_rounded_rect &&\n        (op.parameter <= 0 || op.parameter * 2 > op.bounds.width ||\n         op.parameter * 2 > op.bounds.height)) {\n        return display_fail(list, DisplayError.invalid_parameter);\n    }\n    if (op.kind == DisplayOpKind.fill_rounded_shadow &&\n        (op.parameter <= 0 || op.parameter * 2 > op.bounds.width ||\n         op.parameter * 2 > op.bounds.height ||\n         op.paint.stroke_width <= 0 ||\n         op.paint.stroke_width > 256 * unit_scale())) {\n        return display_fail(list, DisplayError.invalid_parameter);\n    }",
+          )
+
+          # The binary layout is unchanged; the appended enum code is now legal.
+          replace_once(
+              "src/render/display_list_codec.zag",
+              "        if (kind_code < 0 || kind_code > 12) {",
+              "        if (kind_code < 0 || kind_code > 13) {",
+          )
+
+          shadow_functions = r'''
+fn cpu_abs(value: i64) i64 {
+    if (value < 0) { return 0 - value; }
+    return value;
+}
+
+fn cpu_max(left: i64, right: i64) i64 {
+    if (left > right) { return left; }
+    return right;
+}
+
+fn cpu_isqrt(value: i64) i64 {
+    if (value <= 0) { return 0; }
+    let result: i64 = value;
+    let next: i64 = (result + 1) / 2;
+    while (next < result) {
+        result = next;
+        next = (result + value / result) / 2;
+    }
+    return result;
+}
+
+fn cpu_rounded_signed_distance(bounds: Rect, radius: i64,
+    x: i64, y: i64) i64 {
+    let half_width: i64 = bounds.width / 2;
+    let half_height: i64 = bounds.height / 2;
+    let center_x: i64 = bounds.x + half_width;
+    let center_y: i64 = bounds.y + half_height;
+    let inner_x: i64 = half_width - radius;
+    let inner_y: i64 = half_height - radius;
+    let qx: i64 = cpu_abs(x - center_x) - inner_x;
+    let qy: i64 = cpu_abs(y - center_y) - inner_y;
+    let outside_x: i64 = cpu_max(qx, 0);
+    let outside_y: i64 = cpu_max(qy, 0);
+    let outside: i64 = cpu_isqrt(outside_x * outside_x +
+        outside_y * outside_y);
+    let inside: i64 = cpu_max(qx, qy);
+    if (inside > 0) { inside = 0; }
+    return outside + inside - radius;
+}
+
+fn cpu_shadow_coverage(distance: i64, blur_radius: i64) i64 {
+    if (distance <= 0) { return 4096; }
+    if (distance >= blur_radius || blur_radius <= 0) { return 0; }
+    let progress: i64 = ((blur_radius - distance) * 4096) /
+        blur_radius;
+    let numerator: i64 = progress * progress *
+        (3 * 4096 - 2 * progress);
+    return (numerator + (4096 * 4096) / 2) /
+        (4096 * 4096);
+}
+
+fn cpu_fill_rounded_shadow(surface: *CpuSurface, raw_bounds: Rect,
+    raw_radius: i64, clip: Rect, transform: Transform,
+    paint: Paint) CpuRasterResult {
+    let shape: Rect = cpu_transform_rect(raw_bounds, transform);
+    let scale: i64 = transform.scale_x;
+    if (transform.scale_y < scale) { scale = transform.scale_y; }
+    let radius: i64 = (raw_radius * scale) / unit_scale();
+    let blur_radius: i64 = (paint.stroke_width * scale) /
+        unit_scale();
+    if (shape.width <= 0 || shape.height <= 0 || radius <= 0 ||
+        radius * 2 > shape.width || radius * 2 > shape.height ||
+        blur_radius <= 0 || blur_radius > 256 * unit_scale()) {
+        return cpu_result(surface.*, CpuRasterError.invalid_geometry,
+            0 - 1, 0, 0);
+    }
+    let expanded: Rect = rect(shape.x - blur_radius,
+        shape.y - blur_radius, shape.width + blur_radius * 2,
+        shape.height + blur_radius * 2);
+    let bounds: Rect = cpu_rect_intersection(
+        cpu_rect_intersection(expanded, clip),
+        rect(0, 0, (surface.*.width as i64) * unit_scale(),
+            (surface.*.height as i64) * unit_scale())
+    );
+    if (bounds.width <= 0 || bounds.height <= 0) {
+        return cpu_result(surface.*, CpuRasterError.none, 0 - 1, 0, 0);
+    }
+    let first_x: i32 = (bounds.x / unit_scale()) as i32;
+    let first_y: i32 = (bounds.y / unit_scale()) as i32;
+    let last_x: i32 = ((bounds.x + bounds.width + unit_scale() - 1) /
+        unit_scale()) as i32;
+    let last_y: i32 = ((bounds.y + bounds.height + unit_scale() - 1) /
+        unit_scale()) as i32;
+    let pixel_count: i64 = ((last_x - first_x) as i64) *
+        ((last_y - first_y) as i64);
+    if (pixel_count <= 0 || pixel_count > 50000000) {
+        return cpu_result(surface.*, CpuRasterError.work_limit,
+            0 - 1, 0, 0);
+    }
+    let touched: i64 = 0;
+    let y: i32 = first_y;
+    while (y < last_y) {
+        let x: i32 = first_x;
+        while (x < last_x) {
+            let point_x: i64 = (x as i64) * unit_scale() +
+                unit_scale() / 2;
+            let point_y: i64 = (y as i64) * unit_scale() +
+                unit_scale() / 2;
+            let distance: i64 = cpu_rounded_signed_distance(
+                shape, radius, point_x, point_y);
+            let coverage: i64 = cpu_shadow_coverage(distance,
+                blur_radius);
+            if (coverage > 0) {
+                cpu_blend_pixel(surface, x, y, paint, coverage);
+                touched = touched + 1;
+            }
+            x = x + 1;
+        }
+        y = y + 1;
+    }
+    return cpu_result(surface.*, CpuRasterError.none,
+        0 - 1, 0, touched);
+}
+'''
+          replace_once(
+              "src/render/cpu_raster.zag",
+              "    return cpu_result(surface.*, CpuRasterError.none, 0 - 1, 0, touched);\n}\n\nfn cpu_rect_pixel_coverage(bounds: Rect, x: i32, y: i32) i64 {",
+              "    return cpu_result(surface.*, CpuRasterError.none, 0 - 1, 0, touched);\n}\n" +
+              shadow_functions +
+              "\nfn cpu_rect_pixel_coverage(bounds: Rect, x: i32, y: i32) i64 {",
+          )
+          replace_once(
+              "src/render/cpu_raster.zag",
+              "        } else if (op.kind == DisplayOpKind.fill_rounded_rect) {\n            let rounded: CpuRasterResult = cpu_fill_rounded_rect(&surface,\n                op.bounds, op.parameter, current.clip, current.transform, op.paint);\n            if (rounded.error != CpuRasterError.none) {\n                free[CpuRasterState](&stack);\n                return cpu_result(surface, rounded.error, i,\n                    rendered_ops, pixels_touched);\n            }\n            pixels_touched = pixels_touched + rounded.pixels_touched;\n        } else if (op.kind == DisplayOpKind.stroke_rect) {",
+              "        } else if (op.kind == DisplayOpKind.fill_rounded_rect) {\n            let rounded: CpuRasterResult = cpu_fill_rounded_rect(&surface,\n                op.bounds, op.parameter, current.clip, current.transform, op.paint);\n            if (rounded.error != CpuRasterError.none) {\n                free[CpuRasterState](&stack);\n                return cpu_result(surface, rounded.error, i,\n                    rendered_ops, pixels_touched);\n            }\n            pixels_touched = pixels_touched + rounded.pixels_touched;\n        } else if (op.kind == DisplayOpKind.fill_rounded_shadow) {\n            let shadow: CpuRasterResult = cpu_fill_rounded_shadow(&surface,\n                op.bounds, op.parameter, current.clip, current.transform, op.paint);\n            if (shadow.error != CpuRasterError.none) {\n                free[CpuRasterState](&stack);\n                return cpu_result(surface, shadow.error, i,\n                    rendered_ops, pixels_touched);\n            }\n            pixels_touched = pixels_touched + shadow.pixels_touched;\n        } else if (op.kind == DisplayOpKind.stroke_rect) {",
+          )
+
+          # Surface policy and native analytic shadows.
+          replace_once(
+              "src/components/surface.zag",
+              '@import("button.zag")\n',
+              '@import("button.zag")\n@import("../design/visual_system_v2.zag")\n',
+          )
+          replace_once(
+              "src/components/surface.zag",
+              "    tier: SurfaceTier,\n    mode: SurfaceMode,",
+              "    tier: SurfaceTier,\n    material_role: VisualMaterialRole,\n    reduced_transparency: i32,\n    high_contrast: i32,\n    backdrop_available: i32,\n    mode: SurfaceMode,",
+          )
+          replace_once(
+              "src/components/surface.zag",
+              "struct SurfaceResolvedStyle {\n    material_token: SemanticMaterialToken,",
+              "struct SurfaceResolvedStyle {\n    material_token: SemanticMaterialToken,\n    requested_material_role: VisualMaterialRole,\n    effective_material_role: VisualMaterialRole,\n    backdrop_blur_enabled: i32,\n    blur_radius: i64,\n    cpu_fallback_reason: []u8,",
+          )
+
+          old_material_mapping = r'''// Material tier mapping: each SurfaceTier selects the SemanticMaterialToken
+// whose resolved elevation_token and fill_token match the tier's semantic
+// role.
+//   base   → solid: fill=surface_base, elevation=base, no tint gradient,
+//            no blur.  The bottom-most opaque layer should not simulate
+//            translucency or cast shadows.
+//   panel  → veil:  fill=surface_panel, elevation=panel, tint gradient
+//            0→12000, blur=20.  A translucent layer above the base.
+//   raised → glass: fill=surface_raised, elevation=raised, tint gradient,
+//            blur=30.  A more visibly elevated translucent layer.
+//   overlay → glass: same material as raised but the surface_tier_elevation
+//            mapping selects SemanticElevationToken.overlay, producing
+//            deeper shadows.  No separate overlay material is needed
+//            because the elevation token already differentiates the two.
+fn surface_material_token(tier: SurfaceTier) SemanticMaterialToken {
+    if (surface_tier_valid(tier) == 0) {
+        return SemanticMaterialToken.solid;
+    }
+    return switch (tier) {
+        .base => SemanticMaterialToken.solid,
+        .panel => SemanticMaterialToken.veil,
+        .raised => SemanticMaterialToken.glass,
+        .overlay => SemanticMaterialToken.glass,
+    };
+}
+'''
+          new_material_mapping = r'''// Elevation expresses stacking; material expresses backdrop behavior.
+// Content-bearing base, panel, and raised surfaces are solid by default.
+// Only transient overlays default to glass. Callers may explicitly request
+// veil for genuinely floating persistent chrome; compact, high-contrast, and
+// reduced-transparency environments demote it deterministically.
+fn surface_visual_kind(tier: SurfaceTier) VisualSurfaceKind {
+    return switch (tier) {
+        .base => VisualSurfaceKind.canvas,
+        .panel => VisualSurfaceKind.content_panel,
+        .raised => VisualSurfaceKind.raised_card,
+        .overlay => VisualSurfaceKind.transient_overlay,
+    };
+}
+
+fn surface_visual_environment(spec: SurfaceSpec) VisualEnvironment {
+    let environment: VisualEnvironment = visual_environment(spec.density);
+    if (spec.reduced_transparency != 0) {
+        environment.transparency = VisualTransparency.reduced;
+    }
+    environment.high_contrast = spec.high_contrast;
+    environment.backdrop_available = spec.backdrop_available;
+    return environment;
+}
+
+fn surface_visual_effects(spec: SurfaceSpec,
+    elevation: SemanticElevationToken) VisualSurfaceEffects {
+    return visual_surface_effects(surface_visual_kind(spec.tier),
+        spec.material_role, elevation, surface_visual_environment(spec));
+}
+
+// Compatibility query for the automatic standard-density policy.
+fn surface_material_token(tier: SurfaceTier) SemanticMaterialToken {
+    let environment: VisualEnvironment = visual_environment(
+        FlexDensity.standard);
+    return visual_surface_effects(surface_visual_kind(tier),
+        VisualMaterialRole.automatic, surface_tier_elevation(tier),
+        environment).material_token;
+}
+
+fn surface_with_material(raw: SurfaceSpec,
+    role: VisualMaterialRole) SurfaceSpec {
+    let spec: SurfaceSpec = raw;
+    spec.material_role = role;
+    return spec;
+}
+
+fn surface_with_reduced_transparency(raw: SurfaceSpec,
+    enabled: i32) SurfaceSpec {
+    let spec: SurfaceSpec = raw;
+    spec.reduced_transparency = enabled;
+    return spec;
+}
+
+fn surface_with_high_contrast(raw: SurfaceSpec,
+    enabled: i32) SurfaceSpec {
+    let spec: SurfaceSpec = raw;
+    spec.high_contrast = enabled;
+    return spec;
+}
+
+fn surface_with_backdrop(raw: SurfaceSpec,
+    available: i32) SurfaceSpec {
+    let spec: SurfaceSpec = raw;
+    spec.backdrop_available = available;
+    return spec;
+}
+'''
+          replace_once("src/components/surface.zag",
+              old_material_mapping, new_material_mapping)
+
+          replace_once(
+              "src/components/surface.zag",
+              "        .tier = tier,\n        .mode = SurfaceMode.group,",
+              "        .tier = tier,\n        .material_role = VisualMaterialRole.automatic,\n        .reduced_transparency = 0,\n        .high_contrast = 0,\n        .backdrop_available = 0,\n        .mode = SurfaceMode.group,",
+          )
+
+          old_style_head = r'''fn surface_style(spec:  SurfaceSpec) SurfaceResolvedStyle {
+    let material_token: SemanticMaterialToken = surface_material_token(spec.tier);
+    let material: ResolvedMaterialToken = semantic_material(material_token);
+    let tier_elevation: SemanticElevationToken = surface_tier_elevation(spec.tier);
+    let elevation: ResolvedElevationToken = semantic_elevation(
+        tier_elevation);
+    let style: SurfaceResolvedStyle = SurfaceResolvedStyle{
+        .material_token = material_token,
+        .material_fill_token = material.fill_token,
+        .fill_token = material.fill_token,
+        .edge_token = material.edge_token,
+        .border_token = SemanticColorToken.border_subtle,
+        .content_color_token = SemanticColorToken.text_primary,
+        .focus_token = SemanticColorToken.focus,
+        .state_token = material.edge_token,
+        .radius_token = material.radius_token,
+        .material_elevation_token = tier_elevation,
+        .elevation_token = tier_elevation,
+        .content_spacing_token = surface_content_spacing_token(spec.tier),
+        .fill_alpha = semantic_color_paint(material.fill_token).alpha,
+        .border_alpha = elevation.edge_highlight_alpha,
+    };
+'''
+          new_style_head = r'''fn surface_style(spec:  SurfaceSpec) SurfaceResolvedStyle {
+    let tier_elevation: SemanticElevationToken = surface_tier_elevation(spec.tier);
+    let effects: VisualSurfaceEffects = surface_visual_effects(spec,
+        tier_elevation);
+    let elevation: ResolvedElevationToken = semantic_elevation(
+        tier_elevation);
+    let style: SurfaceResolvedStyle = SurfaceResolvedStyle{
+        .material_token = effects.material_token,
+        .requested_material_role = effects.requested_role,
+        .effective_material_role = effects.effective_role,
+        .backdrop_blur_enabled = effects.backdrop_blur_enabled,
+        .blur_radius = effects.blur_radius,
+        .cpu_fallback_reason = effects.cpu_fallback_reason,
+        .material_fill_token = effects.fill_token,
+        .fill_token = effects.fill_token,
+        .edge_token = effects.edge_token,
+        .border_token = SemanticColorToken.border_subtle,
+        .content_color_token = SemanticColorToken.text_primary,
+        .focus_token = SemanticColorToken.focus,
+        .state_token = effects.edge_token,
+        .radius_token = effects.radius_token,
+        .material_elevation_token = tier_elevation,
+        .elevation_token = tier_elevation,
+        .content_spacing_token = surface_content_spacing_token(spec.tier),
+        .fill_alpha = semantic_color_paint(effects.fill_token).alpha,
+        .border_alpha = elevation.edge_highlight_alpha,
+    };
+'''
+          replace_once("src/components/surface.zag",
+              old_style_head, new_style_head)
+
+          replace_once(
+              "src/components/surface.zag",
+              "        surface_tier_valid(spec.tier) == 0 ||\n        surface_mode_valid(spec.mode) == 0 ||",
+              "        surface_tier_valid(spec.tier) == 0 ||\n        visual_material_role_valid(spec.material_role) == 0 ||\n        visual_flag_valid(spec.reduced_transparency) == 0 ||\n        visual_flag_valid(spec.high_contrast) == 0 ||\n        visual_flag_valid(spec.backdrop_available) == 0 ||\n        surface_mode_valid(spec.mode) == 0 ||",
+          )
+          replace_once(
+              "src/components/surface.zag",
+              "    hash = surface_mix(hash, spec.density as i64);\n    hash = surface_mix(hash, spec.live_region as i64);",
+              "    hash = surface_mix(hash, spec.density as i64);\n    hash = surface_mix(hash, spec.material_role as i64);\n    hash = surface_mix(hash, spec.reduced_transparency as i64);\n    hash = surface_mix(hash, spec.high_contrast as i64);\n    hash = surface_mix(hash, spec.backdrop_available as i64);\n    hash = surface_mix(hash, spec.live_region as i64);",
+          )
+          replace_once(
+              "src/components/surface.zag",
+              "    hash = surface_mix(hash, artifact.style.material_token as i64);\n    hash = surface_mix(hash, artifact.style.material_fill_token as i64);",
+              "    hash = surface_mix(hash, artifact.style.material_token as i64);\n    hash = surface_mix(hash, artifact.style.requested_material_role as i64);\n    hash = surface_mix(hash, artifact.style.effective_material_role as i64);\n    hash = surface_mix(hash, artifact.style.backdrop_blur_enabled as i64);\n    hash = surface_mix(hash, artifact.style.blur_radius);\n    hash = surface_text_hash(hash, artifact.style.cpu_fallback_reason);\n    hash = surface_mix(hash, artifact.style.material_fill_token as i64);",
+          )
+
+          shadow_push = r'''
+fn surface_push_shadow(display:  *DisplayList,
+    budget:  *SurfaceBuildBudget,
+    owner: NodeKey, bounds: Rect, radius: i64,
+    blur_radius: i64, paint: Paint) SurfaceDrawResult {
+    let result: SurfaceDrawResult = surface_draw_result();
+    if (surface_take_display(budget) == 0) {
+        result.error = SurfaceBuildError.capacity_error;
+        result.capacity_error = SurfaceCapacityError.display_operations;
+        return result;
+    }
+    let op: DisplayOp = display_op(
+        DisplayOpKind.fill_rounded_shadow, owner);
+    op.bounds = bounds;
+    op.parameter = radius;
+    op.paint = paint;
+    op.paint.stroke_width = blur_radius;
+    let error: DisplayError = display_list_push(display, op);
+    if (error != DisplayError.none) {
+        result.error = SurfaceBuildError.display_error;
+        result.display_error = error;
+    }
+    return result;
+}
+'''
+          replace_once(
+              "src/components/surface.zag",
+              "    return result;\n}\n\nfn surface_push_rect(display:  *DisplayList,",
+              "    return result;\n}\n" + shadow_push +
+              "\nfn surface_push_rect(display:  *DisplayList,",
+          )
+
+          replace_once(
+              "src/components/surface.zag",
+              "    let elevation: ResolvedElevationToken = semantic_elevation(\n        style.elevation_token);\n    let draw: SurfaceDrawResult = surface_draw_result();",
+              "    let elevation: ResolvedElevationToken = semantic_elevation(\n        style.elevation_token);\n    let effects: VisualSurfaceEffects = surface_visual_effects(spec,\n        style.elevation_token);\n    let draw: SurfaceDrawResult = surface_draw_result();",
+          )
+
+          old_shadows = r'''    if (draw.error == SurfaceBuildError.none &&
+        elevation.ambient_shadow_alpha > 0 &&
+        spec.interaction.pressed == 0 &&
+        (spec.mode == SurfaceMode.group || enabled != 0)) {
+        let spread: i64 = elevation.ambient_shadow_blur;
+        draw = surface_push_round(display, &budget, spec.id,
+            rect(chrome.x - spread,
+                chrome.y + elevation.ambient_shadow_y - spread,
+                chrome.width + spread * 2,
+                chrome.height + spread * 2),
+            radius + spread,
+            semantic_color_with_alpha(SemanticColorToken.shadow,
+                elevation.ambient_shadow_alpha));
+        if (draw.error == SurfaceBuildError.none &&
+            elevation.contact_shadow_alpha > 0) {
+            let contact_spread: i64 = elevation.contact_shadow_blur;
+            draw = surface_push_round(display, &budget, spec.id,
+                rect(chrome.x - contact_spread,
+                    chrome.y + elevation.contact_shadow_y - contact_spread,
+                    chrome.width + contact_spread * 2,
+                    chrome.height + contact_spread * 2),
+                radius + contact_spread,
+                semantic_color_with_alpha(SemanticColorToken.shadow,
+                    elevation.contact_shadow_alpha));
+        }
+    }
+'''
+          new_shadows = r'''    if (draw.error == SurfaceBuildError.none &&
+        effects.shadows.ambient.alpha > 0 &&
+        spec.interaction.pressed == 0 &&
+        (spec.mode == SurfaceMode.group || enabled != 0)) {
+        draw = surface_push_shadow(display, &budget, spec.id,
+            rect(chrome.x + effects.shadows.ambient.offset_x,
+                chrome.y + effects.shadows.ambient.offset_y,
+                chrome.width, chrome.height),
+            radius, effects.shadows.ambient.blur_radius,
+            semantic_color_with_alpha(SemanticColorToken.shadow,
+                effects.shadows.ambient.alpha));
+        if (draw.error == SurfaceBuildError.none &&
+            effects.shadows.contact.alpha > 0) {
+            draw = surface_push_shadow(display, &budget, spec.id,
+                rect(chrome.x + effects.shadows.contact.offset_x,
+                    chrome.y + effects.shadows.contact.offset_y,
+                    chrome.width, chrome.height),
+                radius, effects.shadows.contact.blur_radius,
+                semantic_color_with_alpha(SemanticColorToken.shadow,
+                    effects.shadows.contact.alpha));
+        }
+    }
+'''
+          replace_once("src/components/surface.zag", old_shadows, new_shadows)
+
+          replace_once(
+              "src/components/surface.zag",
+              "    if (draw.error == SurfaceBuildError.none) {\n        let edge_inset: i64 = flex_spacing(FlexSpacingToken.small,",
+              "    if (draw.error == SurfaceBuildError.none &&\n        effects.effective_role != VisualMaterialRole.solid &&\n        effects.tint_alpha > 0) {\n        let edge: i64 = unit_scale();\n        draw = surface_push_round(display, &budget, spec.id,\n            rect(chrome.x + edge, chrome.y + edge,\n                chrome.width - edge * 2, chrome.height - edge * 2),\n            radius - edge,\n            semantic_color_with_alpha(effects.tint_token,\n                effects.tint_alpha));\n    }\n    if (draw.error == SurfaceBuildError.none) {\n        let edge_inset: i64 = flex_spacing(FlexSpacingToken.small,",
+          )
+
+          # Surface conformance follows the corrected semantic hierarchy.
+          replace_once(
+              "tests/surface_contract.zag",
+              "fn expected_material(index: i32) SemanticMaterialToken {\n    return switch (index) {\n        0 => SemanticMaterialToken.solid,\n        1 => SemanticMaterialToken.veil,\n        2 => SemanticMaterialToken.glass,\n        else => SemanticMaterialToken.glass,\n    };\n}",
+              "fn expected_material(index: i32) SemanticMaterialToken {\n    if (index == 3) { return SemanticMaterialToken.glass; }\n    return SemanticMaterialToken.solid;\n}\n\nfn expected_fill(index: i32) SemanticColorToken {\n    if (index == 0) { return SemanticColorToken.surface_base; }\n    if (index == 1) { return SemanticColorToken.surface_panel; }\n    return SemanticColorToken.surface_raised;\n}\n\nfn expected_radius(index: i32) SemanticRadiusToken {\n    if (index <= 1) { return SemanticRadiusToken.panel; }\n    return SemanticRadiusToken.card;\n}",
+          )
+          replace_once(
+              "tests/surface_contract.zag",
+              "fn expected_material_name(index: i32) []u8 {\n    return switch (index) {\n        0 => \"material.solid\",\n        1 => \"material.veil\",\n        2 => \"material.glass\",\n        else => \"material.glass\",\n    };\n}",
+              "fn expected_material_name(index: i32) []u8 {\n    if (index == 3) { return \"material.glass\"; }\n    return \"material.solid\";\n}",
+          )
+          replace_once(
+              "tests/surface_contract.zag",
+              "            built.artifact.style.radius_token == material.radius_token &&\n            built.artifact.style.material_fill_token == material.fill_token &&\n            built.artifact.style.edge_token == material.edge_token &&",
+              "            built.artifact.style.radius_token == expected_radius(index) &&\n            built.artifact.style.material_fill_token == expected_fill(index) &&\n            built.artifact.style.effective_material_role ==\n                (VisualMaterialRole.glass if index == 3 else\n                    VisualMaterialRole.solid) &&",
+          )
+          # Zag has no conditional expression; replace the temporary expression
+          # with an explicit helper immediately after the prior patch.
+          replace_once(
+              "tests/surface_contract.zag",
+              "fn expected_radius(index: i32) SemanticRadiusToken {\n    if (index <= 1) { return SemanticRadiusToken.panel; }\n    return SemanticRadiusToken.card;\n}",
+              "fn expected_radius(index: i32) SemanticRadiusToken {\n    if (index <= 1) { return SemanticRadiusToken.panel; }\n    return SemanticRadiusToken.card;\n}\n\nfn expected_role(index: i32) VisualMaterialRole {\n    if (index == 3) { return VisualMaterialRole.glass; }\n    return VisualMaterialRole.solid;\n}",
+          )
+          replace_once(
+              "tests/surface_contract.zag",
+              "            built.artifact.style.effective_material_role ==\n                (VisualMaterialRole.glass if index == 3 else\n                    VisualMaterialRole.solid) &&",
+              "            built.artifact.style.effective_material_role ==\n                expected_role(index) &&",
+          )
+          replace_once(
+              "tests/surface_contract.zag",
+              "    expect(state, display.ops.len == 18 && hits.nodes.len == 4 &&",
+              "    expect(state, display.ops.len == 19 && hits.nodes.len == 4 &&",
+          )
+
+          # Add the new contract to the strict headless release gate.
+          replace_once(
+              "tools/test-headless.sh",
+              '"$znc" tests/design_tokens_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/design-tokens-contract"\n"$tmp/design-tokens-contract"',
+              '"$znc" tests/design_tokens_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/design-tokens-contract"\n"$tmp/design-tokens-contract"\n"$znc" tests/visual_system_v2_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/visual-system-v2-contract"\n"$tmp/visual-system-v2-contract"',
+          )
+          replace_once(
+              "tools/test-headless.sh",
+              "display lists, analytic rounded geometry, CPU shape and image raster, deterministic PNG snapshots",
+              "display lists, analytic rounded geometry and shadows, bounded material policy, CPU shape and image raster, deterministic PNG snapshots",
+          )
+
+          # Keep documentation honest about Surface's corrected material map.
+          replace_once(
+              "docs/components/surface.md",
+              "| `base` | `material.glass.shell` | `color.surface.base` | `radius.panel` | `elevation.base` | `medium` |\n| `panel` | `material.glass.panel` | `color.surface.panel` | `radius.panel` | `elevation.panel` | `large` |\n| `raised` | `material.glass.raised` | `color.surface.raised` | `radius.card` | `elevation.raised` | `xlarge` |\n| `overlay` | `material.glass.overlay` | `color.surface.raised` | `radius.card` | `elevation.overlay` | `xlarge` |",
+              "| `base` | `material.solid` | `color.surface.base` | `radius.panel` | `elevation.base` | `medium` |\n| `panel` | `material.solid` | `color.surface.panel` | `radius.panel` | `elevation.panel` | `large` |\n| `raised` | `material.solid` | `color.surface.raised` | `radius.card` | `elevation.raised` | `xlarge` |\n| `overlay` | `material.glass` | `color.surface.raised` | `radius.card` | `elevation.overlay` | `xlarge` |",
+          )
+
+          print("Applied ZagKit v2 visual-system foundation")
+          PY
+
+      - name: Run focused v2 visual contracts
+        run: |
+          chmod +x "$ZNC"
+          "$ZNC" tests/visual_system_v2_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o /tmp/visual-system-v2-contract
+          /tmp/visual-system-v2-contract
+          "$ZNC" tests/surface_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o /tmp/surface-contract
+          /tmp/surface-contract
+          "$ZNC" tests/display_list_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o /tmp/display-list-contract
+          /tmp/display-list-contract
+          "$ZNC" tests/display_list_codec_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o /tmp/display-list-codec-contract
+          /tmp/display-list-codec-contract
+          "$ZNC" tests/cpu_raster_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o /tmp/cpu-raster-contract
+          /tmp/cpu-raster-contract
+
+      - name: Run complete strict headless gate
+        run: |
+          chmod +x tools/test-headless.sh tools/check-contracts.sh
+          ./tools/test-headless.sh
+          ./tools/check-contracts.sh
+          git diff --check
+
+      - name: Commit verified foundation
+        if: steps.foundation.outputs.apply == 'true'
+        run: |
+          git config user.name "zagkit-visual-bot"
+          git config user.email "zagkit-visual-bot@users.noreply.github.com"
+          git add src tests tools docs contracts
+          git commit -m "feat: establish ZagKit v2 visual effects foundation"
+          git push origin HEAD:master
