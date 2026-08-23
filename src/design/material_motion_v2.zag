@@ -1,0 +1,171 @@
+@import("theme_v2.zag")
+
+// Semantic material motion targets. The existing deterministic motion kernel
+// owns time integration; this module prevents components from inventing easing,
+// depth, or reduced-motion behavior independently.
+
+enum VisualMotionPreference {
+    normal,
+    reduced,
+}
+
+enum VisualSpringKind {
+    snap,
+    snappy,
+    smooth,
+    expressive,
+}
+
+enum MaterialMotionEvent {
+    rest,
+    hover,
+    focus,
+    press,
+    release,
+    selected,
+    disabled,
+    loading,
+    error,
+    overlay_enter,
+    overlay_exit,
+}
+
+struct ResolvedVisualSpring {
+    kind: VisualSpringKind,
+    settle_microseconds: i64,
+    stiffness_16: i64,
+    damping_16: i64,
+}
+
+struct MaterialMotionTarget {
+    elevation_token: SemanticElevationToken,
+    translation_y: i64,
+    scale_16: i64,
+    opacity_16: i64,
+    blur_mix_16: i64,
+    tint_mix_16: i64,
+    spring: ResolvedVisualSpring,
+    preserve_velocity: i32,
+    requests_frame: i32,
+}
+
+fn visual_spring(kind: VisualSpringKind) ResolvedVisualSpring {
+    return switch (kind) {
+        .snap => ResolvedVisualSpring{
+            .kind = kind, .settle_microseconds = 0,
+            .stiffness_16 = 65535, .damping_16 = 65535,
+        },
+        .snappy => ResolvedVisualSpring{
+            .kind = kind, .settle_microseconds = 130000,
+            .stiffness_16 = 59000, .damping_16 = 51000,
+        },
+        .smooth => ResolvedVisualSpring{
+            .kind = kind, .settle_microseconds = 200000,
+            .stiffness_16 = 46000, .damping_16 = 50000,
+        },
+        .expressive => ResolvedVisualSpring{
+            .kind = kind, .settle_microseconds = 320000,
+            .stiffness_16 = 34000, .damping_16 = 45500,
+        },
+    };
+}
+
+fn material_motion_event_valid(event: MaterialMotionEvent) i32 {
+    let value: i64 = event as i64;
+    return (value >= MaterialMotionEvent.rest as i64 &&
+        value <= MaterialMotionEvent.overlay_exit as i64) as i32;
+}
+
+fn material_motion_preference_valid(preference: VisualMotionPreference) i32 {
+    let value: i64 = preference as i64;
+    return (value >= VisualMotionPreference.normal as i64 &&
+        value <= VisualMotionPreference.reduced as i64) as i32;
+}
+
+fn material_motion_target(event: MaterialMotionEvent,
+    resting_elevation: SemanticElevationToken,
+    preference: VisualMotionPreference) MaterialMotionTarget {
+    let elevation: SemanticElevationToken = resting_elevation;
+    let translation: i64 = 0;
+    let scale: i64 = 65535;
+    let opacity: i64 = 65535;
+    let blur_mix: i64 = 65535;
+    let tint_mix: i64 = 65535;
+    let spring_kind: VisualSpringKind = VisualSpringKind.smooth;
+    let preserve: i32 = 1;
+    let frame: i32 = 1;
+
+    if (material_motion_event_valid(event) == 0 ||
+        material_motion_preference_valid(preference) == 0) {
+        spring_kind = VisualSpringKind.snap;
+        frame = 0;
+    } else if (event == MaterialMotionEvent.rest) {
+        spring_kind = VisualSpringKind.snap;
+        frame = 0;
+    } else if (event == MaterialMotionEvent.hover ||
+        event == MaterialMotionEvent.focus ||
+        event == MaterialMotionEvent.selected ||
+        event == MaterialMotionEvent.release) {
+        spring_kind = VisualSpringKind.smooth;
+    } else if (event == MaterialMotionEvent.press) {
+        elevation = SemanticElevationToken.base;
+        translation = 2 * unit_scale();
+        scale = 64880;
+        spring_kind = VisualSpringKind.snappy;
+    } else if (event == MaterialMotionEvent.disabled) {
+        elevation = SemanticElevationToken.base;
+        opacity = 36044;
+        blur_mix = 0;
+        spring_kind = VisualSpringKind.snappy;
+    } else if (event == MaterialMotionEvent.loading) {
+        spring_kind = VisualSpringKind.smooth;
+    } else if (event == MaterialMotionEvent.error) {
+        spring_kind = VisualSpringKind.snappy;
+    } else if (event == MaterialMotionEvent.overlay_enter) {
+        elevation = SemanticElevationToken.overlay;
+        spring_kind = VisualSpringKind.expressive;
+    } else if (event == MaterialMotionEvent.overlay_exit) {
+        elevation = SemanticElevationToken.panel;
+        translation = 6 * unit_scale();
+        opacity = 0;
+        blur_mix = 0;
+        tint_mix = 0;
+        spring_kind = VisualSpringKind.smooth;
+    }
+
+    if (preference == VisualMotionPreference.reduced) {
+        translation = 0;
+        scale = 65535;
+        blur_mix = if (event == MaterialMotionEvent.overlay_exit) 0 else 65535;
+        tint_mix = blur_mix;
+        spring_kind = VisualSpringKind.snap;
+        preserve = 0;
+        frame = 0;
+    }
+
+    return MaterialMotionTarget{
+        .elevation_token = elevation,
+        .translation_y = translation,
+        .scale_16 = scale,
+        .opacity_16 = opacity,
+        .blur_mix_16 = blur_mix,
+        .tint_mix_16 = tint_mix,
+        .spring = visual_spring(spring_kind),
+        .preserve_velocity = preserve,
+        .requests_frame = frame,
+    };
+}
+
+fn material_motion_target_equal(left: MaterialMotionTarget,
+    right: MaterialMotionTarget) i32 {
+    return (left.elevation_token == right.elevation_token &&
+        left.translation_y == right.translation_y &&
+        left.scale_16 == right.scale_16 &&
+        left.opacity_16 == right.opacity_16 &&
+        left.blur_mix_16 == right.blur_mix_16 &&
+        left.tint_mix_16 == right.tint_mix_16 &&
+        left.spring.kind == right.spring.kind &&
+        left.spring.settle_microseconds == right.spring.settle_microseconds &&
+        left.preserve_velocity == right.preserve_velocity &&
+        left.requests_frame == right.requests_frame) as i32;
+}
