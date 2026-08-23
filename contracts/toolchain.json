@@ -3,19 +3,19 @@
   "zagkit_version": "0.1.0-experimental.0",
   "zag": {
     "repository": "https://github.com/Sylorlabs/zag",
-    "resolved_ref": "refs/heads/agent/v2-list-free-named-owner",
-    "commit": "22f8c1f442ed505e75411995a5bb85dd09e97a42",
+    "resolved_ref": "refs/heads/agent/v2-aggregate-let-values",
+    "commit": "f84b5736b5f8f1f7dd9d4b539d13a2f5ddf9a34b",
     "compiler_version": "2026.07.0-dev",
     "edition": "2026"
   },
-  "audited_on": "2026-08-22",
+  "audited_on": "2026-08-23",
   "pin_policy": "Every Zagkit release replaces this record with the exact Zag source commit used to build and test it. Branch names and local dirty state are never release identities.",
   "evidence": [
-    "Zag commit 22f8c1f442ed505e75411995a5bb85dd09e97a42 is the exact clean revision used by the ZagKit v2 strict validation branch.",
+    "Zag commit f84b5736b5f8f1f7dd9d4b539d13a2f5ddf9a34b is the exact clean revision used by the ZagKit v2 strict validation branch.",
     "zag-poc/zag.mod at the pinned commit declares version 2026.07.0-dev and edition 2026.",
     "The pinned tree self-hosts to a byte-identical native compiler fixed point without an external C, assembler, linker, or libc build chain.",
-    "Strict ArrayList cleanup requires the named owner argument and passes the positive, alias, negative, and double-release ownership regression.",
-    "The revision preserves compiler-owned resource embedding, pure-Zag compression primitives, and the existing native authority suites inherited from the prior audited pin.",
-    "Aggregate-valued let initialization is tracked as the next upstream compiler prerequisite and is not represented as complete by this pin."
+    "Strict native validation passed after the aggregate-valued let initialization repair.",
+    "Aggregate runtime regression covers call return, local/parameter copy, field copy, and switch-expression result.",
+    "The revision preserves compiler-owned resource embedding, pure-Zag compression primitives, and existing native authority suites."
   ]
 }
