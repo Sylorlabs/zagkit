@@ -1,0 +1,59 @@
+@import("../src/design/theme_v2.zag")
+
+fn main() i32 {
+    let dark_canvas: Paint = visual_theme_color(
+        VisualColorScheme.dark, SemanticColorToken.canvas).paint;
+    let light_canvas: Paint = visual_theme_color(
+        VisualColorScheme.light, SemanticColorToken.canvas).paint;
+    if (dark_canvas.red == light_canvas.red ||
+        material_luminance_16(dark_canvas) >=
+        material_luminance_16(light_canvas)) { return 1; }
+
+    let dark_text: Paint = visual_theme_color(
+        VisualColorScheme.dark, SemanticColorToken.text_primary).paint;
+    let light_text: Paint = visual_theme_color(
+        VisualColorScheme.light, SemanticColorToken.text_primary).paint;
+    if (material_contrast_x1000(dark_text, dark_canvas) < 4500 ||
+        material_contrast_x1000(light_text, light_canvas) < 4500) {
+        return 2;
+    }
+
+    let high_dark_canvas: Paint = visual_theme_color(
+        VisualColorScheme.high_contrast_dark,
+        SemanticColorToken.canvas).paint;
+    let high_dark_text: Paint = visual_theme_color(
+        VisualColorScheme.high_contrast_dark,
+        SemanticColorToken.text_primary).paint;
+    let high_light_canvas: Paint = visual_theme_color(
+        VisualColorScheme.high_contrast_light,
+        SemanticColorToken.canvas).paint;
+    let high_light_text: Paint = visual_theme_color(
+        VisualColorScheme.high_contrast_light,
+        SemanticColorToken.text_primary).paint;
+    if (material_contrast_x1000(high_dark_text, high_dark_canvas) < 7000 ||
+        material_contrast_x1000(high_light_text, high_light_canvas) < 7000) {
+        return 3;
+    }
+
+    if (visual_theme_contrast_floor_x1000(VisualColorScheme.dark,
+            SemanticMaterialToken.solid) != 4500 ||
+        visual_theme_contrast_floor_x1000(VisualColorScheme.dark,
+            SemanticMaterialToken.glass) != 7000 ||
+        visual_theme_contrast_floor_x1000(
+            VisualColorScheme.high_contrast_light,
+            SemanticMaterialToken.solid) != 7000) { return 4; }
+
+    let light_focus: Paint = visual_theme_color(VisualColorScheme.light,
+        SemanticColorToken.focus).paint;
+    let light_panel: Paint = visual_theme_color(VisualColorScheme.light,
+        SemanticColorToken.surface_panel).paint;
+    if (material_contrast_x1000(light_focus, light_panel) < 3000) {
+        return 5;
+    }
+
+    let identifier: ResolvedColorToken = visual_theme_color(
+        VisualColorScheme.light, SemanticColorToken.accent);
+    if (identifier.id != "color.accent") { return 6; }
+
+    return 0;
+}
