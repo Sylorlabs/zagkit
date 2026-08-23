@@ -38,6 +38,11 @@ jobs:
           chmod +x "$ZNC"
           "$ZNC" version
 
+      - name: Run upstream strict list owner regression
+        run: |
+          chmod +x .toolchain/zag/zag-poc/tests/check_v2_list_named_owner.sh
+          ZNC="$ZNC" .toolchain/zag/zag-poc/tests/check_v2_list_named_owner.sh
+
       - name: Compile and run strict visual policy contract
         run: |
           "$ZNC" tests/visual_system_v2_policy_contract.zag \
