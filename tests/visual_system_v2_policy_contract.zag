@@ -1,0 +1,175 @@
+@import("../src/design/visual_system_v2.zag")
+
+struct TestState {
+    passed: i32,
+    failed: i32,
+}
+
+fn expect(state: *TestState, condition: i32, name: []u8) void {
+    if (condition != 0) {
+        state.*.passed = state.*.passed + 1;
+        _zag_print("ok  ");
+        _zag_println(name);
+    } else {
+        state.*.failed = state.*.failed + 1;
+        _zag_print("FAIL ");
+        _zag_println(name);
+    }
+}
+
+fn material_policy_contract(state: *TestState) void {
+    let standard: VisualEnvironment = visual_environment(FlexDensity.standard);
+    let panel: VisualSurfaceEffects = visual_surface_effects(
+        VisualSurfaceKind.content_panel,
+        VisualMaterialRole.automatic,
+        SemanticElevationToken.panel,
+        standard
+    );
+    let card: VisualSurfaceEffects = visual_surface_effects(
+        VisualSurfaceKind.raised_card,
+        VisualMaterialRole.automatic,
+        SemanticElevationToken.raised,
+        standard
+    );
+    let chrome: VisualSurfaceEffects = visual_surface_effects(
+        VisualSurfaceKind.floating_chrome,
+        VisualMaterialRole.automatic,
+        SemanticElevationToken.panel,
+        standard
+    );
+    let overlay: VisualSurfaceEffects = visual_surface_effects(
+        VisualSurfaceKind.transient_overlay,
+        VisualMaterialRole.automatic,
+        SemanticElevationToken.overlay,
+        standard
+    );
+
+    expect(state,
+        panel.effective_role == VisualMaterialRole.solid &&
+        panel.material_token == SemanticMaterialToken.solid &&
+        panel.fill_token == SemanticColorToken.surface_panel &&
+        panel.blur_radius == 0,
+        "content panels remain opaque without losing depth hierarchy");
+    expect(state,
+        card.effective_role == VisualMaterialRole.solid &&
+        card.fill_token == SemanticColorToken.surface_raised &&
+        card.elevation_token == SemanticElevationToken.raised,
+        "raised cards express elevation without fake translucency");
+    expect(state,
+        chrome.effective_role == VisualMaterialRole.veil &&
+        chrome.material_token == SemanticMaterialToken.veil &&
+        chrome.blur_radius == 20 * unit_scale(),
+        "persistent floating chrome receives bounded veil material");
+    expect(state,
+        overlay.effective_role == VisualMaterialRole.glass &&
+        overlay.material_token == SemanticMaterialToken.glass &&
+        overlay.blur_radius == 36 * unit_scale(),
+        "transient overlays alone receive full glass material");
+}
+
+fn accessibility_contract(state: *TestState) void {
+    let compact: VisualEnvironment = visual_environment(FlexDensity.compact);
+    let compact_chrome: VisualSurfaceEffects = visual_surface_effects(
+        VisualSurfaceKind.floating_chrome,
+        VisualMaterialRole.automatic,
+        SemanticElevationToken.panel,
+        compact
+    );
+    expect(state,
+        compact_chrome.effective_role == VisualMaterialRole.solid &&
+        compact_chrome.blur_radius == 0 &&
+        compact_chrome.tint_alpha == 0,
+        "compact professional layouts remove persistent blur cost");
+
+    let reduced: VisualEnvironment = visual_environment(FlexDensity.standard);
+    reduced.transparency = VisualTransparency.reduced;
+    let reduced_overlay: VisualSurfaceEffects = visual_surface_effects(
+        VisualSurfaceKind.transient_overlay,
+        VisualMaterialRole.automatic,
+        SemanticElevationToken.overlay,
+        reduced
+    );
+    expect(state,
+        reduced_overlay.effective_role == VisualMaterialRole.solid &&
+        reduced_overlay.backdrop_blur_enabled == 0 &&
+        reduced_overlay.blur_radius == 0,
+        "reduced transparency demotes glass instead of approximating it");
+
+    let contrast: VisualEnvironment = visual_environment(FlexDensity.standard);
+    contrast.high_contrast = 1;
+    let contrast_chrome: VisualSurfaceEffects = visual_surface_effects(
+        VisualSurfaceKind.floating_chrome,
+        VisualMaterialRole.automatic,
+        SemanticElevationToken.panel,
+        contrast
+    );
+    expect(state,
+        contrast_chrome.effective_role == VisualMaterialRole.solid &&
+        visual_text_contrast_floor(VisualMaterialRole.solid) == 4500 &&
+        visual_text_contrast_floor(VisualMaterialRole.glass) == 7000,
+        "high contrast removes variable backdrops and glass raises its text floor");
+}
+
+fn lighting_contract(state: *TestState) void {
+    let light: VisualSceneLight = visual_scene_light();
+    let panel: VisualShadowPair = visual_shadow_pair(
+        SemanticElevationToken.panel);
+    let raised: VisualShadowPair = visual_shadow_pair(
+        SemanticElevationToken.raised);
+    let overlay: VisualShadowPair = visual_shadow_pair(
+        SemanticElevationToken.overlay);
+
+    expect(state,
+        light.key_azimuth_degrees == 40 &&
+        light.key_zenith_degrees == 60 &&
+        light.shadow_direction_x > 0 &&
+        light.shadow_direction_y > light.shadow_direction_x,
+        "one window-global scene light owns every shadow direction");
+    expect(state,
+        panel.contact.alpha > panel.ambient.alpha &&
+        panel.contact.blur_radius < panel.ambient.blur_radius,
+        "contact and ambient shadow roles remain physically distinct");
+    expect(state,
+        raised.ambient.blur_radius > panel.ambient.blur_radius &&
+        overlay.ambient.blur_radius > raised.ambient.blur_radius &&
+        overlay.ambient.alpha > raised.ambient.alpha,
+        "elevation monotonically increases shadow reach and separation");
+}
+
+fn budget_contract(state: *TestState) void {
+    let viewport: Size = size(
+        1200 * unit_scale(),
+        800 * unit_scale()
+    );
+    expect(state,
+        visual_viewport_area(viewport) == 960000 &&
+        visual_veil_area_budget(viewport) == 240000,
+        "veil sampling is capped at one quarter of the viewport");
+    expect(state,
+        visual_glass_layer_budget() == 1,
+        "one live glass layer prevents recursive blur explosions");
+    expect(state,
+        visual_viewport_area(size(0, 100 * unit_scale())) == 0 &&
+        visual_viewport_area(size(
+            1000001 * unit_scale(), unit_scale())) == 0,
+        "invalid or pathological viewport budgets fail closed");
+}
+
+fn main() i32 {
+    let state: TestState = TestState{ .passed = 0, .failed = 0 };
+    material_policy_contract(&state);
+    accessibility_contract(&state);
+    lighting_contract(&state);
+    budget_contract(&state);
+
+    let passed: []u8 = _zag_i64_to_str(state.passed as i64);
+    let failed: []u8 = _zag_i64_to_str(state.failed as i64);
+    _zag_print("ZagKit v2 visual policy: pass=");
+    _zag_print(passed);
+    _zag_print(" fail=");
+    _zag_println(failed);
+    _zag_str_free(passed);
+    _zag_str_free(failed);
+    if (state.failed == 0) { return 0; }
+    return 1;
+}
