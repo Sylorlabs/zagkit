@@ -3,19 +3,19 @@
   "zagkit_version": "0.1.0-experimental.0",
   "zag": {
     "repository": "https://github.com/Sylorlabs/zag",
-    "resolved_ref": "refs/heads/agent/v2-list-free-named-owner",
-    "commit": "22f8c1f442ed505e75411995a5bb85dd09e97a42",
+    "resolved_ref": "refs/heads/agent/v2-aggregate-let-values",
+    "commit": "f84b5736b5f8f1f7dd9d4b539d13a2f5ddf9a34b",
     "compiler_version": "2026.07.0-dev",
     "edition": "2026"
   },
-  "audited_on": "2026-08-22",
+  "audited_on": "2026-08-23",
   "pin_policy": "Every Zagkit release replaces this record with the exact Zag source commit used to build and test it. Branch names and local dirty state are never release identities.",
   "evidence": [
-    "Zag commit 22f8c1f442ed505e75411995a5bb85dd09e97a42 extends the previously audited clean v2 toolchain commit 43870455a07bf8e7d4adf38fad807fe3baee4e26 with an upstream std/list named-owner release repair and focused strict native regression.",
+    "Zag commit f84b5736b5f8f1f7dd9d4b539d13a2f5ddf9a34b contains the upstream std/list named-owner release repair and the native aggregate-let address-lowering repair required by ZagKit flex and SurfaceV2 code.",
+    "The pinned compiler reached a byte-identical self-hosting fixpoint at stage 3; an independent three-generation proof produced SHA-256 c3730aa788728a995657981ecb6bf0f9a5f674d5e72a2da34ff68cbea9b5f274.",
+    "The strict v2 named-owner list regression compiles std/list.free under --analyze-strict, executes allocation, growth, readback, named-owner release, and post-release invalidation, and passes.",
+    "Semantic conformance passed 16/16 and the native backend passed 135/135, including aggregate call return, local and parameter copy, field copy, and switch-expression aggregate results.",
     "zag-poc/zag.mod at the pinned lineage declares version 2026.07.0-dev and edition 2026.",
-    "The parent clean pinned tree self-hosted to a byte-identical stage-2/stage-3 fixpoint with no external tools and rebuilt zagd.",
-    "The pinned lineage self-hosts the generic numeric raw-pointer slice repair to a byte-identical compiler fixpoint; its aliasing, mutation, nested-slice, explicit-bound, and negative contracts pass on x86-64 and qemu-user ARM64.",
-    "The pinned lineage provides pure-Zag CRC32, Adler32, deterministic stored-zlib output, and general stored/fixed/dynamic DEFLATE inflate; the same 14-check suite passes on x86-64 and qemu-user ARM64.",
-    "The added v2 list regression compiles std/list.free under --analyze-strict, executes allocation, growth, readback, named-owner release, and post-release invalidation, and returns success only when all checks pass."
+    "The pinned lineage provides pure-Zag CRC32, Adler32, deterministic stored-zlib output, and general stored/fixed/dynamic DEFLATE inflate; the same 14-check suite passes on x86-64 and qemu-user ARM64."
   ]
 }
