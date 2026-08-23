@@ -1,0 +1,78 @@
+@import("../src/components/button_v2_style.zag")
+
+fn main() i32 {
+    let env: VisualEnvironment = visual_environment();
+    let interaction: ButtonInteraction = button_interaction();
+
+    let primary: ButtonV2ResolvedStyle = button_v2_resolve_style(
+        ButtonVariant.primary, interaction, VisualColorScheme.dark,
+        env, VisualMotionPreference.normal);
+    if (primary.valid == 0 ||
+        primary.material.material_token != SemanticMaterialToken.solid ||
+        primary.elevation_token != SemanticElevationToken.panel ||
+        primary.fill.alpha != 65535 || primary.text.alpha != 65535 ||
+        primary.radius != 10 * unit_scale() ||
+        primary.focus_ring_width != 2 * unit_scale()) { return 1; }
+
+    let quiet: ButtonV2ResolvedStyle = button_v2_resolve_style(
+        ButtonVariant.quiet, interaction, VisualColorScheme.light,
+        env, VisualMotionPreference.normal);
+    if (quiet.fill.alpha != 0 || quiet.border.alpha != 0 ||
+        quiet.elevation_token != SemanticElevationToken.base) { return 2; }
+
+    let hovered_interaction: ButtonInteraction = interaction;
+    hovered_interaction.hovered = 1;
+    let hovered: ButtonV2ResolvedStyle = button_v2_resolve_style(
+        ButtonVariant.secondary, hovered_interaction,
+        VisualColorScheme.dark, env, VisualMotionPreference.normal);
+    let secondary: ButtonV2ResolvedStyle = button_v2_resolve_style(
+        ButtonVariant.secondary, interaction, VisualColorScheme.dark,
+        env, VisualMotionPreference.normal);
+    if (hovered.evidence_hash == secondary.evidence_hash ||
+        hovered.fill.red == secondary.fill.red &&
+        hovered.fill.green == secondary.fill.green &&
+        hovered.fill.blue == secondary.fill.blue) { return 3; }
+
+    let pressed_interaction: ButtonInteraction = interaction;
+    pressed_interaction.pressed = 1;
+    let pressed: ButtonV2ResolvedStyle = button_v2_resolve_style(
+        ButtonVariant.primary, pressed_interaction,
+        VisualColorScheme.dark, env, VisualMotionPreference.normal);
+    if (pressed.elevation_token != SemanticElevationToken.base ||
+        pressed.motion.spring.kind != VisualSpringKind.snappy ||
+        pressed.motion.translation_y != 2 * unit_scale()) { return 4; }
+
+    let focus_interaction: ButtonInteraction = interaction;
+    focus_interaction.focused = 1;
+    focus_interaction.focus_visible = 1;
+    let focused: ButtonV2ResolvedStyle = button_v2_resolve_style(
+        ButtonVariant.secondary, focus_interaction,
+        VisualColorScheme.high_contrast_dark, env,
+        VisualMotionPreference.normal);
+    if (focused.focus_ring_visible == 0 ||
+        focused.focus.alpha != 65535 ||
+        focused.focus_separation_width != unit_scale()) { return 5; }
+
+    let disabled_interaction: ButtonInteraction = interaction;
+    disabled_interaction.enabled = 0;
+    let disabled: ButtonV2ResolvedStyle = button_v2_resolve_style(
+        ButtonVariant.destructive, disabled_interaction,
+        VisualColorScheme.light, env, VisualMotionPreference.normal);
+    if (disabled.elevation_token != SemanticElevationToken.base ||
+        disabled.text.alpha == 65535 ||
+        disabled.motion.spring.kind != VisualSpringKind.snappy) { return 6; }
+
+    let reduced_pressed: ButtonV2ResolvedStyle = button_v2_resolve_style(
+        ButtonVariant.primary, pressed_interaction,
+        VisualColorScheme.dark, env, VisualMotionPreference.reduced);
+    if (reduced_pressed.motion.translation_y != 0 ||
+        reduced_pressed.motion.scale_16 != 65535 ||
+        reduced_pressed.motion.requests_frame != 0) { return 7; }
+
+    let repeat: ButtonV2ResolvedStyle = button_v2_resolve_style(
+        ButtonVariant.primary, interaction, VisualColorScheme.dark,
+        env, VisualMotionPreference.normal);
+    if (repeat.evidence_hash != primary.evidence_hash) { return 8; }
+
+    return 0;
+}
