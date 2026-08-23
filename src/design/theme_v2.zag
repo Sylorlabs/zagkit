@@ -1,0 +1,205 @@
+@import("../render/material_composite.zag")
+
+// Native Zagkit v2 theme resolution. Components consume semantic roles; this
+// resolver supplies modern dark, light, and high-contrast values without local
+// RGBA literals.
+
+enum VisualColorScheme {
+    dark,
+    light,
+    high_contrast_dark,
+    high_contrast_light,
+}
+
+fn visual_color_scheme_valid(scheme: VisualColorScheme) i32 {
+    let value: i64 = scheme as i64;
+    return (value >= VisualColorScheme.dark as i64 &&
+        value <= VisualColorScheme.high_contrast_light as i64) as i32;
+}
+
+fn visual_theme_dark(token: SemanticColorToken) Paint {
+    return semantic_color_paint(token);
+}
+
+fn visual_theme_light(token: SemanticColorToken) Paint {
+    if (token == SemanticColorToken.canvas) {
+        return material_paint(62965, 63479, 64507, 65535);
+    }
+    if (token == SemanticColorToken.surface_base) {
+        return material_paint(61680, 62451, 63993, 65535);
+    }
+    if (token == SemanticColorToken.surface_panel) {
+        return material_paint(60909, 61680, 63479, 65535);
+    }
+    if (token == SemanticColorToken.surface_raised) {
+        return material_paint(65535, 65535, 65535, 65535);
+    }
+    if (token == SemanticColorToken.surface_inset) {
+        return material_paint(58853, 59881, 61937, 65535);
+    }
+    if (token == SemanticColorToken.surface_interactive) {
+        return material_paint(21000, 26000, 50000, 7000);
+    }
+    if (token == SemanticColorToken.surface_selected) {
+        return material_paint(18000, 35000, 62000, 12000);
+    }
+    if (token == SemanticColorToken.border_subtle) {
+        return material_paint(16000, 21000, 30000, 11000);
+    }
+    if (token == SemanticColorToken.border_emphasis) {
+        return material_paint(9000, 18000, 38000, 24000);
+    }
+    if (token == SemanticColorToken.text_primary) {
+        return material_paint(2827, 4112, 8224, 65535);
+    }
+    if (token == SemanticColorToken.text_secondary) {
+        return material_paint(15677, 19018, 24929, 65535);
+    }
+    if (token == SemanticColorToken.text_disabled) {
+        return material_paint(30000, 32000, 36000, 52000);
+    }
+    if (token == SemanticColorToken.accent) {
+        return material_paint(23387, 23387, 61680, 65535);
+    }
+    if (token == SemanticColorToken.accent_emphasis) {
+        return material_paint(18000, 18000, 52000, 65535);
+    }
+    if (token == SemanticColorToken.focus) {
+        return material_paint(0, 39000, 52000, 65535);
+    }
+    if (token == SemanticColorToken.status_healthy) {
+        return material_paint(9000, 40000, 23000, 65535);
+    }
+    if (token == SemanticColorToken.status_experimental) {
+        return material_paint(52000, 31000, 6000, 65535);
+    }
+    if (token == SemanticColorToken.status_error) {
+        return material_paint(56000, 12000, 10000, 65535);
+    }
+    if (token == SemanticColorToken.category_semantics) {
+        return material_paint(0, 33000, 52000, 65535);
+    }
+    if (token == SemanticColorToken.category_motion) {
+        return material_paint(24000, 24000, 57000, 65535);
+    }
+    if (token == SemanticColorToken.category_input) {
+        return material_paint(32000, 22000, 52000, 65535);
+    }
+    if (token == SemanticColorToken.category_renderer) {
+        return material_paint(42000, 18000, 47000, 65535);
+    }
+    if (token == SemanticColorToken.chart_grid) {
+        return material_paint(12000, 17000, 25000, 9000);
+    }
+    if (token == SemanticColorToken.chart_axis) {
+        return material_paint(14000, 18000, 26000, 30000);
+    }
+    if (token == SemanticColorToken.chart_series_primary) {
+        return material_paint(0, 36000, 59000, 65535);
+    }
+    if (token == SemanticColorToken.chart_series_secondary) {
+        return material_paint(36000, 22000, 57000, 65535);
+    }
+    if (token == SemanticColorToken.chart_series_tertiary) {
+        return material_paint(59000, 30000, 4000, 65535);
+    }
+    if (token == SemanticColorToken.shadow) {
+        return material_paint(2000, 3000, 7000, 18000);
+    }
+    if (token == SemanticColorToken.edge_highlight) {
+        return material_paint(65535, 65535, 65535, 36000);
+    }
+    if (token == SemanticColorToken.ambient_cool) {
+        return material_paint(15000, 30000, 65535, 2600);
+    }
+    return material_paint(65535, 30000, 48000, 2200);
+}
+
+fn visual_theme_high_contrast_dark(token: SemanticColorToken) Paint {
+    if (token == SemanticColorToken.canvas ||
+        token == SemanticColorToken.surface_inset) {
+        return material_paint(0, 0, 0, 65535);
+    }
+    if (token == SemanticColorToken.surface_base) {
+        return material_paint(3500, 3500, 4200, 65535);
+    }
+    if (token == SemanticColorToken.surface_panel) {
+        return material_paint(6500, 6500, 7600, 65535);
+    }
+    if (token == SemanticColorToken.surface_raised) {
+        return material_paint(10000, 10000, 12000, 65535);
+    }
+    if (token == SemanticColorToken.text_primary) {
+        return material_paint(65535, 65535, 65535, 65535);
+    }
+    if (token == SemanticColorToken.text_secondary) {
+        return material_paint(56000, 56000, 58000, 65535);
+    }
+    if (token == SemanticColorToken.text_disabled) {
+        return material_paint(39000, 39000, 41000, 65535);
+    }
+    if (token == SemanticColorToken.border_subtle ||
+        token == SemanticColorToken.border_emphasis) {
+        return material_paint(50000, 50000, 53000, 65535);
+    }
+    if (token == SemanticColorToken.focus) {
+        return material_paint(20000, 62000, 65535, 65535);
+    }
+    return visual_theme_dark(token);
+}
+
+fn visual_theme_high_contrast_light(token: SemanticColorToken) Paint {
+    if (token == SemanticColorToken.canvas ||
+        token == SemanticColorToken.surface_raised) {
+        return material_paint(65535, 65535, 65535, 65535);
+    }
+    if (token == SemanticColorToken.surface_base) {
+        return material_paint(63000, 63000, 63000, 65535);
+    }
+    if (token == SemanticColorToken.surface_panel) {
+        return material_paint(61000, 61000, 61000, 65535);
+    }
+    if (token == SemanticColorToken.surface_inset) {
+        return material_paint(58000, 58000, 58000, 65535);
+    }
+    if (token == SemanticColorToken.text_primary) {
+        return material_paint(0, 0, 0, 65535);
+    }
+    if (token == SemanticColorToken.text_secondary) {
+        return material_paint(9000, 9000, 10000, 65535);
+    }
+    if (token == SemanticColorToken.text_disabled) {
+        return material_paint(25000, 25000, 27000, 65535);
+    }
+    if (token == SemanticColorToken.border_subtle ||
+        token == SemanticColorToken.border_emphasis) {
+        return material_paint(9000, 9000, 11000, 65535);
+    }
+    if (token == SemanticColorToken.focus) {
+        return material_paint(0, 25000, 43000, 65535);
+    }
+    return visual_theme_light(token);
+}
+
+fn visual_theme_color(scheme: VisualColorScheme,
+    token: SemanticColorToken) ResolvedColorToken {
+    let base: ResolvedColorToken = semantic_color(token);
+    let paint: Paint = visual_theme_dark(token);
+    if (scheme == VisualColorScheme.light) {
+        paint = visual_theme_light(token);
+    } else if (scheme == VisualColorScheme.high_contrast_dark) {
+        paint = visual_theme_high_contrast_dark(token);
+    } else if (scheme == VisualColorScheme.high_contrast_light) {
+        paint = visual_theme_high_contrast_light(token);
+    }
+    return ResolvedColorToken{ .id = base.id, .paint = paint };
+}
+
+fn visual_theme_contrast_floor_x1000(scheme: VisualColorScheme,
+    material: SemanticMaterialToken) i64 {
+    if (scheme == VisualColorScheme.high_contrast_dark ||
+        scheme == VisualColorScheme.high_contrast_light) { return 7000; }
+    if (material == SemanticMaterialToken.glass ||
+        material == SemanticMaterialToken.veil) { return 7000; }
+    return 4500;
+}
