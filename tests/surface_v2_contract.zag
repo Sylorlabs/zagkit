@@ -1,0 +1,277 @@
+@import("../src/components/surface_v2.zag")
+@import("../src/automation/talkback.zag")
+
+struct TestState { passed: i32, failed: i32 }
+
+fn expect(state: *TestState, condition: i32, name: []u8) void {
+    if (condition != 0) {
+        state.*.passed = state.*.passed + 1;
+        _zag_print("ok  ");
+        _zag_println(name);
+    } else {
+        state.*.failed = state.*.failed + 1;
+        _zag_print("FAIL ");
+        _zag_println(name);
+    }
+}
+
+fn hierarchy_contract(state: *TestState) void {
+    let display: DisplayList = display_list_make();
+    let hits: HitTree = hit_tree_make();
+    let semantics: SemanticsTree = semantics_tree_make();
+
+    let panel: SurfaceV2Spec = surface_v2_spec(
+        node_key(1000), hit_root_key(),
+        rect(24 * unit_scale(), 24 * unit_scale(),
+            320 * unit_scale(), 112 * unit_scale()),
+        "Solid content panel", VisualSurfaceKind.content_panel);
+    panel.base.z_order = 1;
+    let built_panel: SurfaceV2BuildResult = surface_v2_emit(
+        panel, &display, &hits, &semantics);
+
+    expect(state,
+        built_panel.error == SurfaceBuildError.none &&
+        built_panel.artifact.effects.effective_role ==
+            VisualMaterialRole.solid &&
+        built_panel.artifact.effects.fill_token ==
+            SemanticColorToken.surface_panel &&
+        built_panel.artifact.effects.elevation_token ==
+            SemanticElevationToken.panel &&
+        built_panel.artifact.shadow_operations ==
+            surface_v2_ambient_shadow_bands() +
+            surface_v2_contact_shadow_bands(),
+        "content panel is opaque modern depth with bounded two-part shadow work");
+
+    let spacing: i64 = flex_spacing(FlexSpacingToken.large,
+        FlexDensity.standard);
+    expect(state,
+        built_panel.artifact.content_bounds.x ==
+            panel.base.bounds.x + spacing &&
+        built_panel.artifact.content_bounds.y ==
+            panel.base.bounds.y + spacing &&
+        built_panel.artifact.content_bounds.width ==
+            panel.base.bounds.width - spacing * 2 &&
+        built_panel.artifact.base.hit_node_index == 0 &&
+        built_panel.artifact.base.semantics_node_index == 0,
+        "SurfaceV2 returns exact Flex content geometry without splitting identity");
+
+    let chrome: SurfaceV2Spec = surface_v2_spec(
+        node_key(1001), hit_root_key(),
+        rect(24 * unit_scale(), 160 * unit_scale(),
+            320 * unit_scale(), 80 * unit_scale()),
+        "Floating command chrome", VisualSurfaceKind.floating_chrome);
+    chrome.base.z_order = 2;
+    chrome.backdrop_available = 1;
+    let built_chrome: SurfaceV2BuildResult = surface_v2_emit(
+        chrome, &display, &hits, &semantics);
+    expect(state,
+        built_chrome.error == SurfaceBuildError.none &&
+        built_chrome.artifact.effects.effective_role ==
+            VisualMaterialRole.veil &&
+        built_chrome.artifact.effects.backdrop_blur_enabled == 1 &&
+        built_chrome.artifact.effects.blur_radius == 20 * unit_scale(),
+        "floating command chrome exposes real veil intent and observable backdrop capability");
+
+    let overlay: SurfaceV2Spec = surface_v2_spec(
+        node_key(1002), hit_root_key(),
+        rect(72 * unit_scale(), 264 * unit_scale(),
+            240 * unit_scale(), 112 * unit_scale()),
+        "Transient command palette", VisualSurfaceKind.transient_overlay);
+    overlay.base.z_order = 3;
+    let built_overlay: SurfaceV2BuildResult = surface_v2_emit(
+        overlay, &display, &hits, &semantics);
+    expect(state,
+        built_overlay.error == SurfaceBuildError.none &&
+        built_overlay.artifact.effects.effective_role ==
+            VisualMaterialRole.glass &&
+        built_overlay.artifact.effects.elevation_token ==
+            SemanticElevationToken.overlay &&
+        built_overlay.artifact.effects.blur_radius == 36 * unit_scale() &&
+        built_overlay.artifact.shadow_operations == 7,
+        "transient overlay receives one bounded glass treatment and overlay depth");
+
+    expect(state,
+        hits.nodes.len == 3 && semantics.nodes.len == 3 &&
+        node_key_equal(hits.nodes.data[0].id, node_key(1000)) != 0 &&
+        node_key_equal(semantics.nodes.data[1].id, node_key(1001)) != 0 &&
+        node_key_equal(semantics.nodes.data[2].id, node_key(1002)) != 0,
+        "modern pixels hits semantics and automation retain one stable ID per surface");
+
+    let session: TalkbackSession = talkback_session_make(
+        talkback_capabilities());
+    let viewport: Rect = rect(0, 0,
+        480 * unit_scale(), 480 * unit_scale());
+    let query: TalkbackResponse = talkback_dispatch(
+        &session, semantics, viewport,
+        talkback_request(1, TalkbackCommand.query,
+            node_key(1002), semantics.revision));
+    expect(state,
+        query.status == TalkbackStatus.accepted &&
+        query.resolved_role == SemanticRole.group &&
+        query.bounds.width == overlay.base.bounds.width,
+        "Talkback resolves the same transient overlay ID and geometry used by rendering");
+
+    expect(state,
+        display_list_seal(&display) == DisplayError.none &&
+        display_list_verify(&display) == DisplayError.none,
+        "SurfaceV2 output seals as deterministic existing Zag render IR");
+
+    talkback_session_free(&session);
+    semantics_tree_free(&semantics);
+    hit_tree_free(&hits);
+    display_list_free(&display);
+}
+
+fn interaction_contract(state: *TestState) void {
+    let display: DisplayList = display_list_make();
+    let hits: HitTree = hit_tree_make();
+    let semantics: SemanticsTree = semantics_tree_make();
+
+    let card: SurfaceV2Spec = surface_v2_action_spec(
+        node_key(1100), hit_root_key(),
+        rect(20 * unit_scale(), 20 * unit_scale(),
+            280 * unit_scale(), 88 * unit_scale()),
+        "Open renderer", VisualSurfaceKind.raised_card);
+    card.base.focus_order = 1;
+    card.base.interaction = surface_canonical_state(
+        SurfaceCanonicalState.focus);
+    let focused: SurfaceV2BuildResult = surface_v2_emit(
+        card, &display, &hits, &semantics);
+
+    expect(state,
+        focused.error == SurfaceBuildError.none &&
+        focused.artifact.effects.effective_role ==
+            VisualMaterialRole.solid &&
+        focused.artifact.base.focus_ring_visible == 1 &&
+        focused.artifact.base.semantics_role == SemanticRole.button &&
+        hits.nodes.data[0].enabled == 1 &&
+        semantics.nodes.data[0].focused == 1,
+        "keyboard focus remains semantic hit-testable and visibly modern on a solid raised card");
+
+    let session: TalkbackSession = talkback_session_make(
+        talkback_capabilities());
+    let viewport: Rect = rect(0, 0,
+        400 * unit_scale(), 180 * unit_scale());
+    let click: TalkbackResponse = talkback_dispatch(
+        &session, semantics, viewport,
+        talkback_request(2, TalkbackCommand.click,
+            node_key(1100), semantics.revision));
+    expect(state,
+        click.status == TalkbackStatus.accepted &&
+        click.emitted_action != 0,
+        "modern actionable surface still executes semantic ID-first automation");
+
+    talkback_session_free(&session);
+    semantics_tree_free(&semantics);
+    hit_tree_free(&hits);
+    display_list_free(&display);
+}
+
+fn accessibility_contract(state: *TestState) void {
+    let display: DisplayList = display_list_make();
+    let hits: HitTree = hit_tree_make();
+    let semantics: SemanticsTree = semantics_tree_make();
+
+    let chrome: SurfaceV2Spec = surface_v2_spec(
+        node_key(1200), hit_root_key(),
+        rect(20 * unit_scale(), 20 * unit_scale(),
+            300 * unit_scale(), 80 * unit_scale()),
+        "Compact toolbar", VisualSurfaceKind.floating_chrome);
+    chrome.base.density = FlexDensity.compact;
+    chrome.backdrop_available = 1;
+    let compact: SurfaceV2BuildResult = surface_v2_emit(
+        chrome, &display, &hits, &semantics);
+    expect(state,
+        compact.error == SurfaceBuildError.none &&
+        compact.artifact.effects.effective_role ==
+            VisualMaterialRole.solid &&
+        compact.artifact.effects.backdrop_blur_enabled == 0 &&
+        compact.artifact.effects.blur_radius == 0,
+        "compact professional chrome automatically removes persistent blur sampling");
+
+    semantics_tree_free(&semantics);
+    hit_tree_free(&hits);
+    display_list_free(&display);
+}
+
+fn rollback_contract(state: *TestState) void {
+    let display: DisplayList = display_list_make();
+    let hits: HitTree = hit_tree_make();
+    let semantics: SemanticsTree = semantics_tree_make();
+    let spec: SurfaceV2Spec = surface_v2_spec(
+        node_key(1300), hit_root_key(),
+        rect(20 * unit_scale(), 20 * unit_scale(),
+            300 * unit_scale(), 100 * unit_scale()),
+        "Budget failure", VisualSurfaceKind.raised_card);
+    spec.effect_operations = 1;
+    let built: SurfaceV2BuildResult = surface_v2_emit(
+        spec, &display, &hits, &semantics);
+    expect(state,
+        built.error == SurfaceBuildError.capacity_error &&
+        built.capacity_error == SurfaceCapacityError.display_operations &&
+        display.ops.len == 0 && hits.nodes.len == 0 &&
+        semantics.nodes.len == 0 && display.revision == 0 &&
+        semantics.revision == 0,
+        "effect-budget exhaustion rolls pixels hits semantics hashes and revisions back atomically");
+
+    semantics_tree_free(&semantics);
+    hit_tree_free(&hits);
+    display_list_free(&display);
+}
+
+fn determinism_contract(state: *TestState) void {
+    let first_display: DisplayList = display_list_make();
+    let first_hits: HitTree = hit_tree_make();
+    let first_semantics: SemanticsTree = semantics_tree_make();
+    let second_display: DisplayList = display_list_make();
+    let second_hits: HitTree = hit_tree_make();
+    let second_semantics: SemanticsTree = semantics_tree_make();
+
+    let spec: SurfaceV2Spec = surface_v2_action_spec(
+        node_key(1400), hit_root_key(),
+        rect(32 * unit_scale(), 32 * unit_scale(),
+            320 * unit_scale(), 96 * unit_scale()),
+        "Deterministic card", VisualSurfaceKind.raised_card);
+    spec.base.focus_order = 1;
+    spec.base.interaction = surface_canonical_state(
+        SurfaceCanonicalState.selected);
+
+    let first: SurfaceV2BuildResult = surface_v2_emit(
+        spec, &first_display, &first_hits, &first_semantics);
+    let second: SurfaceV2BuildResult = surface_v2_emit(
+        spec, &second_display, &second_hits, &second_semantics);
+    expect(state,
+        first.error == SurfaceBuildError.none &&
+        second.error == SurfaceBuildError.none &&
+        first.artifact.evidence_hash == second.artifact.evidence_hash &&
+        first_display.content_hash == second_display.content_hash &&
+        first_semantics.evidence_hash == second_semantics.evidence_hash,
+        "identical SurfaceV2 inputs produce identical visual semantic and component evidence");
+
+    semantics_tree_free(&second_semantics);
+    hit_tree_free(&second_hits);
+    display_list_free(&second_display);
+    semantics_tree_free(&first_semantics);
+    hit_tree_free(&first_hits);
+    display_list_free(&first_display);
+}
+
+fn main() i32 {
+    let state: TestState = TestState{ .passed = 0, .failed = 0 };
+    hierarchy_contract(&state);
+    interaction_contract(&state);
+    accessibility_contract(&state);
+    rollback_contract(&state);
+    determinism_contract(&state);
+
+    let passed: []u8 = _zag_i64_to_str(state.passed as i64);
+    let failed: []u8 = _zag_i64_to_str(state.failed as i64);
+    _zag_print("SurfaceV2 contract: pass=");
+    _zag_print(passed);
+    _zag_print(" fail=");
+    _zag_println(failed);
+    _zag_str_free(passed);
+    _zag_str_free(failed);
+    if (state.failed == 0) { return 0; }
+    return 1;
+}
