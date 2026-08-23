@@ -1,0 +1,60 @@
+@import("../src/zagkit_v2.zag")
+
+fn main() i32 {
+    let environment: VisualEnvironment = visual_environment();
+    environment.backdrop_blur_available = 1;
+    environment.quality = VisualQualityTier.high;
+
+    let button_state: ButtonInteraction = button_interaction();
+    button_state.focused = 1;
+    button_state.focus_visible = 1;
+    let button: ButtonV2ResolvedStyle = button_v2_resolve_style(
+        ButtonVariant.primary, button_state, VisualColorScheme.dark,
+        environment, VisualMotionPreference.normal);
+    if (button.valid == 0 || button.focus_ring_visible == 0) { return 1; }
+
+    let surface_state: ButtonInteraction = surface_interaction();
+    let panel: SurfaceV2VisualStyle = surface_v2_resolve_visual(
+        SurfaceTier.panel, SurfaceMode.group, 0, surface_state,
+        VisualColorScheme.dark, environment,
+        VisualMotionPreference.normal);
+    if (panel.valid == 0 ||
+        panel.material.material_token != SemanticMaterialToken.solid) {
+        return 2;
+    }
+
+    let overlay: SurfaceV2VisualStyle = surface_v2_resolve_visual(
+        SurfaceTier.overlay, SurfaceMode.group, 0, surface_state,
+        VisualColorScheme.dark, environment,
+        VisualMotionPreference.normal);
+    if (overlay.material.material_token != SemanticMaterialToken.glass) {
+        return 3;
+    }
+
+    let viewport_budget: VisualEffectBudget = VisualEffectBudget{
+        .viewport_width = 1440,
+        .viewport_height = 900,
+        .veil_area = 180000,
+        .live_glass_layers = 1,
+    };
+    let overlay_bounds: VisualEffectRect = visual_effect_rect(
+        360 * unit_scale(), 160 * unit_scale(),
+        720 * unit_scale(), 520 * unit_scale());
+    let effects: VisualEffectPlan = visual_effect_plan(overlay_bounds,
+        VisualSurfaceRole.transient_overlay,
+        SemanticElevationToken.overlay, environment,
+        viewport_budget, visual_effect_limits());
+    if (effects.valid == 0 || effects.requires_blur == 0) { return 4; }
+
+    let text_environment: TypographyV2Environment =
+        typography_v2_environment();
+    let body: ResolvedTypographyV2 = typography_v2_resolve(
+        SemanticTypeToken.body, text_environment);
+    let shape: ResolvedShapeV2 = shape_v2_resolve(
+        VisualShapeRole.overlay, overlay_bounds.width,
+        overlay_bounds.height, 20 * unit_scale(),
+        FlexDensity.standard);
+    if (body.valid == 0 || shape.valid == 0) { return 5; }
+
+    return 0;
+}
