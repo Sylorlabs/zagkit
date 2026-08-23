@@ -1,0 +1,643 @@
+name: Launch ZagKit v2 analytic shadows
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/zagkit-v2-analytic-shadow-launcher.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply-test-and-promote:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      ZNC: ${{ github.workspace }}/.toolchain/zag/zag-poc/znc
+    steps:
+      - name: Check out ZagKit master
+        uses: actions/checkout@v6
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - name: Resolve pinned Zag revision
+        id: toolchain
+        run: echo "zag_sha=$(jq -r '.zag.commit' contracts/toolchain.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Check out exact Zag toolchain
+        uses: actions/checkout@v6
+        with:
+          repository: Sylorlabs/zag
+          ref: ${{ steps.toolchain.outputs.zag_sha }}
+          path: .toolchain/zag
+
+      - name: Restore pinned compiler seed
+        id: zag-cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            .toolchain/zag/zag-poc/znc
+            .toolchain/zag/zag-poc/zagd
+          key: zag-fixed-${{ runner.os }}-${{ steps.toolchain.outputs.zag_sha }}
+
+      - name: Bootstrap pinned Zag source
+        if: steps.zag-cache.outputs.cache-hit != 'true'
+        run: |
+          chmod +x .toolchain/zag/zag-poc/znc .toolchain/zag/zag-poc/bootstrap.sh
+          ZAG_BOOTSTRAP_MEMORY_GUARD=off .toolchain/zag/zag-poc/bootstrap.sh
+
+      - name: Apply analytic shadow render slice
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              file = Path(path)
+              text = file.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(
+                      f"{path}: expected one replacement, found {count}: {old[:100]!r}"
+                  )
+              file.write_text(text.replace(old, new, 1))
+
+          display_path = Path("src/render/display_list.zag")
+          display = display_path.read_text()
+          if "fill_rounded_shadow" not in display:
+              replace_once(
+                  str(display_path),
+                  "    apply_effect,\n    fill_rounded_rect,\n}",
+                  "    apply_effect,\n    fill_rounded_rect,\n    fill_rounded_shadow,\n}",
+              )
+              replace_once(
+                  str(display_path),
+                  "        .fill_rounded_rect => 0 - 1,\n    };",
+                  "        .fill_rounded_rect => 0 - 1,\n        .fill_rounded_shadow => 0 - 1,\n    };",
+              )
+              replace_once(
+                  str(display_path),
+                  "    return (kind == DisplayOpKind.clip_rect || kind == DisplayOpKind.fill_rect ||\n        kind == DisplayOpKind.fill_rounded_rect ||\n        kind == DisplayOpKind.stroke_rect || kind == DisplayOpKind.draw_image ||",
+                  "    return (kind == DisplayOpKind.clip_rect || kind == DisplayOpKind.fill_rect ||\n        kind == DisplayOpKind.fill_rounded_rect ||\n        kind == DisplayOpKind.fill_rounded_shadow ||\n        kind == DisplayOpKind.stroke_rect || kind == DisplayOpKind.draw_image ||",
+              )
+              replace_once(
+                  str(display_path),
+                  "    if (op.kind == DisplayOpKind.fill_rounded_rect &&\n        (op.parameter <= 0 || op.parameter * 2 > op.bounds.width ||\n         op.parameter * 2 > op.bounds.height)) {\n        return display_fail(list, DisplayError.invalid_parameter);\n    }",
+                  "    if ((op.kind == DisplayOpKind.fill_rounded_rect ||\n         op.kind == DisplayOpKind.fill_rounded_shadow) &&\n        (op.parameter <= 0 || op.parameter * 2 > op.bounds.width ||\n         op.parameter * 2 > op.bounds.height)) {\n        return display_fail(list, DisplayError.invalid_parameter);\n    }\n    if (op.kind == DisplayOpKind.fill_rounded_shadow &&\n        (op.paint.stroke_width <= 0 ||\n         op.paint.stroke_width > 256 * unit_scale() ||\n         op.paint.alpha <= 0 || op.resource_id != 0)) {\n        return display_fail(list, DisplayError.invalid_parameter);\n    }",
+              )
+
+          codec_path = Path("src/render/display_list_codec.zag")
+          codec = codec_path.read_text()
+          if "fn display_codec_version() i64 { return 4; }" not in codec:
+              replace_once(
+                  str(codec_path),
+                  "fn display_codec_version() i64 { return 3; }",
+                  "fn display_codec_version() i64 { return 4; }",
+              )
+              replace_once(
+                  str(codec_path),
+                  "        if (kind_code < 0 || kind_code > 12) {",
+                  "        if (kind_code < 0 || kind_code > 13) {",
+              )
+
+          codec_test_path = Path("tests/display_list_codec_contract.zag")
+          codec_test = codec_test_path.read_text()
+          if "encoded.bytes.data[4] = 5;" not in codec_test:
+              replace_once(
+                  str(codec_test_path),
+                  "    encoded.bytes.data[4] = 4;",
+                  "    encoded.bytes.data[4] = 5;",
+              )
+
+          raster_path = Path("src/render/cpu_raster.zag")
+          raster = raster_path.read_text()
+          if "fn cpu_fill_rounded_shadow(" not in raster:
+              anchor = '''    return cpu_result(surface.*, CpuRasterError.none, 0 - 1, 0, touched);
+}
+
+fn cpu_rect_pixel_coverage(bounds: Rect, x: i32, y: i32) i64 {'''
+              implementation = '''    return cpu_result(surface.*, CpuRasterError.none, 0 - 1, 0, touched);
+}
+
+fn cpu_shadow_abs(value: i64) i64 {
+    if (value < 0) { return 0 - value; }
+    return value;
+}
+
+// Deterministic octagonal approximation of Euclidean distance. The maximum
+// error is small enough for a soft alpha falloff while avoiding a square root
+// in the frame-hot CPU oracle.
+fn cpu_shadow_radial_distance(dx: i64, dy: i64) i64 {
+    let high: i64 = dx;
+    let low: i64 = dy;
+    if (low > high) {
+        let swap: i64 = high;
+        high = low;
+        low = swap;
+    }
+    return high + (low * 3) / 8;
+}
+
+fn cpu_rounded_signed_distance(bounds: Rect, radius: i64,
+    x: i64, y: i64) i64 {
+    let inner_left: i64 = bounds.x + radius;
+    let inner_right: i64 = bounds.x + bounds.width - radius;
+    let inner_top: i64 = bounds.y + radius;
+    let inner_bottom: i64 = bounds.y + bounds.height - radius;
+    let nearest_x: i64 = x;
+    let nearest_y: i64 = y;
+    if (nearest_x < inner_left) { nearest_x = inner_left; }
+    if (nearest_x > inner_right) { nearest_x = inner_right; }
+    if (nearest_y < inner_top) { nearest_y = inner_top; }
+    if (nearest_y > inner_bottom) { nearest_y = inner_bottom; }
+    let dx: i64 = cpu_shadow_abs(x - nearest_x);
+    let dy: i64 = cpu_shadow_abs(y - nearest_y);
+    return cpu_shadow_radial_distance(dx, dy) - radius;
+}
+
+fn cpu_shadow_work_limit() i64 { return 25000000; }
+
+fn cpu_fill_rounded_shadow(surface: *CpuSurface, raw_bounds: Rect,
+    raw_radius: i64, raw_blur: i64, clip: Rect,
+    transform: Transform, paint: Paint) CpuRasterResult {
+    let shape: Rect = cpu_transform_rect(raw_bounds, transform);
+    let scale: i64 = transform.scale_x;
+    if (transform.scale_y < scale) { scale = transform.scale_y; }
+    let radius: i64 = (raw_radius * scale) / unit_scale();
+    let blur: i64 = (raw_blur * scale) / unit_scale();
+    if (shape.width <= 0 || shape.height <= 0 ||
+        radius <= 0 || radius * 2 > shape.width ||
+        radius * 2 > shape.height || blur <= 0 ||
+        blur > 256 * unit_scale()) {
+        return cpu_result(surface.*, CpuRasterError.invalid_geometry,
+            0 - 1, 0, 0);
+    }
+    let expanded: Rect = rect(shape.x - blur, shape.y - blur,
+        shape.width + blur * 2, shape.height + blur * 2);
+    if (cpu_fixed_safe(expanded.x) == 0 ||
+        cpu_fixed_safe(expanded.y) == 0 ||
+        cpu_fixed_safe(expanded.width) == 0 ||
+        cpu_fixed_safe(expanded.height) == 0) {
+        return cpu_result(surface.*, CpuRasterError.invalid_geometry,
+            0 - 1, 0, 0);
+    }
+    let bounds: Rect = cpu_rect_intersection(
+        cpu_rect_intersection(expanded, clip),
+        rect(0, 0, (surface.*.width as i64) * unit_scale(),
+            (surface.*.height as i64) * unit_scale())
+    );
+    if (bounds.width <= 0 || bounds.height <= 0) {
+        return cpu_result(surface.*, CpuRasterError.none, 0 - 1, 0, 0);
+    }
+    let first_x: i32 = (bounds.x / unit_scale()) as i32;
+    let first_y: i32 = (bounds.y / unit_scale()) as i32;
+    let last_x: i32 = ((bounds.x + bounds.width + unit_scale() - 1) /
+        unit_scale()) as i32;
+    let last_y: i32 = ((bounds.y + bounds.height + unit_scale() - 1) /
+        unit_scale()) as i32;
+    let pixel_count: i64 = ((last_x - first_x) as i64) *
+        ((last_y - first_y) as i64);
+    if (pixel_count <= 0 || pixel_count > cpu_shadow_work_limit()) {
+        return cpu_result(surface.*, CpuRasterError.work_limit,
+            0 - 1, 0, 0);
+    }
+    let denominator: i64 = blur * blur;
+    let touched: i64 = 0;
+    let y: i32 = first_y;
+    while (y < last_y) {
+        let x: i32 = first_x;
+        while (x < last_x) {
+            let center_x: i64 = (x as i64) * unit_scale() +
+                unit_scale() / 2;
+            let center_y: i64 = (y as i64) * unit_scale() +
+                unit_scale() / 2;
+            let distance: i64 = cpu_rounded_signed_distance(
+                shape, radius, center_x, center_y);
+            if (distance < 0) { distance = 0; }
+            if (distance < blur) {
+                let remaining: i64 = blur - distance;
+                let coverage: i64 = (remaining * remaining * 4096) /
+                    denominator;
+                if (coverage > 0) {
+                    cpu_blend_pixel(surface, x, y, paint, coverage);
+                    touched = touched + 1;
+                }
+            }
+            x = x + 1;
+        }
+        y = y + 1;
+    }
+    return cpu_result(surface.*, CpuRasterError.none, 0 - 1, 0, touched);
+}
+
+fn cpu_rect_pixel_coverage(bounds: Rect, x: i32, y: i32) i64 {'''
+              if anchor not in raster:
+                  raise SystemExit("cpu_raster.zag: rounded-rect insertion anchor missing")
+              raster = raster.replace(anchor, implementation, 1)
+              dispatch_old = '''            pixels_touched = pixels_touched + rounded.pixels_touched;
+        } else if (op.kind == DisplayOpKind.stroke_rect) {'''
+              dispatch_new = '''            pixels_touched = pixels_touched + rounded.pixels_touched;
+        } else if (op.kind == DisplayOpKind.fill_rounded_shadow) {
+            let shadow: CpuRasterResult = cpu_fill_rounded_shadow(&surface,
+                op.bounds, op.parameter, op.paint.stroke_width,
+                current.clip, current.transform, op.paint);
+            if (shadow.error != CpuRasterError.none) {
+                free[CpuRasterState](&stack);
+                return cpu_result(surface, shadow.error, i,
+                    rendered_ops, pixels_touched);
+            }
+            pixels_touched = pixels_touched + shadow.pixels_touched;
+        } else if (op.kind == DisplayOpKind.stroke_rect) {'''
+              if dispatch_old not in raster:
+                  raise SystemExit("cpu_raster.zag: dispatch anchor missing")
+              raster = raster.replace(dispatch_old, dispatch_new, 1)
+              raster_path.write_text(raster)
+
+          surface_path = Path("src/components/surface_v2.zag")
+          surface = surface_path.read_text()
+          if "DisplayOpKind.fill_rounded_shadow" not in surface:
+              surface = surface.replace(
+                  "// The current CPU path approximates soft shadows with a fixed number of\n// analytic rounded-rectangle bands. Work is explicit and bounded; no temporary\n// image, Gaussian pass, hidden allocation, or recursive blur is introduced.\n// A future display-list shadow operation may replace the bands without changing\n// this component contract.",
+                  "// Each contact or ambient lobe is one analytic display-list operation.\n// The CPU oracle evaluates a bounded fixed-point falloff directly; no temporary\n// image, Gaussian pass, hidden allocation, recursive blur, or banding is used.\n// GPU backends consume the same retained operation and parameters.",
+              )
+              surface = surface.replace(
+                  "fn surface_v2_ambient_shadow_bands() i32 { return 4; }\nfn surface_v2_contact_shadow_bands() i32 { return 3; }",
+                  "// Compatibility names retained during the experimental v2 transition.\n// Each lobe now emits one analytic operation rather than several visual bands.\nfn surface_v2_ambient_shadow_bands() i32 { return 1; }\nfn surface_v2_contact_shadow_bands() i32 { return 1; }",
+              )
+              old_shadow = '''fn surface_v2_shadow_bands(display: *DisplayList,
+    budget: *SurfaceBuildBudget, owner: NodeKey,
+    bounds: Rect, radius: i64, shadow: VisualShadowSpec,
+    band_count: i32) SurfaceDrawResult {
+    let result: SurfaceDrawResult = surface_v2_draw_result();
+    if (shadow.alpha <= 0 || shadow.blur_radius <= 0 || band_count <= 0) {
+        return result;
+    }
+    let band: i32 = 0;
+    while (band < band_count) {
+        let inward_index: i64 = (band + 1) as i64;
+        let count: i64 = band_count as i64;
+        let expansion: i64 = (shadow.blur_radius *
+            (count - band as i64)) / count;
+        let numerator: i64 = 2 * inward_index - 1;
+        let alpha: i64 = (shadow.alpha * numerator) /
+            (count * count);
+        result = surface_push_round(display, budget, owner,
+            rect(bounds.x + shadow.offset_x - expansion,
+                bounds.y + shadow.offset_y - expansion,
+                bounds.width + expansion * 2,
+                bounds.height + expansion * 2),
+            radius + expansion,
+            semantic_color_with_alpha(SemanticColorToken.shadow, alpha));
+        if (result.error != SurfaceBuildError.none) { return result; }
+        band = band + 1;
+    }
+    return result;
+}'''
+              new_shadow = '''fn surface_v2_shadow(display: *DisplayList,
+    budget: *SurfaceBuildBudget, owner: NodeKey,
+    bounds: Rect, radius: i64,
+    shadow: VisualShadowSpec) SurfaceDrawResult {
+    let result: SurfaceDrawResult = surface_v2_draw_result();
+    if (shadow.alpha <= 0 || shadow.blur_radius <= 0) {
+        return result;
+    }
+    if (surface_take_display(budget) == 0) {
+        result.error = SurfaceBuildError.capacity_error;
+        result.capacity_error = SurfaceCapacityError.display_operations;
+        return result;
+    }
+    let spread: i64 = shadow.spread;
+    let op: DisplayOp = display_op(
+        DisplayOpKind.fill_rounded_shadow, owner);
+    op.bounds = rect(bounds.x + shadow.offset_x - spread,
+        bounds.y + shadow.offset_y - spread,
+        bounds.width + spread * 2,
+        bounds.height + spread * 2);
+    op.parameter = radius + spread;
+    op.paint = semantic_color_with_alpha(
+        SemanticColorToken.shadow, shadow.alpha);
+    op.paint.stroke_width = shadow.blur_radius;
+    let error: DisplayError = display_list_push(display, op);
+    if (error != DisplayError.none) {
+        result.error = SurfaceBuildError.display_error;
+        result.display_error = error;
+    }
+    return result;
+}'''
+              if old_shadow not in surface:
+                  raise SystemExit("surface_v2.zag: band function anchor missing")
+              surface = surface.replace(old_shadow, new_shadow, 1)
+              surface = surface.replace(
+                  '''        draw = surface_v2_shadow_bands(display, &budget,
+            spec.base.id, chrome, radius,
+            effects.shadows.ambient,
+            surface_v2_ambient_shadow_bands());
+        if (draw.error == SurfaceBuildError.none) {
+            draw = surface_v2_shadow_bands(display, &budget,
+                spec.base.id, chrome, radius,
+                effects.shadows.contact,
+                surface_v2_contact_shadow_bands());
+        }''',
+                  '''        draw = surface_v2_shadow(display, &budget,
+            spec.base.id, chrome, radius,
+            effects.shadows.ambient);
+        if (draw.error == SurfaceBuildError.none) {
+            draw = surface_v2_shadow(display, &budget,
+                spec.base.id, chrome, radius,
+                effects.shadows.contact);
+        }''',
+                  1,
+              )
+              surface_path.write_text(surface)
+
+          surface_test_path = Path("tests/surface_v2_contract.zag")
+          surface_test = surface_test_path.read_text()
+          if "built_overlay.artifact.shadow_operations == 2" not in surface_test:
+              replace_once(
+                  str(surface_test_path),
+                  "        built_overlay.artifact.shadow_operations == 7,",
+                  "        built_overlay.artifact.shadow_operations == 2,",
+              )
+
+          analytic_test = r'''@import("../src/components/surface_v2.zag")
+@import("../src/render/display_list_codec.zag")
+@import("../src/render/cpu_raster.zag")
+
+struct TestState { passed: i32, failed: i32 }
+
+fn expect(state: *TestState, condition: i32, name: []u8) void {
+    if (condition != 0) {
+        state.*.passed = state.*.passed + 1;
+        _zag_print("ok  "); _zag_println(name);
+    } else {
+        state.*.failed = state.*.failed + 1;
+        _zag_print("FAIL "); _zag_println(name);
+    }
+}
+
+fn pixel_alpha(surface: CpuSurface, x: i32, y: i32) i64 {
+    return surface.pixels.data[(y * surface.width + x) * 4 + 3] as i64;
+}
+
+fn shadow_op(owner: NodeKey) DisplayOp {
+    let op: DisplayOp = display_op(
+        DisplayOpKind.fill_rounded_shadow, owner);
+    op.bounds = rect(16 * unit_scale(), 16 * unit_scale(),
+        32 * unit_scale(), 32 * unit_scale());
+    op.parameter = 8 * unit_scale();
+    op.paint = paint_rgba16(0, 0, 0, 36000);
+    op.paint.stroke_width = 12 * unit_scale();
+    return op;
+}
+
+fn display_and_raster_contract(state: *TestState) void {
+    let list: DisplayList = display_list_make();
+    let op: DisplayOp = shadow_op(node_key(7000));
+    expect(state,
+        display_list_push(&list, op) == DisplayError.none &&
+        list.ops.len == 1 &&
+        list.ops.data[0].kind == DisplayOpKind.fill_rounded_shadow,
+        "one retained operation represents one complete analytic shadow lobe");
+    expect(state,
+        display_list_seal(&list) == DisplayError.none &&
+        display_list_verify(list) == DisplayError.none,
+        "analytic shadow operation seals into deterministic render IR");
+
+    let first: CpuRasterResult = cpu_rasterize(list, 64, 64);
+    let second: CpuRasterResult = cpu_rasterize(list, 64, 64);
+    let center_alpha: i64 = pixel_alpha(first.surface, 32, 32);
+    let near_alpha: i64 = pixel_alpha(first.surface, 10, 32);
+    let far_alpha: i64 = pixel_alpha(first.surface, 2, 32);
+    expect(state,
+        first.error == CpuRasterError.none &&
+        first.rendered_ops == 1 && first.pixels_touched > 0,
+        "CPU oracle renders the soft shadow in one bounded operation");
+    expect(state,
+        center_alpha > near_alpha && near_alpha > far_alpha &&
+        far_alpha == 0,
+        "quadratic analytic falloff is smooth ordered and reaches transparent zero");
+    expect(state,
+        cpu_surface_hash(first.surface) == cpu_surface_hash(second.surface) &&
+        first.pixels_touched == second.pixels_touched,
+        "identical shadow inputs produce byte-stable CPU output and work counts");
+
+    let encoded: DisplayEncodeResult = display_list_encode(list);
+    let decoded: DisplayDecodeResult = display_list_decode(encoded.bytes);
+    expect(state,
+        encoded.error == DisplayCodecError.none &&
+        decoded.error == DisplayCodecError.none &&
+        decoded.list.ops.len == 1 &&
+        decoded.list.ops.data[0].kind ==
+            DisplayOpKind.fill_rounded_shadow &&
+        decoded.list.ops.data[0].paint.stroke_width ==
+            12 * unit_scale() &&
+        decoded.list.content_hash == list.content_hash,
+        "codec v4 preserves analytic shadow radius blur ownership and identity");
+
+    display_decode_free(&decoded);
+    display_encode_free(&encoded);
+    cpu_raster_free(&second);
+    cpu_raster_free(&first);
+    display_list_free(&list);
+}
+
+fn rejection_contract(state: *TestState) void {
+    let list: DisplayList = display_list_make();
+    let zero_blur: DisplayOp = shadow_op(node_key(7100));
+    zero_blur.paint.stroke_width = 0;
+    expect(state,
+        display_list_push(&list, zero_blur) ==
+            DisplayError.invalid_parameter && list.ops.len == 0,
+        "zero blur cannot enter the canonical shadow stream");
+
+    let huge_blur: DisplayOp = shadow_op(node_key(7101));
+    huge_blur.paint.stroke_width = 257 * unit_scale();
+    expect(state,
+        display_list_push(&list, huge_blur) ==
+            DisplayError.invalid_parameter && list.ops.len == 0,
+        "unbounded blur is rejected before display-list mutation");
+
+    let invisible: DisplayOp = shadow_op(node_key(7102));
+    invisible.paint.alpha = 0;
+    expect(state,
+        display_list_push(&list, invisible) ==
+            DisplayError.invalid_parameter && list.ops.len == 0,
+        "fully transparent shadow no-ops are rejected for canonical identity");
+    display_list_free(&list);
+}
+
+fn surface_integration_contract(state: *TestState) void {
+    let display: DisplayList = display_list_make();
+    let hits: HitTree = hit_tree_make();
+    let semantics: SemanticsTree = semantics_tree_make();
+    let spec: SurfaceV2Spec = surface_v2_spec(
+        node_key(7200), hit_root_key(),
+        rect(32 * unit_scale(), 32 * unit_scale(),
+            240 * unit_scale(), 88 * unit_scale()),
+        "Analytic raised card", VisualSurfaceKind.raised_card);
+    let built: SurfaceV2BuildResult = surface_v2_emit(
+        spec, &display, &hits, &semantics);
+    expect(state,
+        built.error == SurfaceBuildError.none &&
+        built.artifact.shadow_operations == 2 &&
+        display.ops.len >= 2 &&
+        display.ops.data[0].kind ==
+            DisplayOpKind.fill_rounded_shadow &&
+        display.ops.data[1].kind ==
+            DisplayOpKind.fill_rounded_shadow,
+        "SurfaceV2 emits exactly one ambient and one contact shadow operation");
+    expect(state,
+        display_list_seal(&display) == DisplayError.none,
+        "SurfaceV2 analytic shadow scene seals before rendering");
+    let rendered: CpuRasterResult = cpu_rasterize(display, 320, 160);
+    expect(state,
+        rendered.error == CpuRasterError.none &&
+        rendered.rendered_ops == display.ops.len &&
+        rendered.pixels_touched > 0,
+        "integrated modern surface renders through the deterministic CPU oracle");
+
+    cpu_raster_free(&rendered);
+    semantics_tree_free(&semantics);
+    hit_tree_free(&hits);
+    display_list_free(&display);
+}
+
+fn main() i32 {
+    let state: TestState = TestState{ .passed = 0, .failed = 0 };
+    display_and_raster_contract(&state);
+    rejection_contract(&state);
+    surface_integration_contract(&state);
+    _zag_print("Analytic shadow contract: pass=");
+    _zag_print_i64(state.passed as i64);
+    _zag_print(" fail=");
+    _zag_print_i64(state.failed as i64);
+    _zag_println("");
+    if (state.failed == 0) { return 0; }
+    return 1;
+}
+'''
+          Path("tests/analytic_shadow_contract.zag").write_text(analytic_test)
+
+          doc = r'''# Analytic rounded shadows
+
+Status: experimental ZagKit v2 render contract.
+
+ZagKit represents each elevation lobe as one retained
+`fill_rounded_shadow` display operation. A normal elevated surface therefore
+uses exactly two shadow operations: one contact lobe and one ambient lobe.
+This replaces the previous seven expanded rounded-rectangle bands.
+
+## Operation encoding
+
+- `bounds` is the shifted rounded rectangle casting the shadow.
+- `parameter` is its logical corner radius.
+- `paint` owns RGBA16 shadow color and opacity.
+- `paint.stroke_width` owns the logical blur radius for this operation.
+- spread is resolved into bounds and radius before recording.
+- `resource_id` remains zero; the operation does not own an external resource.
+
+The display-list validator rejects zero or excessive blur, empty geometry,
+invalid radius, invisible no-ops, and noncanonical resource identity before
+mutation. Codec version 4 round-trips the operation without changing the fixed
+160-byte operation record.
+
+## CPU oracle
+
+The deterministic CPU path evaluates a rounded-rectangle signed distance with
+a fixed-point octagonal radial approximation and quadratic alpha falloff. It
+uses no temporary image, Gaussian pass, hidden allocation, or recursive blur.
+Work is bounded by the clipped expanded pixel extent and fails visibly above
+the shadow work limit.
+
+The CPU oracle is the semantic reference for future GPU implementations. GPU
+backends may use a native distance-field shader, but must consume the same
+operation parameters and remain within the declared visual tolerance.
+
+## Performance contract
+
+A raised `SurfaceV2` records two shadow operations regardless of blur radius.
+Compact or flattened surfaces record none. The operation count is therefore
+constant per elevated surface and independent of visual softness.
+
+Run:
+
+```sh
+./tools/test-headless.sh
+```
+
+The `analytic_shadow_contract.zag` gate verifies validation, smooth ordered
+falloff, byte-stable raster output, codec identity, and SurfaceV2 integration.
+'''
+          Path("docs/architecture/analytic-shadows.md").write_text(doc)
+
+          headless_path = Path("tools/test-headless.sh")
+          headless = headless_path.read_text()
+          if "tests/analytic_shadow_contract.zag" not in headless:
+              anchor = '''"$znc" tests/cpu_raster_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/cpu-raster-contract"
+"$tmp/cpu-raster-contract"'''
+              addition = anchor + '''
+"$znc" tests/analytic_shadow_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o "$tmp/analytic-shadow-contract"
+"$tmp/analytic-shadow-contract"'''
+              if anchor not in headless:
+                  raise SystemExit("tools/test-headless.sh: CPU raster anchor missing")
+              headless = headless.replace(anchor, addition, 1)
+              headless = headless.replace(
+                  "analytic rounded geometry, CPU shape and image raster",
+                  "analytic rounded geometry, constant-operation soft shadows, CPU shape and image raster",
+                  1,
+              )
+              headless_path.write_text(headless)
+
+          validate_path = Path(".github/workflows/zagkit-v2-validate.yml")
+          validate = validate_path.read_text()
+          if "analytic_shadow_contract.zag" not in validate:
+              anchor = '''      - name: Preserve canonical component contracts
+        run: |'''
+              step = '''      - name: Compile and run analytic shadow contract
+        run: |
+          "$ZNC" tests/analytic_shadow_contract.zag \\
+            --no-zagd --analyze-strict --no-foreground-cache \\
+            -o /tmp/analytic-shadow-contract
+          /tmp/analytic-shadow-contract
+
+'''
+              if anchor not in validate:
+                  raise SystemExit("validate workflow: insertion anchor missing")
+              validate = validate.replace(anchor, step + anchor, 1)
+              validate_path.write_text(validate)
+          PY
+
+      - name: Run focused native Zag v2 contracts
+        run: |
+          chmod +x "$ZNC"
+          "$ZNC" tests/analytic_shadow_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o /tmp/analytic-shadow-contract
+          /tmp/analytic-shadow-contract
+          "$ZNC" tests/surface_v2_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o /tmp/surface-v2-contract
+          /tmp/surface-v2-contract
+          "$ZNC" tests/display_list_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o /tmp/display-list-contract
+          /tmp/display-list-contract
+          "$ZNC" tests/display_list_codec_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o /tmp/display-list-codec-contract
+          /tmp/display-list-codec-contract
+          "$ZNC" tests/cpu_raster_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o /tmp/cpu-raster-contract
+          /tmp/cpu-raster-contract
+
+      - name: Run complete deterministic headless and contract gates
+        run: |
+          chmod +x tools/test-headless.sh tools/check-contracts.sh
+          ./tools/test-headless.sh
+          ./tools/check-contracts.sh
+          git diff --check
+
+      - name: Commit verified analytic shadow slice
+        run: |
+          git config user.name "zagkit-visual-bot"
+          git config user.email "zagkit-visual-bot@users.noreply.github.com"
+          git add src tests tools docs .github/workflows/zagkit-v2-validate.yml
+          if git diff --cached --quiet; then
+            echo "Analytic shadow slice already present"
+            exit 0
+          fi
+          git commit -m "feat: add constant-operation analytic soft shadows"
+          git push origin HEAD:master
