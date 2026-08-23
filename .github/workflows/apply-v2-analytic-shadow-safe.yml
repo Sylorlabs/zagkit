@@ -1,0 +1,250 @@
+name: Apply ownership-safe analytic shadow IR
+
+on:
+  push:
+    branches: [agent/v2-analytic-shadow-safe]
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      ZNC: ${{ github.workspace }}/.toolchain/zag/zag-poc/znc
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: agent/v2-analytic-shadow-safe
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Resolve pinned Zag revision
+        id: toolchain
+        shell: bash
+        run: echo "zag_sha=$(jq -r '.zag.commit' contracts/toolchain.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Check out and bootstrap pinned Zag
+        uses: actions/checkout@v6
+        with:
+          repository: Sylorlabs/zag
+          ref: ${{ steps.toolchain.outputs.zag_sha }}
+          path: .toolchain/zag
+
+      - name: Bootstrap compiler
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x .toolchain/zag/zag-poc/znc .toolchain/zag/zag-poc/bootstrap.sh
+          ZAG_BOOTSTRAP_MEMORY_GUARD=off .toolchain/zag/zag-poc/bootstrap.sh
+
+      - name: Apply renderer-only transplant and verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          (
+            python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              file = Path(path)
+              text = file.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(
+                      f"{path}: expected one replacement, found {count}: {old[:120]!r}")
+              file.write_text(text.replace(old, new, 1))
+
+          def replace_between(path: str, start: str, end: str, replacement: str) -> None:
+              file = Path(path)
+              text = file.read_text()
+              start_index = text.index(start)
+              end_index = text.index(end, start_index)
+              file.write_text(text[:start_index] + replacement + text[end_index:])
+
+          # The dormant foundation workflow contains a reviewed implementation
+          # of the display-list kind, binary codec, deterministic CPU raster,
+          # contract, documentation, and strict headless wiring. Execute it, but
+          # preserve the newer ownership-safe visual API and legacy Surface
+          # contract; only the renderer transport is transplanted here.
+          preserved_paths = [
+              'src/design/visual_system_v2.zag',
+              'src/components/surface.zag',
+              'tests/surface_contract.zag',
+              'docs/components/surface.md',
+          ]
+          preserved = {path: Path(path).read_text() for path in preserved_paths}
+
+          source = Path('.github/workflows/zagkit-v2-visual-system.yml')
+          lines = source.read_text().splitlines()
+          start = next(i for i, line in enumerate(lines)
+                       if line.strip() == "python3 <<'PY'")
+          finish = next(i for i in range(start + 1, len(lines))
+                        if lines[i] == '          PY')
+          body = []
+          for line in lines[start + 1:finish]:
+              body.append(line[10:] if line.startswith('          ') else line)
+          namespace = {'__name__': '__main__'}
+          exec(compile('\n'.join(body) + '\n',
+                       'zagkit-v2-visual-system-extracted.py', 'exec'), namespace)
+
+          for path, content in preserved.items():
+              Path(path).write_text(content)
+
+          surface_path = 'src/components/surface_v2.zag'
+          replace_once(
+              surface_path,
+              '''// The current CPU path approximates soft shadows with a fixed number of
+// analytic rounded-rectangle bands. Work is explicit and bounded; no temporary
+// image, Gaussian pass, hidden allocation, or recursive blur is introduced.
+// A future display-list shadow operation may replace the bands without changing
+// this component contract.
+''',
+              '''// Shadows are emitted as two native analytic display operations: one
+// contact layer and one ambient layer. The CPU oracle evaluates deterministic
+// fixed-point signed-distance falloff; accelerated backends consume the same IR.
+// No temporary image, Gaussian pass, hidden allocation, or recursive blur is
+// introduced by SurfaceV2.
+''')
+
+          replace_once(
+              surface_path,
+              '''fn surface_v2_effect_operation_limit() i32 { return 32; }
+fn surface_v2_ambient_shadow_bands() i32 { return 4; }
+fn surface_v2_contact_shadow_bands() i32 { return 3; }
+''',
+              '''fn surface_v2_effect_operation_limit() i32 { return 24; }
+fn surface_v2_shadow_operation_count() i32 { return 2; }
+''')
+
+          native_shadow = '''fn surface_v2_shadow_operation(display: *DisplayList,
+    budget: *SurfaceBuildBudget, owner: NodeKey,
+    bounds: Rect, radius: i64,
+    shadow: VisualShadowSpec) SurfaceDrawResult {
+    let result: SurfaceDrawResult = surface_v2_draw_result();
+    if (shadow.alpha <= 0 || shadow.blur_radius <= 0) {
+        return result;
+    }
+    if (surface_take_display(budget) == 0) {
+        result.error = SurfaceBuildError.capacity_error;
+        result.capacity_error = SurfaceCapacityError.display_operations;
+        return result;
+    }
+    let spread: i64 = shadow.spread;
+    let op: DisplayOp = display_op(
+        DisplayOpKind.fill_rounded_shadow, owner);
+    op.bounds = rect(
+        bounds.x + shadow.offset_x - spread,
+        bounds.y + shadow.offset_y - spread,
+        bounds.width + spread * 2,
+        bounds.height + spread * 2);
+    op.parameter = radius + spread;
+    op.paint = semantic_color_with_alpha(
+        SemanticColorToken.shadow, shadow.alpha);
+    op.paint.stroke_width = shadow.blur_radius;
+    let error: DisplayError = display_list_push(display, op);
+    if (error != DisplayError.none) {
+        result.error = SurfaceBuildError.display_error;
+        result.display_error = error;
+    }
+    return result;
+}
+
+'''
+          replace_between(
+              surface_path,
+              'fn surface_v2_shadow_bands(',
+              'fn surface_v2_draw_chrome(',
+              native_shadow)
+
+          old_emit = '''        let before: i32 = budget.display_operations;
+        draw = surface_v2_shadow_bands(display, &budget,
+            spec.base.id, chrome, radius,
+            effects.shadows.ambient,
+            surface_v2_ambient_shadow_bands());
+        if (draw.error == SurfaceBuildError.none) {
+            draw = surface_v2_shadow_bands(display, &budget,
+                spec.base.id, chrome, radius,
+                effects.shadows.contact,
+                surface_v2_contact_shadow_bands());
+        }
+        shadow_operations = budget.display_operations - before;
+'''
+          new_emit = '''        let before: i32 = budget.display_operations;
+        draw = surface_v2_shadow_operation(display, &budget,
+            spec.base.id, chrome, radius,
+            effects.shadows.ambient);
+        if (draw.error == SurfaceBuildError.none) {
+            draw = surface_v2_shadow_operation(display, &budget,
+                spec.base.id, chrome, radius,
+                effects.shadows.contact);
+        }
+        shadow_operations = budget.display_operations - before;
+'''
+          replace_once(surface_path, old_emit, new_emit)
+
+          test_path = 'tests/surface_v2_contract.zag'
+          replace_once(
+              test_path,
+              '''        built_panel.artifact.shadow_operations ==
+            surface_v2_ambient_shadow_bands() +
+            surface_v2_contact_shadow_bands(),
+        "content panel is opaque modern depth with bounded two-part shadow work");''',
+              '''        built_panel.artifact.shadow_operations ==
+            surface_v2_shadow_operation_count() &&
+        display.ops.data[built_panel.artifact.display_op_start].kind ==
+            DisplayOpKind.fill_rounded_shadow,
+        "content panel uses two native analytic shadow operations with bounded work");''')
+          replace_once(
+              test_path,
+              '''        built_overlay.artifact.effects.blur_radius == 36 * unit_scale() &&
+        built_overlay.artifact.shadow_operations == 7,
+        "transient overlay receives one bounded glass treatment and overlay depth");''',
+              '''        built_overlay.artifact.effects.blur_radius == 36 * unit_scale() &&
+        built_overlay.artifact.shadow_operations ==
+            surface_v2_shadow_operation_count(),
+        "transient overlay receives bounded glass and two-layer native depth");''')
+
+          print('Applied ownership-safe analytic shadow renderer transplant')
+          PY
+
+            chmod +x "$ZNC" tools/test-headless.sh tools/check-contracts.sh tools/test-native-visual-system.sh
+            "$ZNC" tests/visual_system_v2_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o /tmp/visual-system-v2-contract
+            /tmp/visual-system-v2-contract
+            "$ZNC" tests/surface_v2_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o /tmp/surface-v2-contract
+            /tmp/surface-v2-contract
+            "$ZNC" tests/display_list_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o /tmp/display-list-contract
+            /tmp/display-list-contract
+            "$ZNC" tests/display_list_codec_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o /tmp/display-list-codec-contract
+            /tmp/display-list-codec-contract
+            "$ZNC" tests/cpu_raster_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o /tmp/cpu-raster-contract
+            /tmp/cpu-raster-contract
+            ZNC="$ZNC" ./tools/test-native-visual-system.sh
+            ./tools/test-headless.sh
+            ./tools/check-contracts.sh
+            git diff --check
+          ) > /tmp/v2-analytic-shadow-safe.log 2>&1
+          status=$?
+          set -e
+
+          git config user.name "zagkit-render-bot"
+          git config user.email "zagkit-render-bot@users.noreply.github.com"
+
+          if [ "$status" -ne 0 ]; then
+            git restore .
+            rm -f .github/workflows/apply-v2-analytic-shadow-safe.yml
+            tail -n 600 /tmp/v2-analytic-shadow-safe.log > .github/v2-analytic-shadow-safe-failure.log
+            git add -A
+            git commit -m "ci: record ownership-safe analytic shadow failure"
+            git push origin HEAD:agent/v2-analytic-shadow-safe
+            cat .github/v2-analytic-shadow-safe-failure.log
+            exit "$status"
+          fi
+
+          cat /tmp/v2-analytic-shadow-safe.log
+          rm -f .github/workflows/apply-v2-analytic-shadow-safe.yml
+          git add -A
+          git commit -m "render: integrate ownership-safe analytic shadow IR"
+          git push origin HEAD:agent/v2-analytic-shadow-safe
