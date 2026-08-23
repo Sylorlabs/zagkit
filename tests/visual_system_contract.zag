@@ -1,0 +1,101 @@
+@import("../src/design/visual_system.zag")
+
+fn main() i32 {
+    let env: VisualEnvironment = visual_environment();
+    if (visual_environment_valid(env) == 0) { return 1; }
+
+    // Content is always opaque. A card may be elevated without pretending to
+    // float over live content.
+    if (visual_material_token(VisualSurfaceRole.content, env) !=
+        SemanticMaterialToken.solid) { return 2; }
+
+    // Persistent chrome receives veil only when density and accessibility
+    // preferences permit it.
+    if (visual_material_token(VisualSurfaceRole.floating_chrome, env) !=
+        SemanticMaterialToken.veil) { return 3; }
+
+    let compact: VisualEnvironment = env;
+    compact.density = FlexDensity.compact;
+    if (visual_material_token(VisualSurfaceRole.floating_chrome, compact) !=
+        SemanticMaterialToken.solid) { return 4; }
+
+    let reduced: VisualEnvironment = env;
+    reduced.transparency = VisualTransparencyPreference.reduced;
+    if (visual_material_token(VisualSurfaceRole.floating_chrome, reduced) !=
+        SemanticMaterialToken.solid) { return 5; }
+    if (visual_material_token(VisualSurfaceRole.transient_overlay, reduced) !=
+        SemanticMaterialToken.solid) { return 6; }
+
+    if (visual_material_token(VisualSurfaceRole.transient_overlay, env) !=
+        SemanticMaterialToken.glass) { return 7; }
+
+    // CPU/oracle mode records a truthful fallback instead of claiming that a
+    // blur pass ran.
+    let oracle_glass: ResolvedVisualMaterial = visual_resolve_material(
+        VisualSurfaceRole.transient_overlay,
+        SemanticElevationToken.overlay, env);
+    if (oracle_glass.error != VisualPolicyError.none ||
+        oracle_glass.cpu_fallback == 0 ||
+        oracle_glass.translucent == 0 ||
+        oracle_glass.blur_radius != 36 * unit_scale() ||
+        oracle_glass.backdrop_downsample != 4 ||
+        oracle_glass.blur_passes != 4) { return 8; }
+
+    let gpu: VisualEnvironment = env;
+    gpu.backdrop_blur_available = 1;
+    gpu.quality = VisualQualityTier.high;
+    let accelerated_glass: ResolvedVisualMaterial = visual_resolve_material(
+        VisualSurfaceRole.transient_overlay,
+        SemanticElevationToken.overlay, gpu);
+    if (accelerated_glass.cpu_fallback != 0 ||
+        accelerated_glass.evidence_hash == oracle_glass.evidence_hash) {
+        return 9;
+    }
+
+    // Every elevated material receives the same physical light direction and
+    // a contact/ambient shadow pair. RTL does not mirror this physical light.
+    let light: VisualSceneLight = visual_scene_light();
+    if (light.azimuth_degrees != 40 || light.zenith_degrees != 60 ||
+        light.shadow_direction_x_16 <= 0 ||
+        light.shadow_direction_y_16 <= 0) { return 10; }
+
+    let panel_shadow: VisualShadowPair = visual_shadow_pair(
+        SemanticElevationToken.panel);
+    let raised_shadow: VisualShadowPair = visual_shadow_pair(
+        SemanticElevationToken.raised);
+    let overlay_shadow: VisualShadowPair = visual_shadow_pair(
+        SemanticElevationToken.overlay);
+    if (visual_shadow_extent(panel_shadow) >=
+        visual_shadow_extent(raised_shadow) ||
+        visual_shadow_extent(raised_shadow) >=
+        visual_shadow_extent(overlay_shadow)) { return 11; }
+
+    // Veil occupies at most 25% of a viewport and only one true glass layer may
+    // be live for an interaction.
+    let valid_budget: VisualEffectBudget = VisualEffectBudget{
+        .viewport_width = 1000,
+        .viewport_height = 800,
+        .veil_area = 200000,
+        .live_glass_layers = 1,
+    };
+    if (visual_effect_budget_valid(valid_budget) == 0) { return 12; }
+
+    let excessive_veil: VisualEffectBudget = valid_budget;
+    excessive_veil.veil_area = 200001;
+    if (visual_effect_budget_valid(excessive_veil) != 0) { return 13; }
+
+    let nested_glass: VisualEffectBudget = valid_budget;
+    nested_glass.live_glass_layers = 2;
+    if (visual_effect_budget_valid(nested_glass) != 0) { return 14; }
+
+    // Resolution must be deterministic.
+    let repeat: ResolvedVisualMaterial = visual_resolve_material(
+        VisualSurfaceRole.transient_overlay,
+        SemanticElevationToken.overlay, env);
+    if (repeat.evidence_hash != oracle_glass.evidence_hash ||
+        visual_glass_capture_inflate(repeat) <= repeat.blur_radius) {
+        return 15;
+    }
+
+    return 0;
+}
