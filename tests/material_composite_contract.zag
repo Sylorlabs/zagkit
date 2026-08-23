@@ -1,0 +1,59 @@
+@import("../src/render/material_composite.zag")
+
+fn main() i32 {
+    let black: Paint = material_paint(0, 0, 0, 65535);
+    let white: Paint = material_paint(65535, 65535, 65535, 65535);
+    let half_white: Paint = material_paint(65535, 65535, 65535, 32768);
+
+    if (material_luminance_16(black) != 0 ||
+        material_luminance_16(white) < 65530 ||
+        material_contrast_x1000(white, black) < 20000) { return 1; }
+
+    let mixed: Paint = material_tint(black, white, 32768);
+    if (mixed.red <= 0 || mixed.red >= 65535 ||
+        mixed.red != mixed.green || mixed.green != mixed.blue) { return 2; }
+
+    let over: Paint = material_source_over(half_white, black);
+    if (over.alpha != 65535 || over.red < 32760 || over.red > 32775) {
+        return 3;
+    }
+
+    let highlighted: Paint = material_apply_edge_highlight(black,
+        white, 32768);
+    if (highlighted.red <= black.red || highlighted.alpha != 65535) {
+        return 4;
+    }
+
+    let vignette: Paint = material_vignette(white, 65535, 16384);
+    if (vignette.red >= white.red || vignette.alpha != 65535) { return 5; }
+
+    let adapted: MaterialContrastResult = material_adapt_tint(
+        white, black, white, 0, 65535, 7000);
+    if (adapted.iterations <= 0 || adapted.iterations > 8 ||
+        adapted.tint_alpha_16 <= 0 || adapted.contrast_x1000 <= 1000) {
+        return 6;
+    }
+
+    let env: VisualEnvironment = visual_environment();
+    let solid: ResolvedVisualMaterial = visual_resolve_material(
+        VisualSurfaceRole.content, SemanticElevationToken.panel, env);
+    let solid_sample: MaterialContrastResult = material_resolve_sample(
+        solid, black, white, 32768);
+    if (solid_sample.tint_alpha_16 != 0 ||
+        solid_sample.paint.alpha != 65535) { return 7; }
+
+    let gpu: VisualEnvironment = env;
+    gpu.backdrop_blur_available = 1;
+    gpu.quality = VisualQualityTier.high;
+    let glass: ResolvedVisualMaterial = visual_resolve_material(
+        VisualSurfaceRole.transient_overlay,
+        SemanticElevationToken.overlay, gpu);
+    let glass_sample: MaterialContrastResult = material_resolve_sample(
+        glass, black, white, 32768);
+    if (glass_sample.paint.alpha != black.alpha ||
+        glass_sample.tint_alpha_16 < 0 || glass_sample.iterations > 8) {
+        return 8;
+    }
+
+    return 0;
+}
