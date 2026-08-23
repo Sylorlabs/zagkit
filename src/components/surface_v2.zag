@@ -1,0 +1,602 @@
+@import("surface.zag")
+@import("../design/visual_system_v2.zag")
+
+// SurfaceV2 is the first production-facing visual primitive for ZagKit v2.
+// It preserves Surface's stable identity, hit tree, semantics, focus, and
+// Talkback path while applying the v2 material/elevation contract.
+//
+// The current CPU path approximates soft shadows with a fixed number of
+// analytic rounded-rectangle bands. Work is explicit and bounded; no temporary
+// image, Gaussian pass, hidden allocation, or recursive blur is introduced.
+// A future display-list shadow operation may replace the bands without changing
+// this component contract.
+
+struct SurfaceV2Spec {
+    base: SurfaceSpec,
+    kind: VisualSurfaceKind,
+    material_role: VisualMaterialRole,
+    transparency: VisualTransparency,
+    high_contrast: i32,
+    backdrop_available: i32,
+    effect_operations: i32,
+}
+
+struct SurfaceV2Artifact {
+    base: SurfaceArtifact,
+    effects: VisualSurfaceEffects,
+    content_bounds: Rect,
+    display_op_start: i32,
+    display_op_end: i32,
+    shadow_operations: i32,
+    effect_operations: i32,
+    evidence_hash: i64,
+}
+
+struct SurfaceV2BuildResult {
+    artifact: SurfaceV2Artifact,
+    error: SurfaceBuildError,
+    capacity_error: SurfaceCapacityError,
+    display_error: DisplayError,
+    hit_error: HitTreeError,
+    semantics_error: SemanticsError,
+}
+
+fn surface_v2_effect_operation_limit() i32 { return 32; }
+fn surface_v2_ambient_shadow_bands() i32 { return 4; }
+fn surface_v2_contact_shadow_bands() i32 { return 3; }
+
+fn surface_v2_spec(id: NodeKey, parent: NodeKey, bounds: Rect,
+    name: []u8, kind: VisualSurfaceKind) SurfaceV2Spec {
+    let base: SurfaceSpec = surface_spec(id, parent, bounds,
+        name, SurfaceTier.base);
+    return SurfaceV2Spec{
+        .base = base,
+        .kind = kind,
+        .material_role = VisualMaterialRole.automatic,
+        .transparency = VisualTransparency.normal,
+        .high_contrast = 0,
+        .backdrop_available = 0,
+        .effect_operations = surface_v2_effect_operation_limit(),
+    };
+}
+
+fn surface_v2_action_spec(id: NodeKey, parent: NodeKey, bounds: Rect,
+    name: []u8, kind: VisualSurfaceKind) SurfaceV2Spec {
+    let spec: SurfaceV2Spec = surface_v2_spec(id, parent,
+        bounds, name, kind);
+    spec.base = surface_action_spec(id, parent, bounds,
+        name, SurfaceTier.base);
+    return spec;
+}
+
+fn surface_v2_with_material(raw: SurfaceV2Spec,
+    role: VisualMaterialRole) SurfaceV2Spec {
+    let spec: SurfaceV2Spec = raw;
+    spec.material_role = role;
+    return spec;
+}
+
+fn surface_v2_with_reduced_transparency(raw: SurfaceV2Spec,
+    enabled: i32) SurfaceV2Spec {
+    let spec: SurfaceV2Spec = raw;
+    if (enabled != 0) {
+        spec.transparency = VisualTransparency.reduced;
+    } else {
+        spec.transparency = VisualTransparency.normal;
+    }
+    return spec;
+}
+
+fn surface_v2_with_high_contrast(raw: SurfaceV2Spec,
+    enabled: i32) SurfaceV2Spec {
+    let spec: SurfaceV2Spec = raw;
+    spec.high_contrast = enabled;
+    return spec;
+}
+
+fn surface_v2_with_backdrop(raw: SurfaceV2Spec,
+    available: i32) SurfaceV2Spec {
+    let spec: SurfaceV2Spec = raw;
+    spec.backdrop_available = available;
+    return spec;
+}
+
+fn surface_v2_reduce(spec: SurfaceV2Spec,
+    event: ButtonEvent) SurfaceTransition {
+    return surface_reduce(spec.base.mode, spec.base.interaction, event);
+}
+
+fn surface_v2_elevation(spec: SurfaceV2Spec) SemanticElevationToken {
+    if (spec.base.mode == SurfaceMode.actionable &&
+        (spec.base.interaction.pressed != 0 ||
+         spec.base.interaction.loading != 0 ||
+         spec.base.interaction.enabled == 0)) {
+        return SemanticElevationToken.base;
+    }
+    return switch (spec.kind) {
+        .canvas => SemanticElevationToken.base,
+        .content_panel => SemanticElevationToken.panel,
+        .raised_card => SemanticElevationToken.raised,
+        .floating_chrome => SemanticElevationToken.panel,
+        .transient_overlay => SemanticElevationToken.overlay,
+    };
+}
+
+fn surface_v2_spacing(spec: SurfaceV2Spec) FlexSpacingToken {
+    return switch (spec.kind) {
+        .canvas => FlexSpacingToken.medium,
+        .content_panel => FlexSpacingToken.large,
+        .raised_card => FlexSpacingToken.xlarge,
+        .floating_chrome => FlexSpacingToken.large,
+        .transient_overlay => FlexSpacingToken.xlarge,
+    };
+}
+
+fn surface_v2_environment(spec: SurfaceV2Spec) VisualEnvironment {
+    let environment: VisualEnvironment = visual_environment(spec.base.density);
+    environment.transparency = spec.transparency;
+    environment.high_contrast = spec.high_contrast;
+    environment.backdrop_available = spec.backdrop_available;
+    return environment;
+}
+
+fn surface_v2_effects(spec: SurfaceV2Spec) VisualSurfaceEffects {
+    return visual_surface_effects(spec.kind, spec.material_role,
+        surface_v2_elevation(spec), surface_v2_environment(spec));
+}
+
+fn surface_v2_content_bounds(spec: SurfaceV2Spec) Rect {
+    let spacing: FlexSpacingToken = surface_v2_spacing(spec);
+    let horizontal: i64 = flex_spacing(spacing, spec.base.density);
+    let vertical: i64 = flex_spacing(spacing, spec.base.density);
+    let trailing: i64 = horizontal;
+    if (spec.base.mode == SurfaceMode.actionable &&
+        (spec.base.interaction.loading != 0 ||
+         spec.base.interaction.error != 0 ||
+         spec.base.interaction.enabled == 0)) {
+        trailing = horizontal + flex_spacing(FlexSpacingToken.xlarge,
+            spec.base.density);
+    }
+    if (horizontal + trailing >= spec.base.bounds.width) {
+        trailing = spec.base.bounds.width - horizontal - unit_scale();
+    }
+    if (trailing < 0) { trailing = 0; }
+    return rect(spec.base.bounds.x + horizontal,
+        spec.base.bounds.y + vertical,
+        spec.base.bounds.width - horizontal - trailing,
+        spec.base.bounds.height - vertical * 2);
+}
+
+fn surface_v2_minimum_extent(spec: SurfaceV2Spec) i64 {
+    let padding: i64 = flex_spacing(surface_v2_spacing(spec),
+        spec.base.density);
+    let minimum: i64 = padding * 2 + 8 * unit_scale();
+    if (spec.base.mode == SurfaceMode.actionable &&
+        minimum < surface_minimum_action_target()) {
+        return surface_minimum_action_target();
+    }
+    return minimum;
+}
+
+fn surface_v2_spec_valid(spec: SurfaceV2Spec) i32 {
+    if (visual_surface_kind_valid(spec.kind) == 0 ||
+        visual_material_role_valid(spec.material_role) == 0 ||
+        visual_transparency_valid(spec.transparency) == 0 ||
+        visual_flag_valid(spec.high_contrast) == 0 ||
+        visual_flag_valid(spec.backdrop_available) == 0 ||
+        spec.effect_operations < 0 ||
+        spec.effect_operations > surface_v2_effect_operation_limit()) {
+        return 0;
+    }
+    let base: SurfaceSpec = spec.base;
+    base.tier = SurfaceTier.base;
+    if (surface_spec_valid(base) == 0) { return 0; }
+    let minimum: i64 = surface_v2_minimum_extent(spec);
+    let content: Rect = surface_v2_content_bounds(spec);
+    return (spec.base.bounds.width >= minimum &&
+        spec.base.bounds.height >= minimum &&
+        content.width > 0 && content.height > 0) as i32;
+}
+
+fn surface_v2_fill_token(spec: SurfaceV2Spec,
+    effects: VisualSurfaceEffects) SemanticColorToken {
+    if (spec.base.mode != SurfaceMode.actionable) {
+        return effects.fill_token;
+    }
+    if (spec.base.interaction.enabled == 0 ||
+        spec.base.interaction.loading != 0) {
+        return SemanticColorToken.surface_inset;
+    }
+    if (spec.base.interaction.pressed != 0) {
+        return SemanticColorToken.accent_emphasis;
+    }
+    if (spec.base.interaction.selected != 0) {
+        return SemanticColorToken.surface_selected;
+    }
+    if (spec.base.interaction.hovered != 0) {
+        return SemanticColorToken.surface_interactive;
+    }
+    return effects.fill_token;
+}
+
+fn surface_v2_border_token(spec: SurfaceV2Spec,
+    effects: VisualSurfaceEffects) SemanticColorToken {
+    if (spec.base.mode == SurfaceMode.actionable &&
+        spec.base.interaction.error != 0) {
+        return SemanticColorToken.status_error;
+    }
+    if (spec.base.mode == SurfaceMode.actionable &&
+        (spec.base.interaction.hovered != 0 ||
+         spec.base.interaction.selected != 0)) {
+        return SemanticColorToken.border_emphasis;
+    }
+    if (spec.base.mode == SurfaceMode.actionable &&
+        spec.base.interaction.pressed != 0) {
+        return SemanticColorToken.accent;
+    }
+    return effects.edge_token;
+}
+
+fn surface_v2_state_token(spec: SurfaceV2Spec) SemanticColorToken {
+    if (spec.base.interaction.error != 0) {
+        return SemanticColorToken.status_error;
+    }
+    if (spec.base.interaction.enabled == 0) {
+        return SemanticColorToken.text_disabled;
+    }
+    return SemanticColorToken.accent;
+}
+
+fn surface_v2_fill_alpha(spec: SurfaceV2Spec) i64 {
+    if (spec.base.mode == SurfaceMode.actionable &&
+        spec.base.interaction.enabled == 0) { return 56000; }
+    if (spec.base.mode == SurfaceMode.actionable &&
+        spec.base.interaction.loading != 0) { return 61000; }
+    return 65535;
+}
+
+fn surface_v2_border_alpha(spec: SurfaceV2Spec,
+    effects: VisualSurfaceEffects) i64 {
+    if (spec.base.mode == SurfaceMode.actionable &&
+        spec.base.interaction.error != 0) { return 65535; }
+    if (spec.base.mode == SurfaceMode.actionable &&
+        spec.base.interaction.pressed != 0) { return 42000; }
+    if (spec.base.mode == SurfaceMode.actionable &&
+        (spec.base.interaction.hovered != 0 ||
+         spec.base.interaction.selected != 0)) { return 34000; }
+    return semantic_elevation(effects.elevation_token).edge_highlight_alpha;
+}
+
+fn surface_v2_draw_result() SurfaceDrawResult {
+    return surface_draw_result();
+}
+
+fn surface_v2_shadow_bands(display: *DisplayList,
+    budget: *SurfaceBuildBudget, owner: NodeKey,
+    bounds: Rect, radius: i64, shadow: VisualShadowSpec,
+    band_count: i32) SurfaceDrawResult {
+    let result: SurfaceDrawResult = surface_v2_draw_result();
+    if (shadow.alpha <= 0 || shadow.blur_radius <= 0 || band_count <= 0) {
+        return result;
+    }
+    let band: i32 = 0;
+    while (band < band_count) {
+        let inward_index: i64 = (band + 1) as i64;
+        let count: i64 = band_count as i64;
+        let expansion: i64 = (shadow.blur_radius *
+            (count - band as i64)) / count;
+        let numerator: i64 = 2 * inward_index - 1;
+        let alpha: i64 = (shadow.alpha * numerator) /
+            (count * count);
+        result = surface_push_round(display, budget, owner,
+            rect(bounds.x + shadow.offset_x - expansion,
+                bounds.y + shadow.offset_y - expansion,
+                bounds.width + expansion * 2,
+                bounds.height + expansion * 2),
+            radius + expansion,
+            semantic_color_with_alpha(SemanticColorToken.shadow, alpha));
+        if (result.error != SurfaceBuildError.none) { return result; }
+        band = band + 1;
+    }
+    return result;
+}
+
+fn surface_v2_draw_chrome(spec: SurfaceV2Spec,
+    effects: VisualSurfaceEffects, chrome: Rect, radius: i64,
+    display: *DisplayList, budget: *SurfaceBuildBudget) SurfaceDrawResult {
+    let draw: SurfaceDrawResult = surface_v2_draw_result();
+    let border_token: SemanticColorToken = surface_v2_border_token(
+        spec, effects);
+    let fill_token: SemanticColorToken = surface_v2_fill_token(
+        spec, effects);
+    let border_alpha: i64 = surface_v2_border_alpha(spec, effects);
+
+    draw = surface_push_round(display, budget, spec.base.id,
+        chrome, radius,
+        semantic_color_with_alpha(border_token, border_alpha));
+    if (draw.error != SurfaceBuildError.none) { return draw; }
+
+    let edge: i64 = unit_scale();
+    draw = surface_push_round(display, budget, spec.base.id,
+        rect(chrome.x + edge, chrome.y + edge,
+            chrome.width - edge * 2, chrome.height - edge * 2),
+        radius - edge,
+        semantic_color_with_alpha(fill_token,
+            surface_v2_fill_alpha(spec)));
+    if (draw.error != SurfaceBuildError.none) { return draw; }
+
+    if (effects.effective_role != VisualMaterialRole.solid &&
+        effects.tint_alpha > 0) {
+        let tint_inset: i64 = 2 * unit_scale();
+        draw = surface_push_round(display, budget, spec.base.id,
+            rect(chrome.x + tint_inset, chrome.y + tint_inset,
+                chrome.width - tint_inset * 2,
+                chrome.height - tint_inset * 2),
+            radius - tint_inset,
+            semantic_color_with_alpha(effects.tint_token,
+                effects.tint_alpha));
+        if (draw.error != SurfaceBuildError.none) { return draw; }
+    }
+
+    let highlight_inset: i64 = flex_spacing(FlexSpacingToken.small,
+        spec.base.density);
+    draw = surface_push_rect(display, budget, spec.base.id,
+        rect(chrome.x + highlight_inset,
+            chrome.y + unit_scale(),
+            chrome.width - highlight_inset * 2,
+            unit_scale()),
+        semantic_color_with_alpha(SemanticColorToken.edge_highlight,
+            semantic_elevation(effects.elevation_token).
+                edge_highlight_alpha));
+    return draw;
+}
+
+fn surface_v2_draw_states(spec: SurfaceV2Spec,
+    chrome: Rect, display: *DisplayList,
+    budget: *SurfaceBuildBudget) SurfaceDrawResult {
+    let draw: SurfaceDrawResult = surface_v2_draw_result();
+    if (spec.base.mode != SurfaceMode.actionable) { return draw; }
+    let state_token: SemanticColorToken = surface_v2_state_token(spec);
+
+    if (spec.base.interaction.hovered != 0) {
+        let marker_width: i64 = 3 * unit_scale();
+        let marker_height: i64 = 18 * unit_scale();
+        draw = surface_push_round(display, budget, spec.base.id,
+            rect(chrome.x + chrome.width - marker_width -
+                    5 * unit_scale(),
+                chrome.y + (chrome.height - marker_height) / 2,
+                marker_width, marker_height),
+            unit_scale(), semantic_color_with_alpha(state_token, 65535));
+        if (draw.error != SurfaceBuildError.none) { return draw; }
+    }
+    if (spec.base.interaction.selected != 0) {
+        let marker_height: i64 = 3 * unit_scale();
+        let inset: i64 = flex_spacing(FlexSpacingToken.large,
+            spec.base.density);
+        draw = surface_push_round(display, budget, spec.base.id,
+            rect(chrome.x + inset,
+                chrome.y + chrome.height - marker_height -
+                    flex_spacing(FlexSpacingToken.tiny,
+                        spec.base.density),
+                chrome.width - inset * 2, marker_height),
+            unit_scale(), semantic_color_with_alpha(state_token, 65535));
+        if (draw.error != SurfaceBuildError.none) { return draw; }
+    }
+    if (spec.base.interaction.loading != 0) {
+        let track_width: i64 = 22 * unit_scale();
+        let track_height: i64 = 4 * unit_scale();
+        let track_x: i64 = chrome.x + chrome.width -
+            flex_spacing(FlexSpacingToken.large,
+                spec.base.density) - track_width;
+        let track_y: i64 = chrome.y +
+            (chrome.height - track_height) / 2;
+        draw = surface_push_round(display, budget, spec.base.id,
+            rect(track_x, track_y, track_width, track_height),
+            track_height / 2,
+            semantic_color_with_alpha(state_token, 21000));
+        if (draw.error != SurfaceBuildError.none) { return draw; }
+        draw = surface_push_round(display, budget, spec.base.id,
+            rect(track_x, track_y, 13 * unit_scale(), track_height),
+            track_height / 2,
+            semantic_color_with_alpha(state_token, 65535));
+        if (draw.error != SurfaceBuildError.none) { return draw; }
+    }
+    if (spec.base.interaction.error != 0) {
+        let rail_width: i64 = flex_spacing(FlexSpacingToken.tiny,
+            spec.base.density);
+        let rail_height: i64 = flex_spacing(FlexSpacingToken.xlarge,
+            spec.base.density);
+        let rail_x: i64 = chrome.x + chrome.width -
+            flex_spacing(FlexSpacingToken.large,
+                spec.base.density) - rail_width;
+        let rail_y: i64 = chrome.y +
+            (chrome.height - rail_height) / 2;
+        draw = surface_push_round(display, budget, spec.base.id,
+            rect(rail_x, rail_y, rail_width, rail_height),
+            rail_width / 2,
+            semantic_color_with_alpha(state_token, 65535));
+        if (draw.error != SurfaceBuildError.none) { return draw; }
+    }
+    if (spec.base.interaction.enabled == 0) {
+        let mark_width: i64 = 14 * unit_scale();
+        let mark_x: i64 = chrome.x + chrome.width -
+            flex_spacing(FlexSpacingToken.large,
+                spec.base.density) - mark_width;
+        let mark_y: i64 = chrome.y + chrome.height / 2 -
+            3 * unit_scale();
+        draw = surface_push_rect(display, budget, spec.base.id,
+            rect(mark_x, mark_y, mark_width, 2 * unit_scale()),
+            semantic_color_with_alpha(state_token, 50000));
+        if (draw.error != SurfaceBuildError.none) { return draw; }
+        draw = surface_push_rect(display, budget, spec.base.id,
+            rect(mark_x, mark_y + 5 * unit_scale(),
+                9 * unit_scale(), 2 * unit_scale()),
+            semantic_color_with_alpha(state_token, 30000));
+    }
+    return draw;
+}
+
+fn surface_v2_empty_artifact(spec: SurfaceV2Spec) SurfaceV2Artifact {
+    let base: SurfaceSpec = spec.base;
+    base.tier = SurfaceTier.base;
+    return SurfaceV2Artifact{
+        .base = surface_empty_artifact(base),
+        .effects = surface_v2_effects(spec),
+        .content_bounds = rect(0, 0, 0, 0),
+        .display_op_start = 0 - 1,
+        .display_op_end = 0 - 1,
+        .shadow_operations = 0,
+        .effect_operations = 0,
+        .evidence_hash = 0,
+    };
+}
+
+fn surface_v2_result(spec: SurfaceV2Spec,
+    error: SurfaceBuildError) SurfaceV2BuildResult {
+    return SurfaceV2BuildResult{
+        .artifact = surface_v2_empty_artifact(spec),
+        .error = error,
+        .capacity_error = SurfaceCapacityError.none,
+        .display_error = DisplayError.none,
+        .hit_error = HitTreeError.none,
+        .semantics_error = SemanticsError.none,
+    };
+}
+
+fn surface_v2_evidence_hash(spec: SurfaceV2Spec,
+    artifact: SurfaceV2Artifact) i64 {
+    let hash: i64 = surface_mix(29, artifact.base.evidence_hash);
+    hash = surface_mix(hash, spec.kind as i64);
+    hash = surface_mix(hash, spec.material_role as i64);
+    hash = surface_mix(hash, spec.transparency as i64);
+    hash = surface_mix(hash, spec.high_contrast as i64);
+    hash = surface_mix(hash, spec.backdrop_available as i64);
+    hash = surface_mix(hash, artifact.effects.effective_role as i64);
+    hash = surface_mix(hash, artifact.effects.fill_token as i64);
+    hash = surface_mix(hash, artifact.effects.edge_token as i64);
+    hash = surface_mix(hash, artifact.effects.radius_token as i64);
+    hash = surface_mix(hash, artifact.effects.elevation_token as i64);
+    hash = surface_mix(hash, artifact.effects.tint_alpha);
+    hash = surface_mix(hash, artifact.effects.blur_radius);
+    hash = surface_mix(hash,
+        artifact.effects.backdrop_blur_enabled as i64);
+    hash = surface_mix(hash, artifact.content_bounds.x);
+    hash = surface_mix(hash, artifact.content_bounds.y);
+    hash = surface_mix(hash, artifact.content_bounds.width);
+    hash = surface_mix(hash, artifact.content_bounds.height);
+    hash = surface_mix(hash, artifact.shadow_operations as i64);
+    hash = surface_mix(hash, artifact.effect_operations as i64);
+    return surface_text_hash(hash,
+        artifact.effects.cpu_fallback_reason);
+}
+
+fn surface_v2_copy_base_failure(result: *SurfaceV2BuildResult,
+    base: SurfaceBuildResult) void {
+    result.*.error = base.error;
+    result.*.capacity_error = base.capacity_error;
+    result.*.display_error = base.display_error;
+    result.*.hit_error = base.hit_error;
+    result.*.semantics_error = base.semantics_error;
+}
+
+fn surface_v2_copy_draw_failure(result: *SurfaceV2BuildResult,
+    draw: SurfaceDrawResult) void {
+    result.*.error = draw.error;
+    result.*.capacity_error = draw.capacity_error;
+    result.*.display_error = draw.display_error;
+}
+
+fn surface_v2_emit(spec: SurfaceV2Spec,
+    display: *DisplayList, hits: *HitTree,
+    semantics: *SemanticsTree) SurfaceV2BuildResult {
+    let result: SurfaceV2BuildResult = surface_v2_result(
+        spec, SurfaceBuildError.none);
+    if (surface_v2_spec_valid(spec) == 0) {
+        result.error = SurfaceBuildError.invalid_spec;
+        return result;
+    }
+    if (display.*.sealed != 0) {
+        result.error = SurfaceBuildError.display_error;
+        result.display_error = DisplayError.sealed;
+        return result;
+    }
+
+    let checkpoint: SurfaceCheckpoint = surface_checkpoint(
+        display, hits, semantics);
+    let limits: SurfaceBuildLimits = SurfaceBuildLimits{
+        .display_operations = spec.effect_operations,
+        .hit_nodes = 0,
+        .semantic_nodes = 0,
+    };
+    let budget: SurfaceBuildBudget = surface_budget(limits);
+    let effects: VisualSurfaceEffects = surface_v2_effects(spec);
+    let chrome: Rect = surface_chrome_bounds(spec.base);
+    let radius: i64 = surface_resolved_radius(
+        effects.radius_token, chrome);
+    let draw: SurfaceDrawResult = surface_v2_draw_result();
+    let shadow_operations: i32 = 0;
+
+    if (effects.elevation_token != SemanticElevationToken.base &&
+        spec.base.interaction.pressed == 0 &&
+        (spec.base.mode == SurfaceMode.group ||
+         surface_effectively_enabled(spec.base) != 0)) {
+        let before: i32 = budget.display_operations;
+        draw = surface_v2_shadow_bands(display, &budget,
+            spec.base.id, chrome, radius,
+            effects.shadows.ambient,
+            surface_v2_ambient_shadow_bands());
+        if (draw.error == SurfaceBuildError.none) {
+            draw = surface_v2_shadow_bands(display, &budget,
+                spec.base.id, chrome, radius,
+                effects.shadows.contact,
+                surface_v2_contact_shadow_bands());
+        }
+        shadow_operations = budget.display_operations - before;
+    }
+    if (draw.error != SurfaceBuildError.none) {
+        surface_rollback(display, hits, semantics, checkpoint);
+        surface_v2_copy_draw_failure(&result, draw);
+        return result;
+    }
+
+    let base_spec: SurfaceSpec = spec.base;
+    base_spec.tier = SurfaceTier.base;
+    let base_result: SurfaceBuildResult = surface_emit(
+        base_spec, display, hits, semantics);
+    if (base_result.error != SurfaceBuildError.none) {
+        surface_rollback(display, hits, semantics, checkpoint);
+        surface_v2_copy_base_failure(&result, base_result);
+        return result;
+    }
+
+    draw = surface_v2_draw_chrome(spec, effects,
+        base_result.artifact.chrome_bounds,
+        radius, display, &budget);
+    if (draw.error == SurfaceBuildError.none) {
+        draw = surface_v2_draw_states(spec,
+            base_result.artifact.chrome_bounds,
+            display, &budget);
+    }
+    if (draw.error != SurfaceBuildError.none) {
+        surface_rollback(display, hits, semantics, checkpoint);
+        surface_v2_copy_draw_failure(&result, draw);
+        return result;
+    }
+
+    result.artifact = SurfaceV2Artifact{
+        .base = base_result.artifact,
+        .effects = effects,
+        .content_bounds = surface_v2_content_bounds(spec),
+        .display_op_start = checkpoint.display_length,
+        .display_op_end = display.*.ops.len,
+        .shadow_operations = shadow_operations,
+        .effect_operations = budget.display_operations,
+        .evidence_hash = 0,
+    };
+    result.artifact.base.content_bounds = result.artifact.content_bounds;
+    result.artifact.base.display_op_start = checkpoint.display_length;
+    result.artifact.base.display_op_end = display.*.ops.len;
+    result.artifact.evidence_hash = surface_v2_evidence_hash(
+        spec, result.artifact);
+    return result;
+}
