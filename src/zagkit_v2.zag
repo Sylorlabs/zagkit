@@ -1,0 +1,22 @@
+// Public native Zagkit v2 visual-system entrypoint.
+//
+// Application code imports this file instead of reaching into implementation
+// directories. The surface is experimental until the corresponding release
+// gates are complete, but every exported contract here compiles as native Zag.
+
+@import("design/visual_system.zag")
+@import("design/theme_v2.zag")
+@import("design/content_colors_v2.zag")
+@import("design/material_motion_v2.zag")
+@import("design/typography_v2.zag")
+@import("design/shape_v2.zag")
+
+@import("render/effect_plan.zag")
+@import("render/analytic_shadow.zag")
+@import("render/material_composite.zag")
+
+@import("components/button.zag")
+@import("components/button_v2_style.zag")
+@import("components/surface.zag")
+@import("components/surface_v2_policy.zag")
+@import("components/surface_v2_style.zag")
