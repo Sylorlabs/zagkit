@@ -162,14 +162,11 @@ fn main() i32 {
     lighting_contract(&state);
     budget_contract(&state);
 
-    let passed: []u8 = _zag_i64_to_str(state.passed as i64);
-    let failed: []u8 = _zag_i64_to_str(state.failed as i64);
     _zag_print("ZagKit v2 visual policy: pass=");
-    _zag_print(passed);
+    _zag_print_i64(state.passed as i64);
     _zag_print(" fail=");
-    _zag_println(failed);
-    _zag_str_free(passed);
-    _zag_str_free(failed);
+    _zag_print_i64(state.failed as i64);
+    _zag_println("");
     if (state.failed == 0) { return 0; }
     return 1;
 }
