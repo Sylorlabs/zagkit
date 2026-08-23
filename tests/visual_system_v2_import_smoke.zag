@@ -1,0 +1,5 @@
+@import("../src/design/visual_system_v2.zag")
+
+fn main() i32 {
+    return 0;
+}
