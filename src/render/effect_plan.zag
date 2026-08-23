@@ -1,0 +1,206 @@
+@import("../design/visual_system.zag")
+
+// Renderer-facing, allocation-free planning for native visual effects.
+//
+// The planner converts semantic material meaning into explicit bounded work.
+// No renderer may infer a larger capture, add passes, or silently nest glass.
+
+enum VisualEffectPlanError {
+    none,
+    invalid_bounds,
+    invalid_limits,
+    invalid_budget,
+    capture_too_large,
+    shadow_too_large,
+    too_many_operations,
+}
+
+struct VisualEffectRect {
+    x: i64,
+    y: i64,
+    width: i64,
+    height: i64,
+}
+
+struct VisualEffectLimits {
+    max_capture_pixels: i64,
+    max_shadow_extent: i64,
+    max_operations: i32,
+}
+
+struct VisualEffectPlan {
+    bounds: VisualEffectRect,
+    capture_bounds: VisualEffectRect,
+    damage_bounds: VisualEffectRect,
+    material: ResolvedVisualMaterial,
+    capture_pixels: i64,
+    temporary_pixels: i64,
+    operation_count: i32,
+    cache_key: i64,
+    requires_backdrop_capture: i32,
+    requires_blur: i32,
+    valid: i32,
+    error: VisualEffectPlanError,
+}
+
+fn visual_effect_rect(x: i64, y: i64,
+    width: i64, height: i64) VisualEffectRect {
+    return VisualEffectRect{ .x = x, .y = y,
+        .width = width, .height = height };
+}
+
+fn visual_effect_limits() VisualEffectLimits {
+    return VisualEffectLimits{
+        // Intermediate pixels after downsampling. This is deliberately lower
+        // than a full 4K surface and keeps transient effects bounded.
+        .max_capture_pixels = 4194304,
+        .max_shadow_extent = 96 * unit_scale(),
+        .max_operations = 10,
+    };
+}
+
+fn visual_effect_rect_valid(rect: VisualEffectRect) i32 {
+    if (rect.width <= 0 || rect.height <= 0) { return 0; }
+    if (rect.width > 1048576 * unit_scale() ||
+        rect.height > 1048576 * unit_scale()) { return 0; }
+    return 1;
+}
+
+fn visual_effect_limits_valid(limits: VisualEffectLimits) i32 {
+    if (limits.max_capture_pixels <= 0 ||
+        limits.max_shadow_extent < 0 || limits.max_operations <= 0) { return 0; }
+    return 1;
+}
+
+fn visual_effect_rect_inflate(rect: VisualEffectRect,
+    amount: i64) VisualEffectRect {
+    if (amount <= 0) { return rect; }
+    return VisualEffectRect{
+        .x = rect.x - amount,
+        .y = rect.y - amount,
+        .width = rect.width + amount * 2,
+        .height = rect.height + amount * 2,
+    };
+}
+
+fn visual_effect_ceil_pixels(value: i64) i64 {
+    let scale: i64 = unit_scale();
+    if (value <= 0) { return 0; }
+    return (value + scale - 1) / scale;
+}
+
+fn visual_effect_pixel_area(rect: VisualEffectRect) i64 {
+    let width: i64 = visual_effect_ceil_pixels(rect.width);
+    let height: i64 = visual_effect_ceil_pixels(rect.height);
+    if (width <= 0 || height <= 0) { return 0; }
+    // Bounds validation above keeps this multiplication inside i64.
+    return width * height;
+}
+
+fn visual_effect_empty_plan(bounds: VisualEffectRect,
+    material: ResolvedVisualMaterial,
+    error: VisualEffectPlanError) VisualEffectPlan {
+    return VisualEffectPlan{
+        .bounds = bounds,
+        .capture_bounds = bounds,
+        .damage_bounds = bounds,
+        .material = material,
+        .capture_pixels = 0,
+        .temporary_pixels = 0,
+        .operation_count = 0,
+        .cache_key = 0,
+        .requires_backdrop_capture = 0,
+        .requires_blur = 0,
+        .valid = 0,
+        .error = error,
+    };
+}
+
+fn visual_effect_operation_count(material: ResolvedVisualMaterial) i32 {
+    // Fill/material composite + contact shadow + ambient shadow + edge light.
+    let count: i32 = 4;
+    if (material.translucent != 0) {
+        // Capture, downsample, bounded blur passes, and final composite are
+        // represented explicitly. Pass count is metadata within one blur op.
+        count = count + 4;
+    }
+    return count;
+}
+
+fn visual_effect_plan(bounds: VisualEffectRect,
+    role: VisualSurfaceRole,
+    elevation: SemanticElevationToken,
+    env: VisualEnvironment,
+    budget: VisualEffectBudget,
+    limits: VisualEffectLimits) VisualEffectPlan {
+    let material: ResolvedVisualMaterial = visual_resolve_material(
+        role, elevation, env);
+
+    if (visual_effect_rect_valid(bounds) == 0) {
+        return visual_effect_empty_plan(bounds, material,
+            VisualEffectPlanError.invalid_bounds);
+    }
+    if (visual_effect_limits_valid(limits) == 0) {
+        return visual_effect_empty_plan(bounds, material,
+            VisualEffectPlanError.invalid_limits);
+    }
+    if (visual_effect_budget_valid(budget) == 0) {
+        return visual_effect_empty_plan(bounds, material,
+            VisualEffectPlanError.invalid_budget);
+    }
+
+    let shadow_extent: i64 = visual_shadow_extent(material.shadow);
+    if (shadow_extent > limits.max_shadow_extent) {
+        return visual_effect_empty_plan(bounds, material,
+            VisualEffectPlanError.shadow_too_large);
+    }
+
+    let capture_inflate: i64 = visual_glass_capture_inflate(material);
+    let capture: VisualEffectRect = if (material.translucent != 0)
+        visual_effect_rect_inflate(bounds, capture_inflate) else bounds;
+    let damage: VisualEffectRect = visual_effect_rect_inflate(bounds,
+        shadow_extent);
+    let capture_pixels: i64 = if (material.translucent != 0)
+        visual_effect_pixel_area(capture) else 0;
+    let divisor: i64 = material.backdrop_downsample as i64;
+    let temporary_pixels: i64 = if (capture_pixels > 0)
+        (capture_pixels + divisor * divisor - 1) /
+            (divisor * divisor) else 0;
+
+    if (temporary_pixels > limits.max_capture_pixels) {
+        return visual_effect_empty_plan(bounds, material,
+            VisualEffectPlanError.capture_too_large);
+    }
+
+    let operations: i32 = visual_effect_operation_count(material);
+    if (operations > limits.max_operations) {
+        return visual_effect_empty_plan(bounds, material,
+            VisualEffectPlanError.too_many_operations);
+    }
+
+    let cache: i64 = visual_mix_hash(material.evidence_hash, bounds.x);
+    cache = visual_mix_hash(cache, bounds.y);
+    cache = visual_mix_hash(cache, bounds.width);
+    cache = visual_mix_hash(cache, bounds.height);
+    cache = visual_mix_hash(cache, capture.x);
+    cache = visual_mix_hash(cache, capture.y);
+    cache = visual_mix_hash(cache, capture.width);
+    cache = visual_mix_hash(cache, capture.height);
+    cache = visual_mix_hash(cache, temporary_pixels);
+
+    return VisualEffectPlan{
+        .bounds = bounds,
+        .capture_bounds = capture,
+        .damage_bounds = damage,
+        .material = material,
+        .capture_pixels = capture_pixels,
+        .temporary_pixels = temporary_pixels,
+        .operation_count = operations,
+        .cache_key = cache,
+        .requires_backdrop_capture = material.translucent,
+        .requires_blur = (material.translucent != 0 &&
+            material.cpu_fallback == 0) as i32,
+        .valid = 1,
+        .error = VisualEffectPlanError.none,
+    };
+}
