@@ -17,6 +17,11 @@ enum VisualSurfaceKind {
     transient_overlay,
 }
 enum VisualTransparency { normal, reduced }
+enum VisualFallbackReason {
+    solid_exact,
+    veil_cpu_tint_edge,
+    glass_cpu_tint_shadow,
+}
 
 struct VisualEnvironment {
     density: FlexDensity,
@@ -59,7 +64,7 @@ struct VisualSurfaceEffects {
     tint_alpha: i64,
     blur_radius: i64,
     backdrop_blur_enabled: i32,
-    cpu_fallback_reason: []u8,
+    cpu_fallback_reason: VisualFallbackReason,
     shadows: VisualShadowPair,
 }
 
@@ -161,6 +166,24 @@ fn visual_material_token(role: VisualMaterialRole) SemanticMaterialToken {
     return SemanticMaterialToken.solid;
 }
 
+fn visual_fallback_reason(role: VisualMaterialRole) VisualFallbackReason {
+    if (role == VisualMaterialRole.veil) {
+        return VisualFallbackReason.veil_cpu_tint_edge;
+    }
+    if (role == VisualMaterialRole.glass) {
+        return VisualFallbackReason.glass_cpu_tint_shadow;
+    }
+    return VisualFallbackReason.solid_exact;
+}
+
+fn visual_fallback_reason_name(reason: VisualFallbackReason) []u8 {
+    return switch (reason) {
+        .solid_exact => "solid exact fill and lighting",
+        .veil_cpu_tint_edge => "veil CPU tint and edge fallback",
+        .glass_cpu_tint_shadow => "glass CPU tint and shadow fallback",
+    };
+}
+
 fn visual_surface_fill_token(kind: VisualSurfaceKind) SemanticColorToken {
     return switch (kind) {
         .canvas => SemanticColorToken.surface_base,
@@ -254,7 +277,7 @@ fn visual_surface_effects(kind: VisualSurfaceKind,
         .tint_alpha = tint_alpha,
         .blur_radius = blur_radius,
         .backdrop_blur_enabled = backdrop,
-        .cpu_fallback_reason = material.cpu_fallback_reason,
+        .cpu_fallback_reason = visual_fallback_reason(role),
         .shadows = visual_shadow_pair(elevation_token),
     };
 }
