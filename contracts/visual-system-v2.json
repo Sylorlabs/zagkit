@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "product": "ZagKit",
+  "language_target": "Zag v2",
+  "status": "active-foundation",
+  "principles": [
+    "material-role-independent-of-elevation",
+    "solid-content-surfaces",
+    "bounded-veil-and-glass",
+    "single-scene-light",
+    "deterministic-analytic-shadow",
+    "shared-cpu-gpu-render-ir"
+  ],
+  "budgets": {
+    "veil_viewport_area_fraction": 0.25,
+    "live_glass_layers_per_interaction": 1,
+    "max_shadow_blur_dp": 256
+  },
+  "required_modes": [
+    "light",
+    "dark",
+    "high-contrast",
+    "reduced-transparency",
+    "reduced-motion",
+    "compact",
+    "standard",
+    "touch"
+  ]
+}

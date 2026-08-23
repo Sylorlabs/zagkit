@@ -256,7 +256,7 @@ fn display_list_decode(bytes: ArrayList[u8]) DisplayDecodeResult {
     let i: i64 = 0;
     while (i < count) {
         let kind_code: i64 = display_read_i64(bytes, offset);
-        if (kind_code < 0 || kind_code > 12) {
+        if (kind_code < 0 || kind_code > 13) {
             return display_decode_fail(list, DisplayCodecError.invalid_kind, offset);
         }
         let op: DisplayOp = display_op(kind_code as DisplayOpKind, node_key_scoped(

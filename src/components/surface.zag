@@ -1,4 +1,5 @@
 @import("button.zag")
+@import("../design/visual_system_v2.zag")
 
 // Surface is Zagkit's canonical retained container. One stable NodeKey owns
 // its display operations, hit node, semantic node, and Talkback identity.

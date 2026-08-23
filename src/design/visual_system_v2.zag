@@ -7,10 +7,6 @@
 // surfaces that genuinely float over live content. Every shadow derives from
 // one scene light and resolves to deterministic fixed-point data shared by CPU
 // and future GPU backends.
-//
-// This frame-hot contract intentionally contains only scalars, enums, and
-// token identities. Human-readable inspector strings resolve outside this
-// structure so visual evaluation never acquires or releases text ownership.
 
 enum VisualMaterialRole { automatic, solid, veil, glass }
 enum VisualSurfaceKind {
@@ -21,11 +17,6 @@ enum VisualSurfaceKind {
     transient_overlay,
 }
 enum VisualTransparency { normal, reduced }
-enum VisualFallbackReason {
-    solid_exact,
-    veil_cpu_tint_edge,
-    glass_cpu_tint_shadow,
-}
 
 struct VisualEnvironment {
     density: FlexDensity,
@@ -68,7 +59,7 @@ struct VisualSurfaceEffects {
     tint_alpha: i64,
     blur_radius: i64,
     backdrop_blur_enabled: i32,
-    cpu_fallback_reason: VisualFallbackReason,
+    cpu_fallback_reason: []u8,
     shadows: VisualShadowPair,
 }
 
@@ -170,35 +161,6 @@ fn visual_material_token(role: VisualMaterialRole) SemanticMaterialToken {
     return SemanticMaterialToken.solid;
 }
 
-fn visual_material_tint_token(role: VisualMaterialRole) SemanticColorToken {
-    if (role == VisualMaterialRole.glass) {
-        return SemanticColorToken.ambient_warm;
-    }
-    return SemanticColorToken.ambient_cool;
-}
-
-fn visual_material_tint_alpha(role: VisualMaterialRole) i64 {
-    if (role == VisualMaterialRole.veil) { return 12000; }
-    if (role == VisualMaterialRole.glass) { return 14000; }
-    return 0;
-}
-
-fn visual_material_blur_radius(role: VisualMaterialRole) i64 {
-    if (role == VisualMaterialRole.veil) { return 20 * unit_scale(); }
-    if (role == VisualMaterialRole.glass) { return 36 * unit_scale(); }
-    return 0;
-}
-
-fn visual_fallback_reason(role: VisualMaterialRole) VisualFallbackReason {
-    if (role == VisualMaterialRole.veil) {
-        return VisualFallbackReason.veil_cpu_tint_edge;
-    }
-    if (role == VisualMaterialRole.glass) {
-        return VisualFallbackReason.glass_cpu_tint_shadow;
-    }
-    return VisualFallbackReason.solid_exact;
-}
-
 fn visual_surface_fill_token(kind: VisualSurfaceKind) SemanticColorToken {
     return switch (kind) {
         .canvas => SemanticColorToken.surface_base,
@@ -244,11 +206,11 @@ fn visual_shadow_pair(token: SemanticElevationToken) VisualShadowPair {
     let light: VisualSceneLight = visual_scene_light();
     return VisualShadowPair{
         .contact = visual_shadow_spec(elevation.contact_shadow_y,
-            elevation.contact_shadow_blur,
-            elevation.contact_shadow_alpha, light),
+  elevation.contact_shadow_blur,
+  elevation.contact_shadow_alpha, light),
         .ambient = visual_shadow_spec(elevation.ambient_shadow_y,
-            elevation.ambient_shadow_blur,
-            elevation.ambient_shadow_alpha, light),
+  elevation.ambient_shadow_blur,
+  elevation.ambient_shadow_alpha, light),
     };
 }
 
@@ -270,21 +232,29 @@ fn visual_surface_effects(kind: VisualSurfaceKind,
     }
     let role: VisualMaterialRole = visual_effective_role(
         safe_kind, safe_requested, environment);
+    let material_token: SemanticMaterialToken = visual_material_token(role);
+    let material: ResolvedMaterialToken = semantic_material(material_token);
+    let tint_alpha: i64 = material.tint_alpha_end;
+    let blur_radius: i64 = material.blur_radius;
+    if (role == VisualMaterialRole.solid) {
+        tint_alpha = 0;
+        blur_radius = 0;
+    }
     let backdrop: i32 = (role != VisualMaterialRole.solid &&
         environment.backdrop_available != 0) as i32;
     return VisualSurfaceEffects{
         .requested_role = safe_requested,
         .effective_role = role,
-        .material_token = visual_material_token(role),
+        .material_token = material_token,
         .fill_token = visual_surface_fill_token(safe_kind),
-        .tint_token = visual_material_tint_token(role),
+        .tint_token = material.tint_token,
         .edge_token = visual_surface_edge_token(safe_kind, elevation_token),
         .radius_token = visual_surface_radius_token(safe_kind),
         .elevation_token = elevation_token,
-        .tint_alpha = visual_material_tint_alpha(role),
-        .blur_radius = visual_material_blur_radius(role),
+        .tint_alpha = tint_alpha,
+        .blur_radius = blur_radius,
         .backdrop_blur_enabled = backdrop,
-        .cpu_fallback_reason = visual_fallback_reason(role),
+        .cpu_fallback_reason = material.cpu_fallback_reason,
         .shadows = visual_shadow_pair(elevation_token),
     };
 }

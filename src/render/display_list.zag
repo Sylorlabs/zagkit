@@ -19,6 +19,7 @@ enum DisplayOpKind {
     end_layer,
     apply_effect,
     fill_rounded_rect,
+    fill_rounded_shadow,
 }
 
 enum DisplayError {
@@ -254,6 +255,7 @@ fn display_expected_resource_kind(kind: DisplayOpKind) i64 {
         .begin_layer => 0 - 1,
         .end_layer => 0 - 1,
         .fill_rounded_rect => 0 - 1,
+        .fill_rounded_shadow => 0 - 1,
     };
 }
 
@@ -284,6 +286,7 @@ fn display_resource_payload_valid(resource: RenderResource) i32 {
 fn display_op_requires_bounds(kind: DisplayOpKind) i32 {
     return (kind == DisplayOpKind.clip_rect || kind == DisplayOpKind.fill_rect ||
         kind == DisplayOpKind.fill_rounded_rect ||
+        kind == DisplayOpKind.fill_rounded_shadow ||
         kind == DisplayOpKind.stroke_rect || kind == DisplayOpKind.draw_image ||
         kind == DisplayOpKind.begin_layer) as i32;
 }
@@ -318,6 +321,13 @@ fn display_list_push(list: *DisplayList, op: DisplayOp) DisplayError {
     if (op.kind == DisplayOpKind.fill_rounded_rect &&
         (op.parameter <= 0 || op.parameter * 2 > op.bounds.width ||
          op.parameter * 2 > op.bounds.height)) {
+        return display_fail(list, DisplayError.invalid_parameter);
+    }
+    if (op.kind == DisplayOpKind.fill_rounded_shadow &&
+        (op.parameter <= 0 || op.parameter * 2 > op.bounds.width ||
+         op.parameter * 2 > op.bounds.height ||
+         op.paint.stroke_width <= 0 ||
+         op.paint.stroke_width > 256 * unit_scale())) {
         return display_fail(list, DisplayError.invalid_parameter);
     }
     if (op.kind == DisplayOpKind.draw_image &&
