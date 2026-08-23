@@ -1,0 +1,172 @@
+@import("content_colors_v2.zag")
+
+// Deterministic typography metrics for the native Zagkit v2 design language.
+// Shaping and glyph rasterization remain owned by the text engine; components
+// select semantic roles and receive locale-aware geometry.
+
+enum VisualScriptClass {
+    latin,
+    arabic,
+    hebrew,
+    indic,
+    cjk,
+    thai,
+    emoji,
+    code,
+}
+
+enum VisualNumeralStyle {
+    proportional,
+    tabular,
+}
+
+struct TypographyV2Environment {
+    density: FlexDensity,
+    text_scale_16: i64,
+    script: VisualScriptClass,
+    numerals: VisualNumeralStyle,
+}
+
+struct ResolvedTypographyV2 {
+    token: SemanticTypeToken,
+    size: i64,
+    line_height: i64,
+    tracking_1000: i64,
+    weight: i32,
+    optical_size: i64,
+    baseline_step: i64,
+    tabular_numerals: i32,
+    fallback_group: []u8,
+    evidence_hash: i64,
+    valid: i32,
+}
+
+fn typography_v2_environment() TypographyV2Environment {
+    return TypographyV2Environment{
+        .density = FlexDensity.standard,
+        .text_scale_16 = 65535,
+        .script = VisualScriptClass.latin,
+        .numerals = VisualNumeralStyle.proportional,
+    };
+}
+
+fn typography_v2_environment_valid(env: TypographyV2Environment) i32 {
+    let density: i64 = env.density as i64;
+    let script: i64 = env.script as i64;
+    let numerals: i64 = env.numerals as i64;
+    if (density < FlexDensity.compact as i64 ||
+        density > FlexDensity.touch as i64) { return 0; }
+    if (env.text_scale_16 < 32768 || env.text_scale_16 > 196605) {
+        return 0;
+    }
+    if (script < VisualScriptClass.latin as i64 ||
+        script > VisualScriptClass.code as i64) { return 0; }
+    if (numerals < VisualNumeralStyle.proportional as i64 ||
+        numerals > VisualNumeralStyle.tabular as i64) { return 0; }
+    return 1;
+}
+
+fn typography_v2_line_height_16(token: SemanticTypeToken) i64 {
+    return switch (token) {
+        .display => 75366,
+        .title => 78642,
+        .heading => 81919,
+        .body => 91749,
+        .label => 81919,
+        .caption => 85196,
+        .code => 95026,
+    };
+}
+
+fn typography_v2_weight(token: SemanticTypeToken) i32 {
+    return switch (token) {
+        .display => 700,
+        .title => 650,
+        .heading => 600,
+        .body => 400,
+        .label => 550,
+        .caption => 450,
+        .code => 400,
+    };
+}
+
+fn typography_v2_tracking_1000(token: SemanticTypeToken) i64 {
+    return switch (token) {
+        .display => -15,
+        .title => -10,
+        .heading => -5,
+        .body => 0,
+        .label => 5,
+        .caption => 10,
+        .code => 0,
+    };
+}
+
+fn typography_v2_script_line_multiplier_16(
+    script: VisualScriptClass) i64 {
+    if (script == VisualScriptClass.arabic ||
+        script == VisualScriptClass.indic ||
+        script == VisualScriptClass.thai) { return 75366; }
+    if (script == VisualScriptClass.cjk ||
+        script == VisualScriptClass.hebrew ||
+        script == VisualScriptClass.emoji) { return 72089; }
+    return 65535;
+}
+
+fn typography_v2_fallback_group(script: VisualScriptClass) []u8 {
+    return switch (script) {
+        .latin => "Inter, Fira Sans, Noto Sans",
+        .arabic => "Noto Sans Arabic",
+        .hebrew => "Noto Sans Hebrew",
+        .indic => "Noto Sans Indic",
+        .cjk => "Noto Sans CJK",
+        .thai => "Noto Sans Thai",
+        .emoji => "Noto Color Emoji",
+        .code => "JetBrains Mono, Noto Sans Mono",
+    };
+}
+
+fn typography_v2_ceil_grid(value: i64, grid: i64) i64 {
+    if (grid <= 0 || value <= 0) { return value; }
+    return ((value + grid - 1) / grid) * grid;
+}
+
+fn typography_v2_resolve(token: SemanticTypeToken,
+    env: TypographyV2Environment) ResolvedTypographyV2 {
+    let valid: i32 = typography_v2_environment_valid(env);
+    let safe: TypographyV2Environment = if (valid != 0)
+        env else typography_v2_environment();
+    let base_size: i64 = semantic_type_size(token);
+    let size: i64 = (base_size * safe.text_scale_16) / 65535;
+    let line_height: i64 = (size * typography_v2_line_height_16(token)) /
+        65535;
+    line_height = (line_height *
+        typography_v2_script_line_multiplier_16(safe.script)) / 65535;
+    let baseline: i64 = 4 * unit_scale();
+    line_height = typography_v2_ceil_grid(line_height, baseline);
+
+    let tabular: i32 = (safe.numerals == VisualNumeralStyle.tabular ||
+        token == SemanticTypeToken.code) as i32;
+    let hash: i64 = visual_mix_hash(1469598103, token as i64);
+    hash = visual_mix_hash(hash, safe.density as i64);
+    hash = visual_mix_hash(hash, safe.text_scale_16);
+    hash = visual_mix_hash(hash, safe.script as i64);
+    hash = visual_mix_hash(hash, safe.numerals as i64);
+    hash = visual_mix_hash(hash, size);
+    hash = visual_mix_hash(hash, line_height);
+    hash = visual_mix_hash(hash, typography_v2_weight(token) as i64);
+
+    return ResolvedTypographyV2{
+        .token = token,
+        .size = size,
+        .line_height = line_height,
+        .tracking_1000 = typography_v2_tracking_1000(token),
+        .weight = typography_v2_weight(token),
+        .optical_size = size,
+        .baseline_step = baseline,
+        .tabular_numerals = tabular,
+        .fallback_group = typography_v2_fallback_group(safe.script),
+        .evidence_hash = hash,
+        .valid = valid,
+    };
+}
