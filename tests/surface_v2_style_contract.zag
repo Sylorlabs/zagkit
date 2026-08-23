@@ -1,0 +1,87 @@
+@import("../src/components/surface_v2_style.zag")
+
+fn main() i32 {
+    let env: VisualEnvironment = visual_environment();
+    let group: ButtonInteraction = surface_interaction();
+
+    let panel: SurfaceV2VisualStyle = surface_v2_resolve_visual(
+        SurfaceTier.panel, SurfaceMode.group, 0, group,
+        VisualColorScheme.dark, env, VisualMotionPreference.normal);
+    if (panel.valid == 0 ||
+        panel.policy.role != VisualSurfaceRole.content ||
+        panel.material.material_token != SemanticMaterialToken.solid ||
+        panel.elevation_token != SemanticElevationToken.panel ||
+        panel.edge.alpha <= 0 || panel.border.alpha != 0 ||
+        panel.radius != 16 * unit_scale()) { return 1; }
+
+    let chrome: SurfaceV2VisualStyle = surface_v2_resolve_visual(
+        SurfaceTier.panel, SurfaceMode.group, 1, group,
+        VisualColorScheme.light, env, VisualMotionPreference.normal);
+    if (chrome.valid == 0 ||
+        chrome.policy.role != VisualSurfaceRole.floating_chrome ||
+        chrome.material.material_token != SemanticMaterialToken.veil) {
+        return 2;
+    }
+
+    let overlay: SurfaceV2VisualStyle = surface_v2_resolve_visual(
+        SurfaceTier.overlay, SurfaceMode.group, 0, group,
+        VisualColorScheme.dark, env, VisualMotionPreference.normal);
+    if (overlay.material.material_token != SemanticMaterialToken.glass ||
+        overlay.elevation_token != SemanticElevationToken.overlay ||
+        overlay.radius != 18 * unit_scale()) { return 3; }
+
+    let action: ButtonInteraction = surface_interaction();
+    action.hovered = 1;
+    let hovered: SurfaceV2VisualStyle = surface_v2_resolve_visual(
+        SurfaceTier.raised, SurfaceMode.actionable, 0, action,
+        VisualColorScheme.dark, env, VisualMotionPreference.normal);
+    let rest_action: ButtonInteraction = surface_interaction();
+    let rest: SurfaceV2VisualStyle = surface_v2_resolve_visual(
+        SurfaceTier.raised, SurfaceMode.actionable, 0, rest_action,
+        VisualColorScheme.dark, env, VisualMotionPreference.normal);
+    if (hovered.valid == 0 ||
+        hovered.evidence_hash == rest.evidence_hash) { return 4; }
+
+    let pressed_state: ButtonInteraction = surface_interaction();
+    pressed_state.pressed = 1;
+    let pressed: SurfaceV2VisualStyle = surface_v2_resolve_visual(
+        SurfaceTier.raised, SurfaceMode.actionable, 0, pressed_state,
+        VisualColorScheme.dark, env, VisualMotionPreference.normal);
+    if (pressed.elevation_token != SemanticElevationToken.base ||
+        pressed.edge.alpha != 0 ||
+        pressed.motion.translation_y != 2 * unit_scale()) { return 5; }
+
+    let focused_state: ButtonInteraction = surface_interaction();
+    focused_state.focused = 1;
+    focused_state.focus_visible = 1;
+    let focused: SurfaceV2VisualStyle = surface_v2_resolve_visual(
+        SurfaceTier.raised, SurfaceMode.actionable, 0, focused_state,
+        VisualColorScheme.high_contrast_dark, env,
+        VisualMotionPreference.normal);
+    if (focused.focus_ring_visible == 0 ||
+        focused.focus_ring_width != 2 * unit_scale() ||
+        focused.focus_separation_width != unit_scale()) { return 6; }
+
+    let disabled_state: ButtonInteraction = surface_interaction();
+    disabled_state.enabled = 0;
+    let disabled: SurfaceV2VisualStyle = surface_v2_resolve_visual(
+        SurfaceTier.raised, SurfaceMode.actionable, 0, disabled_state,
+        VisualColorScheme.light, env, VisualMotionPreference.normal);
+    if (disabled.elevation_token != SemanticElevationToken.base ||
+        disabled.edge.alpha != 0 ||
+        disabled.content.alpha == 65535) { return 7; }
+
+    let invalid_group_state: ButtonInteraction = surface_interaction();
+    invalid_group_state.hovered = 1;
+    let invalid_group: SurfaceV2VisualStyle = surface_v2_resolve_visual(
+        SurfaceTier.panel, SurfaceMode.group, 0, invalid_group_state,
+        VisualColorScheme.dark, env, VisualMotionPreference.normal);
+    if (invalid_group.valid != 0) { return 8; }
+
+    let repeat: SurfaceV2VisualStyle = surface_v2_resolve_visual(
+        SurfaceTier.panel, SurfaceMode.group, 0, group,
+        VisualColorScheme.dark, env, VisualMotionPreference.normal);
+    if (repeat.evidence_hash != panel.evidence_hash) { return 9; }
+
+    return 0;
+}
