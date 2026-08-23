@@ -1,0 +1,75 @@
+name: Validate ZagKit v2 visual foundation
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-zag-v2:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      ZNC: ${{ github.workspace }}/.toolchain/zag/zag-poc/znc
+    steps:
+      - name: Check out proposed ZagKit revision
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Resolve pinned Zag revision
+        id: toolchain
+        run: echo "zag_sha=$(jq -r '.zag.commit' contracts/toolchain.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Check out exact Zag toolchain
+        uses: actions/checkout@v6
+        with:
+          repository: Sylorlabs/zag
+          ref: ${{ steps.toolchain.outputs.zag_sha }}
+          path: .toolchain/zag
+
+      - name: Validate compiler seed
+        run: |
+          chmod +x "$ZNC"
+          "$ZNC" version
+
+      - name: Compile and run visual policy contract
+        run: |
+          "$ZNC" tests/visual_system_v2_policy_contract.zag \
+            --no-zagd --analyze-strict --no-foreground-cache \
+            -o /tmp/visual-system-v2-policy
+          /tmp/visual-system-v2-policy
+
+      - name: Compile and run SurfaceV2 contract
+        run: |
+          "$ZNC" tests/surface_v2_contract.zag \
+            --no-zagd --analyze-strict --no-foreground-cache \
+            -o /tmp/surface-v2-contract
+          /tmp/surface-v2-contract
+
+      - name: Preserve canonical component contracts
+        run: |
+          "$ZNC" tests/surface_contract.zag \
+            --no-zagd --analyze-strict --no-foreground-cache \
+            -o /tmp/surface-contract
+          /tmp/surface-contract
+          "$ZNC" tests/design_tokens_contract.zag \
+            --no-zagd --analyze-strict --no-foreground-cache \
+            -o /tmp/design-tokens-contract
+          /tmp/design-tokens-contract
+
+      - name: Run complete deterministic headless gate
+        run: |
+          chmod +x tools/test-headless.sh tools/check-contracts.sh
+          ./tools/test-headless.sh
+          ./tools/check-contracts.sh
+
+      - name: Enforce clean repository output
+        run: |
+          git diff --check
+          git status --short
