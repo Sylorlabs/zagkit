@@ -310,6 +310,8 @@ fn surface_v2_draw_chrome(spec: SurfaceV2Spec,
     let fill_token: SemanticColorToken = surface_v2_fill_token(
         spec, effects);
     let border_alpha: i64 = surface_v2_border_alpha(spec, effects);
+    let elevation: ResolvedElevationToken = semantic_elevation(
+        effects.elevation_token);
 
     draw = surface_push_round(display, budget, spec.base.id,
         chrome, radius,
@@ -346,8 +348,7 @@ fn surface_v2_draw_chrome(spec: SurfaceV2Spec,
             chrome.width - highlight_inset * 2,
             unit_scale()),
         semantic_color_with_alpha(SemanticColorToken.edge_highlight,
-            semantic_elevation(effects.elevation_token).
-                edge_highlight_alpha));
+            elevation.edge_highlight_alpha));
     return draw;
 }
 
@@ -480,14 +481,14 @@ fn surface_v2_evidence_hash(spec: SurfaceV2Spec,
     hash = surface_mix(hash, artifact.effects.blur_radius);
     hash = surface_mix(hash,
         artifact.effects.backdrop_blur_enabled as i64);
+    hash = surface_mix(hash,
+        artifact.effects.cpu_fallback_reason as i64);
     hash = surface_mix(hash, artifact.content_bounds.x);
     hash = surface_mix(hash, artifact.content_bounds.y);
     hash = surface_mix(hash, artifact.content_bounds.width);
     hash = surface_mix(hash, artifact.content_bounds.height);
     hash = surface_mix(hash, artifact.shadow_operations as i64);
-    hash = surface_mix(hash, artifact.effect_operations as i64);
-    return surface_text_hash(hash,
-        artifact.effects.cpu_fallback_reason);
+    return surface_mix(hash, artifact.effect_operations as i64);
 }
 
 fn surface_v2_copy_base_failure(result: *SurfaceV2BuildResult,
