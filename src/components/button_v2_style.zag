@@ -1,0 +1,188 @@
+@import("button.zag")
+@import("../design/content_colors_v2.zag")
+
+// Modern, semantic Button styling for native Zagkit v2. The retained Button
+// contract continues to own identity, hit testing, semantics, and Talkback;
+// this resolver owns theme, depth, focus, material, and motion targets.
+
+struct ButtonV2ResolvedStyle {
+    fill: Paint,
+    border: Paint,
+    text: Paint,
+    focus: Paint,
+    elevation_token: SemanticElevationToken,
+    radius: i64,
+    border_width: i64,
+    focus_ring_width: i64,
+    focus_separation_width: i64,
+    focus_ring_visible: i32,
+    material: ResolvedVisualMaterial,
+    motion: MaterialMotionTarget,
+    evidence_hash: i64,
+    valid: i32,
+}
+
+fn button_v2_with_alpha(paint: Paint, alpha_16: i64) Paint {
+    let result: Paint = paint;
+    result.alpha = (material_channel(paint.alpha) *
+        material_channel(alpha_16)) / 65535;
+    return result;
+}
+
+fn button_v2_motion_event(interaction: ButtonInteraction) MaterialMotionEvent {
+    if (interaction.enabled == 0) { return MaterialMotionEvent.disabled; }
+    if (interaction.loading != 0) { return MaterialMotionEvent.loading; }
+    if (interaction.error != 0) { return MaterialMotionEvent.error; }
+    if (interaction.pressed != 0) { return MaterialMotionEvent.press; }
+    if (interaction.selected != 0) { return MaterialMotionEvent.selected; }
+    if (interaction.focused != 0) { return MaterialMotionEvent.focus; }
+    if (interaction.hovered != 0) { return MaterialMotionEvent.hover; }
+    return MaterialMotionEvent.rest;
+}
+
+fn button_v2_base_fill(variant: ButtonVariant,
+    scheme: VisualColorScheme) Paint {
+    if (variant == ButtonVariant.primary) {
+        return visual_theme_color(scheme, SemanticColorToken.accent).paint;
+    }
+    if (variant == ButtonVariant.secondary) {
+        return visual_theme_color(scheme,
+            SemanticColorToken.surface_raised).paint;
+    }
+    if (variant == ButtonVariant.destructive) {
+        return visual_theme_color(scheme,
+            SemanticColorToken.status_error).paint;
+    }
+    return material_paint(0, 0, 0, 0);
+}
+
+fn button_v2_base_text(variant: ButtonVariant,
+    scheme: VisualColorScheme) Paint {
+    if (variant == ButtonVariant.primary) {
+        return visual_content_color(VisualContentColorRole.on_accent,
+            scheme).paint;
+    }
+    if (variant == ButtonVariant.destructive) {
+        return visual_content_color(VisualContentColorRole.on_danger,
+            scheme).paint;
+    }
+    return visual_theme_color(scheme,
+        SemanticColorToken.text_primary).paint;
+}
+
+fn button_v2_base_elevation(variant: ButtonVariant) SemanticElevationToken {
+    if (variant == ButtonVariant.quiet) {
+        return SemanticElevationToken.base;
+    }
+    return SemanticElevationToken.panel;
+}
+
+fn button_v2_resolve_style(variant: ButtonVariant,
+    interaction: ButtonInteraction,
+    scheme: VisualColorScheme,
+    env: VisualEnvironment,
+    motion_preference: VisualMotionPreference) ButtonV2ResolvedStyle {
+    let valid: i32 = (button_interaction_valid(interaction) != 0 &&
+        visual_color_scheme_valid(scheme) != 0 &&
+        visual_environment_valid(env) != 0) as i32;
+    let safe_interaction: ButtonInteraction = if (valid != 0)
+        interaction else button_interaction();
+
+    let fill: Paint = button_v2_base_fill(variant, scheme);
+    let border: Paint = visual_theme_color(scheme,
+        SemanticColorToken.border_subtle).paint;
+    let text: Paint = button_v2_base_text(variant, scheme);
+    let focus: Paint = visual_theme_color(scheme,
+        SemanticColorToken.focus).paint;
+    let elevation: SemanticElevationToken = button_v2_base_elevation(variant);
+    let event: MaterialMotionEvent = button_v2_motion_event(safe_interaction);
+    let motion: MaterialMotionTarget = material_motion_target(event,
+        elevation, motion_preference);
+
+    if (variant == ButtonVariant.quiet) {
+        border.alpha = 0;
+    }
+
+    if (safe_interaction.hovered != 0 &&
+        safe_interaction.enabled != 0 && safe_interaction.loading == 0) {
+        let hover: Paint = visual_theme_color(scheme,
+            SemanticColorToken.surface_interactive).paint;
+        fill = material_source_over(hover, fill);
+    }
+
+    if (safe_interaction.selected != 0) {
+        let selected: Paint = visual_theme_color(scheme,
+            SemanticColorToken.surface_selected).paint;
+        fill = material_source_over(selected, fill);
+    }
+
+    if (safe_interaction.pressed != 0) {
+        elevation = SemanticElevationToken.base;
+        if (variant == ButtonVariant.primary) {
+            fill = visual_theme_color(scheme,
+                SemanticColorToken.accent_emphasis).paint;
+        } else {
+            let pressed: Paint = visual_theme_color(scheme,
+                SemanticColorToken.surface_interactive).paint;
+            pressed.alpha = analytic_max(pressed.alpha, 18000);
+            fill = material_source_over(pressed, fill);
+        }
+    }
+
+    if (safe_interaction.error != 0) {
+        border = visual_theme_color(scheme,
+            SemanticColorToken.status_error).paint;
+        border.alpha = 65535;
+    }
+
+    if (safe_interaction.loading != 0) {
+        fill = button_v2_with_alpha(fill, 56000);
+        text = button_v2_with_alpha(text, 56000);
+    }
+
+    if (safe_interaction.enabled == 0) {
+        elevation = SemanticElevationToken.base;
+        fill = button_v2_with_alpha(fill, 36044);
+        border = button_v2_with_alpha(border, 36044);
+        text = visual_theme_color(scheme,
+            SemanticColorToken.text_disabled).paint;
+    }
+
+    let material: ResolvedVisualMaterial = visual_resolve_material(
+        VisualSurfaceRole.content, elevation, env);
+    let hash: i64 = visual_mix_hash(material.evidence_hash,
+        variant as i64);
+    hash = visual_mix_hash(hash, fill.red);
+    hash = visual_mix_hash(hash, fill.green);
+    hash = visual_mix_hash(hash, fill.blue);
+    hash = visual_mix_hash(hash, fill.alpha);
+    hash = visual_mix_hash(hash, border.red);
+    hash = visual_mix_hash(hash, border.alpha);
+    hash = visual_mix_hash(hash, text.red);
+    hash = visual_mix_hash(hash, text.alpha);
+    hash = visual_mix_hash(hash, safe_interaction.hovered as i64);
+    hash = visual_mix_hash(hash, safe_interaction.focused as i64);
+    hash = visual_mix_hash(hash, safe_interaction.focus_visible as i64);
+    hash = visual_mix_hash(hash, safe_interaction.pressed as i64);
+    hash = visual_mix_hash(hash, safe_interaction.selected as i64);
+    hash = visual_mix_hash(hash, safe_interaction.enabled as i64);
+    hash = visual_mix_hash(hash, safe_interaction.loading as i64);
+    hash = visual_mix_hash(hash, safe_interaction.error as i64);
+
+    return ButtonV2ResolvedStyle{
+        .fill = fill,
+        .border = border,
+        .text = text,
+        .focus = focus,
+        .elevation_token = elevation,
+        .radius = 10 * unit_scale(),
+        .border_width = unit_scale(),
+        .focus_ring_width = 2 * unit_scale(),
+        .focus_separation_width = unit_scale(),
+        .focus_ring_visible = safe_interaction.focus_visible,
+        .material = material,
+        .motion = motion,
+        .evidence_hash = hash,
+        .valid = valid,
+    };
+}
