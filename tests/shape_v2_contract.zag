@@ -1,0 +1,48 @@
+@import("../src/design/shape_v2.zag")
+
+fn main() i32 {
+    let control: ResolvedShapeV2 = shape_v2_resolve(
+        VisualShapeRole.control, 120 * unit_scale(),
+        44 * unit_scale(), 8 * unit_scale(), FlexDensity.standard);
+    if (control.valid == 0 || control.radius != 10 * unit_scale() ||
+        control.inner_radius != 2 * unit_scale() ||
+        control.focus_radius != 14 * unit_scale() ||
+        control.superellipse_power_16 != 262140) { return 1; }
+
+    let compact: ResolvedShapeV2 = shape_v2_resolve(
+        VisualShapeRole.control, 120 * unit_scale(),
+        44 * unit_scale(), 8 * unit_scale(), FlexDensity.compact);
+    if (compact.radius != 8 * unit_scale() ||
+        compact.radius >= control.radius) { return 2; }
+
+    let panel: ResolvedShapeV2 = shape_v2_resolve(
+        VisualShapeRole.panel, 400 * unit_scale(),
+        300 * unit_scale(), 20 * unit_scale(), FlexDensity.standard);
+    if (panel.radius != 16 * unit_scale() || panel.inner_radius != 0) {
+        return 3;
+    }
+
+    let tiny: ResolvedShapeV2 = shape_v2_resolve(
+        VisualShapeRole.overlay, 12 * unit_scale(),
+        8 * unit_scale(), 1 * unit_scale(), FlexDensity.standard);
+    if (tiny.radius != 4 * unit_scale() ||
+        tiny.focus_radius != 8 * unit_scale()) { return 4; }
+
+    let pill: ResolvedShapeV2 = shape_v2_resolve(
+        VisualShapeRole.pill, 100 * unit_scale(),
+        32 * unit_scale(), 8 * unit_scale(), FlexDensity.compact);
+    if (pill.radius != 16 * unit_scale() ||
+        pill.inner_radius != 8 * unit_scale()) { return 5; }
+
+    let invalid: ResolvedShapeV2 = shape_v2_resolve(
+        VisualShapeRole.control, 0, 20 * unit_scale(), 0,
+        FlexDensity.standard);
+    if (invalid.valid != 0) { return 6; }
+
+    let repeat: ResolvedShapeV2 = shape_v2_resolve(
+        VisualShapeRole.control, 120 * unit_scale(),
+        44 * unit_scale(), 8 * unit_scale(), FlexDensity.standard);
+    if (repeat.evidence_hash != control.evidence_hash) { return 7; }
+
+    return 0;
+}
