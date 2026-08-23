@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "suite": "zagkit-v2-visual-effects",
+  "language_target": "Zag v2",
+  "claim_policy": "No performance claim is valid until the named scene passes on declared physical hardware.",
+  "global_budgets": {
+    "idle_frames_requested": 0,
+    "steady_state_allocations_per_frame": 0,
+    "live_glass_layers_per_interaction": 1,
+    "veil_viewport_area_fraction_max": 0.25,
+    "shadow_support_radius_dp_max": 256,
+    "unbounded_effect_passes": 0
+  },
+  "axes": {
+    "scale": [1.0, 1.25, 1.5, 2.0, 3.0],
+    "theme": ["light", "dark"],
+    "contrast": ["normal", "high"],
+    "transparency": ["normal", "reduced"],
+    "motion": ["normal", "reduced"],
+    "density": ["compact", "standard", "touch"],
+    "direction": ["ltr", "rtl"]
+  },
+  "scenes": [
+    {
+      "id": "effects-solid-dashboard",
+      "description": "Dense professional dashboard with 10000 retained elements and no translucent content surfaces.",
+      "requirements": {
+        "glass_layers": 0,
+        "veil_area_fraction_max": 0.0,
+        "steady_state_allocations_per_frame": 0,
+        "target_refresh_hz": [60, 120]
+      }
+    },
+    {
+      "id": "effects-floating-chrome",
+      "description": "Scrolling content beneath one persistent command veil and one floating navigation rail.",
+      "requirements": {
+        "glass_layers": 0,
+        "veil_area_fraction_max": 0.25,
+        "steady_state_allocations_per_frame": 0,
+        "backdrop_reuse_required": true,
+        "target_refresh_hz": [60, 120]
+      }
+    },
+    {
+      "id": "effects-transient-overlay",
+      "description": "One menu or command palette condensing over changing content with interruption and reversal.",
+      "requirements": {
+        "glass_layers_max": 1,
+        "recursive_glass": false,
+        "velocity_continuity_required": true,
+        "reduced_transparency_fallback_required": true,
+        "target_refresh_hz": [60, 120]
+      }
+    },
+    {
+      "id": "effects-shadow-grid",
+      "description": "4096 rounded surfaces across all elevation tokens for CPU/GPU shadow comparison.",
+      "requirements": {
+        "temporary_surface_per_shadow": false,
+        "deterministic_cpu_hash_required": true,
+        "bounded_damage_required": true,
+        "target_refresh_hz": [60, 120]
+      }
+    },
+    {
+      "id": "effects-resize-stress",
+      "description": "Continuous resize across compact, medium, and expanded breakpoints with material demotion.",
+      "requirements": {
+        "steady_state_allocations_per_frame": 0,
+        "stale_backdrop_frames": 0,
+        "layout_identity_stable": true,
+        "target_refresh_hz": [60, 120]
+      }
+    }
+  ],
+  "measurements": [
+    "frame_time_p50_us",
+    "frame_time_p95_us",
+    "frame_time_p99_us",
+    "layout_time_us",
+    "paint_time_us",
+    "effect_time_us",
+    "pixels_sampled",
+    "damage_pixels",
+    "allocations_per_frame",
+    "bytes_allocated_per_frame",
+    "effect_cache_hits",
+    "effect_cache_misses",
+    "peak_resident_bytes",
+    "startup_time_us"
+  ]
+}
