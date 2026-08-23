@@ -245,7 +245,9 @@ fn determinism_contract(state: *TestState) void {
         second.error == SurfaceBuildError.none &&
         first.artifact.evidence_hash == second.artifact.evidence_hash &&
         first_display.content_hash == second_display.content_hash &&
-        first_semantics.evidence_hash == second_semantics.evidence_hash,
+        first_semantics.nodes.len == 1 && second_semantics.nodes.len == 1 &&
+        semantic_node_evidence_hash(first_semantics.nodes.data[0]) ==
+            semantic_node_evidence_hash(second_semantics.nodes.data[0]),
         "identical SurfaceV2 inputs produce identical visual semantic and component evidence");
 
     semantics_tree_free(&second_semantics);
@@ -264,14 +266,11 @@ fn main() i32 {
     rollback_contract(&state);
     determinism_contract(&state);
 
-    let passed: []u8 = _zag_i64_to_str(state.passed as i64);
-    let failed: []u8 = _zag_i64_to_str(state.failed as i64);
     _zag_print("SurfaceV2 contract: pass=");
-    _zag_print(passed);
+    _zag_print_i64(state.passed as i64);
     _zag_print(" fail=");
-    _zag_println(failed);
-    _zag_str_free(passed);
-    _zag_str_free(failed);
+    _zag_print_i64(state.failed as i64);
+    _zag_println("");
     if (state.failed == 0) { return 0; }
     return 1;
 }
