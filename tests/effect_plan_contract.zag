@@ -1,0 +1,93 @@
+@import("../src/render/effect_plan.zag")
+
+fn main() i32 {
+    let env: VisualEnvironment = visual_environment();
+    let limits: VisualEffectLimits = visual_effect_limits();
+    let budget: VisualEffectBudget = VisualEffectBudget{
+        .viewport_width = 1440,
+        .viewport_height = 900,
+        .veil_area = 200000,
+        .live_glass_layers = 1,
+    };
+    let bounds: VisualEffectRect = visual_effect_rect(
+        100 * unit_scale(), 100 * unit_scale(),
+        480 * unit_scale(), 320 * unit_scale());
+
+    let content: VisualEffectPlan = visual_effect_plan(bounds,
+        VisualSurfaceRole.content, SemanticElevationToken.raised,
+        env, budget, limits);
+    if (content.valid == 0 || content.error != VisualEffectPlanError.none ||
+        content.requires_backdrop_capture != 0 ||
+        content.requires_blur != 0 || content.capture_pixels != 0 ||
+        content.operation_count != 4) { return 1; }
+    if (content.damage_bounds.width <= content.bounds.width ||
+        content.damage_bounds.height <= content.bounds.height) { return 2; }
+
+    let oracle_overlay: VisualEffectPlan = visual_effect_plan(bounds,
+        VisualSurfaceRole.transient_overlay,
+        SemanticElevationToken.overlay, env, budget, limits);
+    if (oracle_overlay.valid == 0 ||
+        oracle_overlay.requires_backdrop_capture == 0 ||
+        oracle_overlay.requires_blur != 0 ||
+        oracle_overlay.capture_pixels <= 0 ||
+        oracle_overlay.temporary_pixels <= 0 ||
+        oracle_overlay.operation_count != 8) { return 3; }
+    if (oracle_overlay.capture_bounds.width <= bounds.width ||
+        oracle_overlay.capture_bounds.height <= bounds.height) { return 4; }
+
+    let gpu: VisualEnvironment = env;
+    gpu.backdrop_blur_available = 1;
+    gpu.quality = VisualQualityTier.high;
+    let accelerated: VisualEffectPlan = visual_effect_plan(bounds,
+        VisualSurfaceRole.transient_overlay,
+        SemanticElevationToken.overlay, gpu, budget, limits);
+    if (accelerated.valid == 0 || accelerated.requires_blur == 0 ||
+        accelerated.cache_key == oracle_overlay.cache_key) { return 5; }
+
+    let repeated: VisualEffectPlan = visual_effect_plan(bounds,
+        VisualSurfaceRole.transient_overlay,
+        SemanticElevationToken.overlay, gpu, budget, limits);
+    if (repeated.cache_key != accelerated.cache_key ||
+        repeated.temporary_pixels != accelerated.temporary_pixels) { return 6; }
+
+    let tiny_limits: VisualEffectLimits = limits;
+    tiny_limits.max_capture_pixels = 1;
+    let rejected_capture: VisualEffectPlan = visual_effect_plan(bounds,
+        VisualSurfaceRole.transient_overlay,
+        SemanticElevationToken.overlay, gpu, budget, tiny_limits);
+    if (rejected_capture.valid != 0 ||
+        rejected_capture.error != VisualEffectPlanError.capture_too_large) {
+        return 7;
+    }
+
+    let tiny_shadow: VisualEffectLimits = limits;
+    tiny_shadow.max_shadow_extent = unit_scale();
+    let rejected_shadow: VisualEffectPlan = visual_effect_plan(bounds,
+        VisualSurfaceRole.content, SemanticElevationToken.overlay,
+        env, budget, tiny_shadow);
+    if (rejected_shadow.valid != 0 ||
+        rejected_shadow.error != VisualEffectPlanError.shadow_too_large) {
+        return 8;
+    }
+
+    let excessive_glass: VisualEffectBudget = budget;
+    excessive_glass.live_glass_layers = 2;
+    let rejected_budget: VisualEffectPlan = visual_effect_plan(bounds,
+        VisualSurfaceRole.transient_overlay,
+        SemanticElevationToken.overlay, gpu, excessive_glass, limits);
+    if (rejected_budget.valid != 0 ||
+        rejected_budget.error != VisualEffectPlanError.invalid_budget) {
+        return 9;
+    }
+
+    let invalid_bounds: VisualEffectRect = visual_effect_rect(0, 0, 0, 10);
+    let rejected_bounds: VisualEffectPlan = visual_effect_plan(invalid_bounds,
+        VisualSurfaceRole.content, SemanticElevationToken.base,
+        env, budget, limits);
+    if (rejected_bounds.valid != 0 ||
+        rejected_bounds.error != VisualEffectPlanError.invalid_bounds) {
+        return 10;
+    }
+
+    return 0;
+}
