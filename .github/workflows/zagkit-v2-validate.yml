@@ -38,6 +38,13 @@ jobs:
           chmod +x "$ZNC"
           "$ZNC" version
 
+      - name: Compile visual module import smoke
+        run: |
+          "$ZNC" tests/visual_system_v2_import_smoke.zag \
+            --no-zagd --analyze-strict --no-foreground-cache \
+            -o /tmp/visual-system-v2-import
+          /tmp/visual-system-v2-import
+
       - name: Compile and run visual policy contract
         run: |
           "$ZNC" tests/visual_system_v2_policy_contract.zag \
