@@ -7,6 +7,10 @@
 // surfaces that genuinely float over live content. Every shadow derives from
 // one scene light and resolves to deterministic fixed-point data shared by CPU
 // and future GPU backends.
+//
+// This frame-hot contract intentionally contains only scalars, enums, and
+// token identities. Human-readable inspector strings resolve outside this
+// structure so visual evaluation never acquires or releases text ownership.
 
 enum VisualMaterialRole { automatic, solid, veil, glass }
 enum VisualSurfaceKind {
@@ -166,6 +170,25 @@ fn visual_material_token(role: VisualMaterialRole) SemanticMaterialToken {
     return SemanticMaterialToken.solid;
 }
 
+fn visual_material_tint_token(role: VisualMaterialRole) SemanticColorToken {
+    if (role == VisualMaterialRole.glass) {
+        return SemanticColorToken.ambient_warm;
+    }
+    return SemanticColorToken.ambient_cool;
+}
+
+fn visual_material_tint_alpha(role: VisualMaterialRole) i64 {
+    if (role == VisualMaterialRole.veil) { return 12000; }
+    if (role == VisualMaterialRole.glass) { return 14000; }
+    return 0;
+}
+
+fn visual_material_blur_radius(role: VisualMaterialRole) i64 {
+    if (role == VisualMaterialRole.veil) { return 20 * unit_scale(); }
+    if (role == VisualMaterialRole.glass) { return 36 * unit_scale(); }
+    return 0;
+}
+
 fn visual_fallback_reason(role: VisualMaterialRole) VisualFallbackReason {
     if (role == VisualMaterialRole.veil) {
         return VisualFallbackReason.veil_cpu_tint_edge;
@@ -174,14 +197,6 @@ fn visual_fallback_reason(role: VisualMaterialRole) VisualFallbackReason {
         return VisualFallbackReason.glass_cpu_tint_shadow;
     }
     return VisualFallbackReason.solid_exact;
-}
-
-fn visual_fallback_reason_name(reason: VisualFallbackReason) []u8 {
-    return switch (reason) {
-        .solid_exact => "solid exact fill and lighting",
-        .veil_cpu_tint_edge => "veil CPU tint and edge fallback",
-        .glass_cpu_tint_shadow => "glass CPU tint and shadow fallback",
-    };
 }
 
 fn visual_surface_fill_token(kind: VisualSurfaceKind) SemanticColorToken {
@@ -255,27 +270,19 @@ fn visual_surface_effects(kind: VisualSurfaceKind,
     }
     let role: VisualMaterialRole = visual_effective_role(
         safe_kind, safe_requested, environment);
-    let material_token: SemanticMaterialToken = visual_material_token(role);
-    let material: ResolvedMaterialToken = semantic_material(material_token);
-    let tint_alpha: i64 = material.tint_alpha_end;
-    let blur_radius: i64 = material.blur_radius;
-    if (role == VisualMaterialRole.solid) {
-        tint_alpha = 0;
-        blur_radius = 0;
-    }
     let backdrop: i32 = (role != VisualMaterialRole.solid &&
         environment.backdrop_available != 0) as i32;
     return VisualSurfaceEffects{
         .requested_role = safe_requested,
         .effective_role = role,
-        .material_token = material_token,
+        .material_token = visual_material_token(role),
         .fill_token = visual_surface_fill_token(safe_kind),
-        .tint_token = material.tint_token,
+        .tint_token = visual_material_tint_token(role),
         .edge_token = visual_surface_edge_token(safe_kind, elevation_token),
         .radius_token = visual_surface_radius_token(safe_kind),
         .elevation_token = elevation_token,
-        .tint_alpha = tint_alpha,
-        .blur_radius = blur_radius,
+        .tint_alpha = visual_material_tint_alpha(role),
+        .blur_radius = visual_material_blur_radius(role),
         .backdrop_blur_enabled = backdrop,
         .cpu_fallback_reason = visual_fallback_reason(role),
         .shadows = visual_shadow_pair(elevation_token),
