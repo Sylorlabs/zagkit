@@ -1,0 +1,62 @@
+@import("../src/render/analytic_shadow.zag")
+
+fn main() i32 {
+    let shape: VisualRoundedRect = visual_rounded_rect(
+        100 * unit_scale(), 100 * unit_scale(),
+        200 * unit_scale(), 120 * unit_scale(),
+        16 * unit_scale());
+    if (visual_rounded_rect_valid(shape) == 0 ||
+        shape.radius != 16 * unit_scale()) { return 1; }
+
+    let clamped: VisualRoundedRect = visual_rounded_rect(
+        0, 0, 10 * unit_scale(), 8 * unit_scale(),
+        99 * unit_scale());
+    if (clamped.radius != 4 * unit_scale()) { return 2; }
+
+    let panel: VisualShadowPair = visual_shadow_pair(
+        SemanticElevationToken.panel);
+    let raised: VisualShadowPair = visual_shadow_pair(
+        SemanticElevationToken.raised);
+
+    let centre_x: i64 = shape.x + shape.width / 2;
+    let bottom: i64 = shape.y + shape.height;
+    let near_y: i64 = bottom + 2 * unit_scale();
+    let middle_y: i64 = bottom + 12 * unit_scale();
+    let far_y: i64 = bottom + 80 * unit_scale();
+
+    let near_panel: i64 = analytic_shadow_pair_coverage_16(shape,
+        panel, centre_x, near_y);
+    let middle_panel: i64 = analytic_shadow_pair_coverage_16(shape,
+        panel, centre_x, middle_y);
+    let far_panel: i64 = analytic_shadow_pair_coverage_16(shape,
+        panel, centre_x, far_y);
+
+    if (near_panel <= 0 || near_panel <= middle_panel ||
+        middle_panel <= far_panel || far_panel != 0) { return 3; }
+
+    let near_raised: i64 = analytic_shadow_pair_coverage_16(shape,
+        raised, centre_x, near_y);
+    if (near_raised <= near_panel || near_raised > 65535) { return 4; }
+
+    let contact_spec: AnalyticShadowSpec = AnalyticShadowSpec{
+        .shape = shape,
+        .layer = panel.contact,
+    };
+    let first: i64 = analytic_shadow_coverage_16(contact_spec,
+        centre_x, near_y);
+    let repeat: i64 = analytic_shadow_coverage_16(contact_spec,
+        centre_x, near_y);
+    if (first != repeat || first < 0 ||
+        first > panel.contact.alpha_16) { return 5; }
+
+    if (analytic_source_over_alpha_16(65535, 12345) != 65535 ||
+        analytic_source_over_alpha_16(0, 12345) != 12345) { return 6; }
+
+    let inside_distance: i64 = analytic_rounded_rect_distance(shape,
+        centre_x, shape.y + shape.height / 2);
+    let outside_distance: i64 = analytic_rounded_rect_distance(shape,
+        centre_x, far_y);
+    if (inside_distance >= 0 || outside_distance <= 0) { return 7; }
+
+    return 0;
+}
