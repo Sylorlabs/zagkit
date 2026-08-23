@@ -1,0 +1,71 @@
+@import("../src/design/material_motion_v2.zag")
+
+fn main() i32 {
+    let rest: MaterialMotionTarget = material_motion_target(
+        MaterialMotionEvent.rest, SemanticElevationToken.raised,
+        VisualMotionPreference.normal);
+    if (rest.elevation_token != SemanticElevationToken.raised ||
+        rest.requests_frame != 0 ||
+        rest.spring.kind != VisualSpringKind.snap) { return 1; }
+
+    let press: MaterialMotionTarget = material_motion_target(
+        MaterialMotionEvent.press, SemanticElevationToken.raised,
+        VisualMotionPreference.normal);
+    if (press.elevation_token != SemanticElevationToken.base ||
+        press.translation_y != 2 * unit_scale() ||
+        press.scale_16 >= 65535 ||
+        press.spring.kind != VisualSpringKind.snappy ||
+        press.preserve_velocity == 0 || press.requests_frame == 0) {
+        return 2;
+    }
+
+    let release: MaterialMotionTarget = material_motion_target(
+        MaterialMotionEvent.release, SemanticElevationToken.raised,
+        VisualMotionPreference.normal);
+    if (release.elevation_token != SemanticElevationToken.raised ||
+        release.spring.kind != VisualSpringKind.smooth ||
+        release.preserve_velocity == 0) { return 3; }
+
+    let enter: MaterialMotionTarget = material_motion_target(
+        MaterialMotionEvent.overlay_enter,
+        SemanticElevationToken.overlay, VisualMotionPreference.normal);
+    if (enter.spring.kind != VisualSpringKind.expressive ||
+        enter.blur_mix_16 != 65535 || enter.tint_mix_16 != 65535) {
+        return 4;
+    }
+
+    let exit: MaterialMotionTarget = material_motion_target(
+        MaterialMotionEvent.overlay_exit,
+        SemanticElevationToken.overlay, VisualMotionPreference.normal);
+    if (exit.opacity_16 != 0 || exit.blur_mix_16 != 0 ||
+        exit.tint_mix_16 != 0 || exit.translation_y <= 0) { return 5; }
+
+    let reduced_press: MaterialMotionTarget = material_motion_target(
+        MaterialMotionEvent.press, SemanticElevationToken.raised,
+        VisualMotionPreference.reduced);
+    if (reduced_press.translation_y != 0 ||
+        reduced_press.scale_16 != 65535 ||
+        reduced_press.spring.kind != VisualSpringKind.snap ||
+        reduced_press.preserve_velocity != 0 ||
+        reduced_press.requests_frame != 0) { return 6; }
+
+    let disabled: MaterialMotionTarget = material_motion_target(
+        MaterialMotionEvent.disabled, SemanticElevationToken.raised,
+        VisualMotionPreference.normal);
+    if (disabled.elevation_token != SemanticElevationToken.base ||
+        disabled.opacity_16 >= 65535) { return 7; }
+
+    if (visual_spring(VisualSpringKind.snappy).settle_microseconds >=
+        visual_spring(VisualSpringKind.smooth).settle_microseconds ||
+        visual_spring(VisualSpringKind.smooth).settle_microseconds >=
+        visual_spring(VisualSpringKind.expressive).settle_microseconds) {
+        return 8;
+    }
+
+    let repeat: MaterialMotionTarget = material_motion_target(
+        MaterialMotionEvent.press, SemanticElevationToken.raised,
+        VisualMotionPreference.normal);
+    if (material_motion_target_equal(press, repeat) == 0) { return 9; }
+
+    return 0;
+}
