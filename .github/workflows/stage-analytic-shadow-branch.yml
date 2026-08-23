@@ -1,0 +1,64 @@
+name: Stage analytic shadow implementation branch
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/stage-analytic-shadow-branch.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  stage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out launcher source
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          path: control
+
+      - name: Extract the canonical patch program
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          import textwrap
+
+          workflow = Path(
+              "control/.github/workflows/"
+              "zagkit-v2-analytic-shadow-launcher.yml"
+          ).read_text()
+          marker = "          python3 <<'PY'\n"
+          start = workflow.index(marker) + len(marker)
+          end = workflow.index("\n          PY\n", start)
+          patch = textwrap.dedent(workflow[start:end]) + "\n"
+          Path("/tmp/apply-analytic-shadow.py").write_text(patch)
+          PY
+
+      - name: Check out current ZagKit master
+        uses: actions/checkout@v6
+        with:
+          ref: master
+          path: work
+          fetch-depth: 0
+
+      - name: Apply and stage the renderer slice
+        shell: bash
+        working-directory: work
+        run: |
+          set -euo pipefail
+          python3 /tmp/apply-analytic-shadow.py
+          git diff --check
+          git config user.name "zagkit-visual-bot"
+          git config user.email "zagkit-visual-bot@users.noreply.github.com"
+          git add src tests tools docs .github/workflows/zagkit-v2-validate.yml
+          if git diff --cached --quiet; then
+            echo "Analytic shadow implementation is already staged"
+          else
+            git commit -m "feat: add constant-operation analytic soft shadows"
+          fi
+          git push --force origin HEAD:refs/heads/agent/analytic-shadows
