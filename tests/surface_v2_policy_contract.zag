@@ -1,0 +1,68 @@
+@import("../src/components/surface_v2_policy.zag")
+
+fn main() i32 {
+    let env: VisualEnvironment = visual_environment();
+
+    let base: SurfaceV2Style = surface_v2_content_style(
+        SurfaceTier.base, env);
+    let panel: SurfaceV2Style = surface_v2_content_style(
+        SurfaceTier.panel, env);
+    let raised: SurfaceV2Style = surface_v2_content_style(
+        SurfaceTier.raised, env);
+    let overlay: SurfaceV2Style = surface_v2_content_style(
+        SurfaceTier.overlay, env);
+
+    if (base.error != SurfaceV2PolicyError.none ||
+        base.material.material_token != SemanticMaterialToken.solid ||
+        base.material.elevation_token != SemanticElevationToken.base) {
+        return 1;
+    }
+    if (panel.material.material_token != SemanticMaterialToken.solid ||
+        panel.material.elevation_token != SemanticElevationToken.panel) {
+        return 2;
+    }
+    if (raised.material.material_token != SemanticMaterialToken.solid ||
+        raised.material.elevation_token != SemanticElevationToken.raised) {
+        return 3;
+    }
+    if (overlay.role != VisualSurfaceRole.transient_overlay ||
+        overlay.material.material_token != SemanticMaterialToken.glass ||
+        overlay.material.elevation_token != SemanticElevationToken.overlay) {
+        return 4;
+    }
+
+    let chrome: SurfaceV2Style = surface_v2_chrome_style(
+        SurfaceTier.panel, env);
+    if (chrome.role != VisualSurfaceRole.floating_chrome ||
+        chrome.material.material_token != SemanticMaterialToken.veil) {
+        return 5;
+    }
+
+    let compact: VisualEnvironment = env;
+    compact.density = FlexDensity.compact;
+    let compact_chrome: SurfaceV2Style = surface_v2_chrome_style(
+        SurfaceTier.panel, compact);
+    if (compact_chrome.material.material_token !=
+        SemanticMaterialToken.solid) { return 6; }
+
+    let reduced: VisualEnvironment = env;
+    reduced.transparency = VisualTransparencyPreference.reduced;
+    let reduced_overlay: SurfaceV2Style = surface_v2_content_style(
+        SurfaceTier.overlay, reduced);
+    if (reduced_overlay.material.material_token !=
+        SemanticMaterialToken.solid) { return 7; }
+
+    let invalid_overlay_chrome: SurfaceV2Style = surface_v2_chrome_style(
+        SurfaceTier.overlay, env);
+    if (invalid_overlay_chrome.error !=
+        SurfaceV2PolicyError.invalid_chrome_role) { return 8; }
+
+    if (base.content_spacing_token != FlexSpacingToken.medium ||
+        panel.content_spacing_token != FlexSpacingToken.large ||
+        raised.content_spacing_token != FlexSpacingToken.xlarge ||
+        overlay.content_spacing_token != FlexSpacingToken.xlarge) {
+        return 9;
+    }
+
+    return 0;
+}
