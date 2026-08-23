@@ -1,0 +1,107 @@
+name: Apply ZagKit v2 native render IR
+
+on:
+  push:
+    branches: [agent/v2-native-render-ir]
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      ZNC: ${{ github.workspace }}/.toolchain/zag/zag-poc/znc
+    steps:
+      - name: Check out render-IR branch
+        uses: actions/checkout@v6
+        with:
+          ref: agent/v2-native-render-ir
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Resolve pinned Zag revision
+        id: toolchain
+        shell: bash
+        run: echo "zag_sha=$(jq -r '.zag.commit' contracts/toolchain.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Check out pinned Zag toolchain
+        uses: actions/checkout@v6
+        with:
+          repository: Sylorlabs/zag
+          ref: ${{ steps.toolchain.outputs.zag_sha }}
+          path: .toolchain/zag
+
+      - name: Bootstrap pinned Zag compiler
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x .toolchain/zag/zag-poc/znc .toolchain/zag/zag-poc/bootstrap.sh
+          ZAG_BOOTSTRAP_MEMORY_GUARD=off .toolchain/zag/zag-poc/bootstrap.sh
+
+      - name: Activate dormant render-IR patch and verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          (
+            python3 - <<'PY'
+          from pathlib import Path
+
+          source = Path('.github/workflows/zagkit-v2-visual-system.yml')
+          lines = source.read_text().splitlines()
+          start = next(i for i, line in enumerate(lines)
+                       if line.strip() == "python3 <<'PY'")
+          end = next(i for i in range(start + 1, len(lines))
+                     if lines[i] == '          PY')
+          body = []
+          for line in lines[start + 1:end]:
+              if line.startswith('          '):
+                  body.append(line[10:])
+              else:
+                  body.append(line)
+          script = '\n'.join(body) + '\n'
+          Path('/tmp/apply-v2-native-render-ir.py').write_text(script)
+          PY
+            python3 /tmp/apply-v2-native-render-ir.py
+
+            chmod +x "$ZNC" tools/test-headless.sh tools/check-contracts.sh
+            "$ZNC" tests/visual_system_v2_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o /tmp/visual-system-v2-contract
+            /tmp/visual-system-v2-contract
+            "$ZNC" tests/surface_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o /tmp/surface-contract
+            /tmp/surface-contract
+            "$ZNC" tests/surface_v2_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o /tmp/surface-v2-contract
+            /tmp/surface-v2-contract
+            "$ZNC" tests/display_list_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o /tmp/display-list-contract
+            /tmp/display-list-contract
+            "$ZNC" tests/display_list_codec_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o /tmp/display-list-codec-contract
+            /tmp/display-list-codec-contract
+            "$ZNC" tests/cpu_raster_contract.zag --no-zagd --analyze-strict --no-foreground-cache -o /tmp/cpu-raster-contract
+            /tmp/cpu-raster-contract
+            ./tools/test-headless.sh
+            ./tools/check-contracts.sh
+            git diff --check
+          ) > /tmp/v2-native-render-ir.log 2>&1
+          status=$?
+          set -e
+
+          git config user.name "zagkit-render-bot"
+          git config user.email "zagkit-render-bot@users.noreply.github.com"
+
+          if [ "$status" -ne 0 ]; then
+            git restore .
+            rm -f .github/workflows/apply-v2-native-render-ir.yml
+            tail -n 500 /tmp/v2-native-render-ir.log > .github/v2-native-render-ir-failure.log
+            git add -A
+            git commit -m "ci: record native render IR upgrade failure"
+            git push origin HEAD:agent/v2-native-render-ir
+            cat .github/v2-native-render-ir-failure.log
+            exit "$status"
+          fi
+
+          cat /tmp/v2-native-render-ir.log
+          rm -f .github/workflows/apply-v2-native-render-ir.yml
+          git add -A
+          git commit -m "render: add native analytic shadow IR"
+          git push origin HEAD:agent/v2-native-render-ir
