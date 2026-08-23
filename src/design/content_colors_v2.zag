@@ -1,0 +1,46 @@
+@import("material_motion_v2.zag")
+
+// Foreground roles for saturated or variable materials. These remain semantic
+// so components never choose local white/black literals.
+
+enum VisualContentColorRole {
+    on_accent,
+    on_danger,
+    on_dark_material,
+    on_light_material,
+}
+
+struct ResolvedVisualContentColor {
+    id: []u8,
+    paint: Paint,
+}
+
+fn visual_content_color(role: VisualContentColorRole,
+    scheme: VisualColorScheme) ResolvedVisualContentColor {
+    if (role == VisualContentColorRole.on_light_material) {
+        return ResolvedVisualContentColor{
+            .id = "color.content.on-light",
+            .paint = material_paint(2827, 4112, 8224, 65535),
+        };
+    }
+    if (role == VisualContentColorRole.on_dark_material) {
+        return ResolvedVisualContentColor{
+            .id = "color.content.on-dark",
+            .paint = material_paint(65535, 65535, 65535, 65535),
+        };
+    }
+    if (role == VisualContentColorRole.on_danger) {
+        return ResolvedVisualContentColor{
+            .id = "color.content.on-danger",
+            .paint = material_paint(65535, 65535, 65535, 65535),
+        };
+    }
+
+    // Accent remains dark enough in every current scheme for white content.
+    // High-contrast themes may replace this role independently later without
+    // changing component code.
+    return ResolvedVisualContentColor{
+        .id = "color.content.on-accent",
+        .paint = material_paint(65535, 65535, 65535, 65535),
+    };
+}
