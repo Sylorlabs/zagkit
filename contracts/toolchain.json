@@ -19,6 +19,7 @@
     "The revision preserves compiler-owned resource embedding, pure-Zag compression primitives, and existing native authority suites.",
     "ZagKit is compiled as an edition-2027 project; the pinned compiler reports 2026.07.0-dev but implements the edition-2027 strict ownership gates used here.",
     "ZagKit semantics mutation APIs no longer use invalid parameter-position @borrows_mut syntax; strict edition-2027 arity validation passes.",
-    "The sealed-destination Surface negative contract sets the retained DisplayList sealed state directly, isolating Surface fail-closed behavior from display_list_seal ownership semantics."
+    "The sealed-destination Surface negative contract sets the retained DisplayList sealed state directly, isolating Surface fail-closed behavior from display_list_seal ownership semantics.",
+    "Repository contracts and the strict visual policy, SurfaceV2, Surface, and design-token suites all passed before launching the retained analytic-shadow integration."
   ]
 }
