@@ -1,28 +1,30 @@
 from pathlib import Path
+import os
+import shutil
 import subprocess
+import tempfile
 
+repo = Path.cwd()
 workflow_path = '.github/workflows/integrate-v2-surface-pipeline.yml'
 marker = "python3 - <<'PY'"
 
-# Locate the most recent historical revision that still contains the reviewed
-# embedded transplant. The live workflow has since been reduced to syntax-safe
-# orchestration, so a fixed HEAD^ assumption is intentionally avoided.
+# Find the latest revision containing the reviewed embedded renderer payload.
 commits = subprocess.check_output(
     ['git', 'log', '--format=%H', '--', workflow_path],
     text=True,
 ).splitlines()
-raw = None
 source_commit = None
+raw = None
 for commit in commits:
     candidate = subprocess.check_output(
         ['git', 'show', f'{commit}:{workflow_path}'],
         text=True,
     )
     if marker in candidate:
-        raw = candidate
         source_commit = commit
+        raw = candidate
         break
-if raw is None:
+if source_commit is None or raw is None:
     raise SystemExit('reviewed renderer transplant payload not found in workflow history')
 
 lines = raw.splitlines()
@@ -32,26 +34,65 @@ finish = next(i for i in range(start + 1, len(lines))
 body = []
 for line in lines[start + 1:finish]:
     body.append(line[10:] if line.startswith('          ') else line)
+body_text = '\n'.join(body) + '\n'
 
-# Preserve strict-v2 and repository-hygiene repairs authored after the renderer
-# payload. The transplant may update rendering/components/tests, but it must not
-# regress the exact compiler audit or repaired semantics/documentation gates.
-preserve_paths = [
-    'src/semantics/semantics.zag',
-    'tests/surface_contract.zag',
-    'GOAL.md',
-    'tools/check-contracts.sh',
-    'contracts/toolchain.json',
-    'contracts/upstream-zag.json',
-]
-preserve_paths += [str(path) for path in sorted(Path('docs/evidence').glob('*.md'))]
-preserved = {path: Path(path).read_text() for path in preserve_paths}
+# Run the reviewed patch against its own historical repository shape. This
+# avoids forcing stale string-replacement assumptions onto today's stricter
+# Surface/semantics API. Only the product diff produced by that reviewed patch
+# is transplanted back onto the current branch.
+worktree = Path(tempfile.mkdtemp(prefix='zagkit-v2-render-source-'))
+subprocess.check_call(['git', 'worktree', 'add', '--detach', str(worktree), source_commit])
+try:
+    old_cwd = Path.cwd()
+    os.chdir(worktree)
+    try:
+        exec(compile(body_text,
+                     f'integrate-v2-surface-pipeline-{source_commit}.py', 'exec'),
+             {'__name__': '__main__'})
+    finally:
+        os.chdir(old_cwd)
 
-exec(compile('\n'.join(body) + '\n',
-             f'integrate-v2-surface-pipeline-{source_commit}.py', 'exec'),
-     {'__name__': '__main__'})
+    status = subprocess.check_output(
+        ['git', '-C', str(worktree), 'diff', '--name-status', '--no-renames'],
+        text=True,
+    ).splitlines()
 
-for path, content in preserved.items():
-    Path(path).write_text(content)
+    protected_exact = {
+        'GOAL.md',
+        'contracts/toolchain.json',
+        'contracts/upstream-zag.json',
+        'src/semantics/semantics.zag',
+        'tests/surface_contract.zag',
+        'tools/check-contracts.sh',
+        'zag.mod',
+    }
+    protected_prefixes = (
+        '.github/',
+        'docs/evidence/',
+    )
 
-print(f'Applied reviewed native shadow/display-list SurfaceV2 transplant from {source_commit}')
+    copied = []
+    for row in status:
+        if not row.strip():
+            continue
+        code, path = row.split('\t', 1)
+        if path in protected_exact or path.startswith(protected_prefixes):
+            continue
+        destination = repo / path
+        source = worktree / path
+        if code.startswith('D'):
+            destination.unlink(missing_ok=True)
+            copied.append(f'D {path}')
+            continue
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+        copied.append(f'{code} {path}')
+
+    if not copied:
+        raise SystemExit('reviewed renderer payload produced no transplantable product diff')
+    print(f'Applied reviewed renderer payload from {source_commit}:')
+    for item in copied:
+        print(f'  {item}')
+finally:
+    subprocess.call(['git', 'worktree', 'remove', '--force', str(worktree)])
+    shutil.rmtree(worktree, ignore_errors=True)
