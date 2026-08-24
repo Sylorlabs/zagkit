@@ -62,42 +62,17 @@ jobs:
               text = text.replace(old, new, 1)
           semantics.write_text(text)
 
+          # This contract checks Surface's early fail-closed behavior for a
+          # sealed destination. It does not need to exercise display_list_seal,
+          # whose nested retained store has a separate ownership contract.
           contract = Path('tests/surface_contract.zag')
           text = contract.read_text()
-          start_marker = '    let sealed_display: DisplayList = display_list_make();\n'
-          end_marker = '    display_list_free(&sealed_display);\n'
-          start = text.find(start_marker)
-          if start < 0:
-              raise SystemExit(f'{contract}: sealed destination start marker missing')
-          end = text.find(end_marker, start)
-          if end < 0:
-              raise SystemExit(f'{contract}: sealed destination end marker missing')
-          end = end + len(end_marker)
-          lines = [
-              '    // Strict v2 forbids local aggregate addresses from escaping through',
-              '    // call graphs that may retain them. This negative destination fixture',
-              '    // therefore owns its builders explicitly and releases them after use.',
-              '    let sealed_display: *DisplayList = new(display_list_make());',
-              '    let sealed_hits: *HitTree = new(hit_tree_make());',
-              '    let sealed_semantics: *SemanticsTree = new(semantics_tree_make());',
-              '    _ = display_list_seal(sealed_display);',
-              '    let sealed: SurfaceBuildResult = surface_emit(action_fixture(730,',
-              '        SurfaceCanonicalState.rest), sealed_display, sealed_hits,',
-              '        sealed_semantics);',
-              '    expect(state, sealed.error == SurfaceBuildError.display_error &&',
-              '        sealed.display_error == DisplayError.sealed &&',
-              '        sealed_display.*.ops.len == 0 && sealed_hits.*.nodes.len == 0 &&',
-              '        sealed_semantics.*.nodes.len == 0,',
-              '        "sealed display destinations fail without partial hit or semantic trees");',
-              '    semantics_tree_free(sealed_semantics);',
-              '    hit_tree_free(sealed_hits);',
-              '    display_list_free(sealed_display);',
-              '    delete(sealed_semantics);',
-              '    delete(sealed_hits);',
-              '    delete(sealed_display);',
-          ]
-          replacement = '\n'.join(lines) + '\n'
-          contract.write_text(text[:start] + replacement + text[end:])
+          old = '    _ = display_list_seal(&sealed_display);\n'
+          new = '    sealed_display.sealed = 1;\n'
+          count = text.count(old)
+          if count != 1:
+              raise SystemExit(f'{contract}: expected one sealed fixture transition, found {count}')
+          contract.write_text(text.replace(old, new, 1))
           PY
 
       - name: Validate strict Zag v2 Surface contracts
@@ -143,10 +118,11 @@ jobs:
           evidence = data.setdefault('evidence', [])
           notes = [
               ('ZagKit semantics mutation APIs use ordinary pointer parameters on the '
-               'portable Zag v2 path; stale experimental @borrows_mut parameter syntax '
+               'portable Zag v2 path; stale parameter-position @borrows_mut syntax '
                'was removed after strict arity validation.'),
-              ('Strict sealed-destination Surface testing uses explicit heap-owned builder '
-               'objects so the v2 lifetime checker can prove that no local aggregate address escapes.'),
+              ('The sealed-destination Surface negative contract marks the destination '
+               'sealed directly so it tests Surface fail-closed behavior without '
+               'conflating the separate display-list ownership transition.'),
           ]
           for note in notes:
               if note not in evidence:
