@@ -70,9 +70,8 @@ def apply_reviewed_surface_edits(worktree: Path) -> None:
     values: dict[str, object] = {}
     actions: list[tuple[str, tuple[object, ...]]] = []
 
-    # Collect the reviewed literal values and mutation calls without executing
-    # the historical orchestration itself. This preserves the reviewed product
-    # patch while allowing harmless formatting drift to be handled structurally.
+    # Collect reviewed literal values and mutation calls without executing the
+    # historical orchestration. Harmless formatting drift is handled below.
     for node in tree.body:
         if isinstance(node, ast.Assign) and len(node.targets) == 1 and \
                 isinstance(node.targets[0], ast.Name):
@@ -130,6 +129,41 @@ def apply_reviewed_surface_edits(worktree: Path) -> None:
             block_end = text.index(failure_marker, block_start)
             file.write_text(text[:block_start] + new + text[block_end:])
             return
+
+        if path == 'tests/surface_v2_contract.zag':
+            # The dormant foundation has evolved whitespace around these three
+            # assertions. The user-visible messages and semantic anchors are
+            # stable, so replace only the reviewed assertion tails/range.
+            if 'content panel is opaque modern depth with bounded two-part shadow work' in old:
+                message = '"content panel is opaque modern depth with bounded two-part shadow work");'
+                message_index = text.index(message)
+                block_start = text.rfind(
+                    '        built_panel.artifact.shadow_operations ==', 0, message_index)
+                if block_start < 0:
+                    raise SystemExit('panel shadow assertion anchor not found')
+                block_end = message_index + len(message)
+                file.write_text(text[:block_start] + new + text[block_end:])
+                return
+
+            if 'transient overlay receives one bounded glass treatment and overlay depth' in old:
+                message = '"transient overlay receives one bounded glass treatment and overlay depth");'
+                message_index = text.index(message)
+                block_start = text.rfind(
+                    '        built_overlay.artifact.effects.blur_radius ==', 0, message_index)
+                if block_start < 0:
+                    raise SystemExit('overlay shadow assertion anchor not found')
+                block_end = message_index + len(message)
+                file.write_text(text[:block_start] + new + text[block_end:])
+                return
+
+            if 'focused.artifact.base.focus_ring_visible == 1 &&' in old and \
+                    'focused.artifact.base.semantics_role == SemanticRole.button &&' in old:
+                first = '        focused.artifact.base.focus_ring_visible == 1 &&\n'
+                last = '        focused.artifact.base.semantics_role == SemanticRole.button &&\n'
+                block_start = text.index(first)
+                block_end = text.index(last, block_start) + len(last)
+                file.write_text(text[:block_start] + new + text[block_end:])
+                return
 
         raise SystemExit(
             f'{path}: reviewed replacement did not match current foundation '
