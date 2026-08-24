@@ -40,11 +40,12 @@ jobs:
           ref: ${{ steps.toolchain.outputs.zag_sha }}
           path: .toolchain/zag
 
-      - name: Repair strict-v2 semantics and sealed-destination fixture
+      - name: Repair strict-v2 semantics, fixture, and edition metadata
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
+          import json
           from pathlib import Path
 
           semantics = Path('src/semantics/semantics.zag')
@@ -70,6 +71,24 @@ jobs:
           if count != 1:
               raise SystemExit(f'{contract}: expected one sealed transition, found {count}')
           contract.write_text(text.replace(old, new, 1))
+
+          toolchain = Path('contracts/toolchain.json')
+          data = json.loads(toolchain.read_text())
+          data['zag']['edition'] = '2027'
+          evidence = data.setdefault('evidence', [])
+          notes = [
+              ('ZagKit is compiled as an edition-2027 project; the pinned compiler reports '
+               '2026.07.0-dev but implements the edition-2027 strict ownership gates used here.'),
+              ('ZagKit semantics mutation APIs no longer use invalid parameter-position '
+               '@borrows_mut syntax; strict edition-2027 arity validation passes.'),
+              ('The sealed-destination Surface negative contract sets the retained '
+               'DisplayList sealed state directly, isolating Surface fail-closed behavior '
+               'from display_list_seal ownership semantics.'),
+          ]
+          for note in notes:
+              if note not in evidence:
+                  evidence.append(note)
+          toolchain.write_text(json.dumps(data, indent=2) + '\n')
           PY
 
       - name: Validate strict Zag v2 Surface contracts
@@ -106,26 +125,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-
-          path = Path('contracts/toolchain.json')
-          data = json.loads(path.read_text())
-          evidence = data.setdefault('evidence', [])
-          notes = [
-              ('ZagKit semantics mutation APIs no longer use invalid parameter-position '
-               '@borrows_mut syntax; strict edition-2027 arity validation passes.'),
-              ('The sealed-destination Surface negative contract sets the retained '
-               'DisplayList sealed state directly, isolating Surface fail-closed behavior '
-               'from display_list_seal ownership semantics.'),
-          ]
-          for note in notes:
-              if note not in evidence:
-                  evidence.append(note)
-          path.write_text(json.dumps(data, indent=2) + '\n')
-          PY
-
           rm -f .github/run-v2-semantics-repair \
                 .github/workflows/repair-v2-semantics-arity.yml
 
@@ -133,5 +132,5 @@ jobs:
           git config user.email "zagkit-render-bot@users.noreply.github.com"
           git add -A
           git diff --cached --quiet && { echo 'repair produced no changes'; exit 1; }
-          git commit -m "fix: align Surface contracts with strict Zag v2 ownership"
+          git commit -m "fix: align strict Zag v2 Surface contracts"
           git push origin HEAD:agent/v2-analytic-shadow-safe
