@@ -73,29 +73,30 @@ jobs:
           if end < 0:
               raise SystemExit(f'{contract}: sealed destination end marker missing')
           end = end + len(end_marker)
-          replacement = (
-              '    // Strict v2 forbids local aggregate addresses from escaping through\\n'
-              '    // call graphs that may retain them. This negative destination fixture\\n'
-              '    // therefore owns its builders explicitly and releases them after use.\\n'
-              '    let sealed_display: *DisplayList = new(display_list_make());\\n'
-              '    let sealed_hits: *HitTree = new(hit_tree_make());\\n'
-              '    let sealed_semantics: *SemanticsTree = new(semantics_tree_make());\\n'
-              '    _ = display_list_seal(sealed_display);\\n'
-              '    let sealed: SurfaceBuildResult = surface_emit(action_fixture(730,\\n'
-              '        SurfaceCanonicalState.rest), sealed_display, sealed_hits,\\n'
-              '        sealed_semantics);\\n'
-              '    expect(state, sealed.error == SurfaceBuildError.display_error &&\\n'
-              '        sealed.display_error == DisplayError.sealed &&\\n'
-              '        sealed_display.*.ops.len == 0 && sealed_hits.*.nodes.len == 0 &&\\n'
-              '        sealed_semantics.*.nodes.len == 0,\\n'
-              '        "sealed display destinations fail without partial hit or semantic trees");\\n'
-              '    semantics_tree_free(sealed_semantics);\\n'
-              '    hit_tree_free(sealed_hits);\\n'
-              '    display_list_free(sealed_display);\\n'
-              '    delete(sealed_semantics);\\n'
-              '    delete(sealed_hits);\\n'
-              '    delete(sealed_display);\\n'
-          ).replace('\\\\n', '\\n')
+          lines = [
+              '    // Strict v2 forbids local aggregate addresses from escaping through',
+              '    // call graphs that may retain them. This negative destination fixture',
+              '    // therefore owns its builders explicitly and releases them after use.',
+              '    let sealed_display: *DisplayList = new(display_list_make());',
+              '    let sealed_hits: *HitTree = new(hit_tree_make());',
+              '    let sealed_semantics: *SemanticsTree = new(semantics_tree_make());',
+              '    _ = display_list_seal(sealed_display);',
+              '    let sealed: SurfaceBuildResult = surface_emit(action_fixture(730,',
+              '        SurfaceCanonicalState.rest), sealed_display, sealed_hits,',
+              '        sealed_semantics);',
+              '    expect(state, sealed.error == SurfaceBuildError.display_error &&',
+              '        sealed.display_error == DisplayError.sealed &&',
+              '        sealed_display.*.ops.len == 0 && sealed_hits.*.nodes.len == 0 &&',
+              '        sealed_semantics.*.nodes.len == 0,',
+              '        "sealed display destinations fail without partial hit or semantic trees");',
+              '    semantics_tree_free(sealed_semantics);',
+              '    hit_tree_free(sealed_hits);',
+              '    display_list_free(sealed_display);',
+              '    delete(sealed_semantics);',
+              '    delete(sealed_hits);',
+              '    delete(sealed_display);',
+          ]
+          replacement = '\n'.join(lines) + '\n'
           contract.write_text(text[:start] + replacement + text[end:])
           PY
 
