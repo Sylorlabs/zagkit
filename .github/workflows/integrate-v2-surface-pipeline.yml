@@ -18,7 +18,7 @@ concurrency:
 jobs:
   integrate:
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 45
     env:
       ZNC: ${{ github.workspace }}/.toolchain/zag/zag-poc/znc
 
@@ -42,12 +42,14 @@ jobs:
           ref: ${{ steps.toolchain.outputs.zag_sha }}
           path: .toolchain/zag
 
-      - name: Bootstrap exact Zag compiler
+      - name: Validate exact verified Zag compiler seed
         shell: bash
         run: |
           set -euo pipefail
-          chmod +x "$ZNC" .toolchain/zag/zag-poc/bootstrap.sh
-          ZAG_BOOTSTRAP_MEMORY_GUARD=off .toolchain/zag/zag-poc/bootstrap.sh
+          chmod +x "$ZNC"
+          "$ZNC" version
+          chmod +x .toolchain/zag/zag-poc/tests/check_v2_list_named_owner.sh
+          ZNC="$ZNC" .toolchain/zag/zag-poc/tests/check_v2_list_named_owner.sh
 
       - name: Apply reviewed renderer transplant
         shell: bash
