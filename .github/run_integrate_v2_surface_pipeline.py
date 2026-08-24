@@ -43,6 +43,39 @@ body_text = '\n'.join(body) + '\n'
 worktree = Path(tempfile.mkdtemp(prefix='zagkit-v2-render-source-'))
 subprocess.check_call(['git', 'worktree', 'add', '--detach', str(worktree), source_commit])
 try:
+    # The outer renderer payload explicitly snapshots and restores these files.
+    # Its dormant visual-foundation payload predates that preservation contract
+    # and contains strict replace-once assertions against legacy Surface. Make
+    # those helper-based mutations no-ops so the reviewed renderer/codec/CPU
+    # changes can be harvested without rewriting the preserved public API.
+    historical_preserved = (
+        'src/zagkit_v2.zag',
+        'src/design/visual_system.zag',
+        'src/design/visual_system_v2.zag',
+        'src/render/analytic_shadow.zag',
+        'src/components/surface.zag',
+        'tests/surface_contract.zag',
+        'docs/components/surface.md',
+    )
+    dormant_path = worktree / '.github/workflows/zagkit-v2-visual-system.yml'
+    dormant_text = dormant_path.read_text()
+    helper_start = (
+        '          def replace_once(path: str, old: str, new: str) -> None:\n'
+        '              file = Path(path)\n'
+    )
+    helper_replacement = (
+        '          def replace_once(path: str, old: str, new: str) -> None:\n'
+        f'              if path in {historical_preserved!r}:\n'
+        '                  return\n'
+        '              file = Path(path)\n'
+    )
+    count = dormant_text.count(helper_start)
+    if count != 1:
+        raise SystemExit(
+            f'dormant visual foundation: expected one replace_once helper, found {count}')
+    dormant_path.write_text(dormant_text.replace(
+        helper_start, helper_replacement, 1))
+
     old_cwd = Path.cwd()
     os.chdir(worktree)
     try:
