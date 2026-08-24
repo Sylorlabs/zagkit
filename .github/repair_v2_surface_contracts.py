@@ -36,25 +36,25 @@ if count != 1:
     raise SystemExit(f'{goal}: expected one non-portable PrismStudio evidence link set, found {count}')
 goal.write_text(text.replace(old, new, 1))
 
-# Historical session evidence names were recorded before the repository was
-# normalized and many local log/image artifacts were intentionally not committed.
-# Preserve those names as explicit artifact references while leaving every real
-# repository link subject to the global broken-link gate.
-history = Path('docs/evidence/goal-progress-2026-08-07.md')
-text = history.read_text()
+# Historical evidence ledgers record many session-local logs/screenshots that
+# were intentionally not committed. Preserve missing targets as explicit
+# artifact-name references. Existing repository links remain normal Markdown
+# links and continue to be enforced by the global broken-link gate.
 link = re.compile(r'\[([^\]]+)\]\(([^)]+)\)')
-base = history.parent
+for history in sorted(Path('docs/evidence').glob('*.md')):
+    text = history.read_text()
+    base = history.parent
 
-def normalize_historical_link(match: re.Match[str]) -> str:
-    label, target = match.group(1), match.group(2)
-    if not target or target.startswith(('#', 'http://', 'https://', 'mailto:')):
-        return match.group(0)
-    path = target.split('#', 1)[0]
-    if (base / path).exists():
-        return match.group(0)
-    return f'{label} (`{target}`)'
+    def normalize_historical_link(match: re.Match[str]) -> str:
+        label, target = match.group(1), match.group(2)
+        if not target or target.startswith(('#', 'http://', 'https://', 'mailto:')):
+            return match.group(0)
+        path = target.split('#', 1)[0]
+        if (base / path).exists():
+            return match.group(0)
+        return f'{label} (`{target}`)'
 
-history.write_text(link.sub(normalize_historical_link, text))
+    history.write_text(link.sub(normalize_historical_link, text))
 
 checker = Path('tools/check-contracts.sh')
 text = checker.read_text()
