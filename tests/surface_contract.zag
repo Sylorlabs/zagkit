@@ -638,7 +638,7 @@ fn invalid_and_deterministic_contract(state:  *TestState) void {
     let sealed_display: DisplayList = display_list_make();
     let sealed_hits: HitTree = hit_tree_make();
     let sealed_semantics: SemanticsTree = semantics_tree_make();
-    _ = display_list_seal(&sealed_display);
+    sealed_display.sealed = 1;
     let sealed: SurfaceBuildResult = surface_emit(action_fixture(730,
         SurfaceCanonicalState.rest), &sealed_display, &sealed_hits,
         &sealed_semantics);

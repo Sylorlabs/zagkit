@@ -1,16 +1,23 @@
 {
   "schema_version": 1,
   "audited_repository": "https://github.com/Sylorlabs/zag",
-  "audited_commit": "43870455a07bf8e7d4adf38fad807fe3baee4e26",
-  "audited_on": "2026-08-06",
-  "state_vocabulary": ["available", "partial", "missing"],
+  "audited_commit": "f84b5736b5f8f1f7dd9d4b539d13a2f5ddf9a34b",
+  "audited_on": "2026-08-23",
+  "state_vocabulary": [
+    "available",
+    "partial",
+    "missing"
+  ],
   "evidence_rule": "Available requires native executable conformance at the audited commit. Source presence, a cross compile, or a dirty working tree does not qualify.",
   "entries": [
     {
       "id": "target-linux-arm64",
       "category": "object-target",
       "state": "partial",
-      "needed_by": [3, 7],
+      "needed_by": [
+        3,
+        7
+      ],
       "evidence": "zag-poc/VERSIONING.md marks ARM64 Linux experimental and cites qemu-user execution, while unsupported numeric, debug, and call cases remain and no physical ARM64 evidence is recorded.",
       "exit_gate": "Pure Zag ARM64 ELF generation, ABI corpus, native device execution, self-hosting or documented bootstrap boundary, and cleanup pass."
     },
@@ -18,7 +25,11 @@
       "id": "target-darwin-macho",
       "category": "object-target",
       "state": "missing",
-      "needed_by": [5, 6, 7],
+      "needed_by": [
+        5,
+        6,
+        7
+      ],
       "evidence": "zag-poc/VERSIONING.md calls macOS not planned yet and requires a Mach-O backend.",
       "exit_gate": "Mach-O x86-64 and ARM64 executables run natively on declared macOS versions with ABI and lifecycle conformance."
     },
@@ -26,7 +37,10 @@
       "id": "target-windows-pe-coff",
       "category": "object-target",
       "state": "missing",
-      "needed_by": [5, 7],
+      "needed_by": [
+        5,
+        7
+      ],
       "evidence": "zag-poc/VERSIONING.md calls Windows not planned and requires a PE/COFF backend.",
       "exit_gate": "PE/COFF x86-64 and ARM64 executables run natively with Windows ABI, unwind, resource, and lifecycle conformance."
     },
@@ -34,7 +48,10 @@
       "id": "target-ios-arm64",
       "category": "object-target",
       "state": "missing",
-      "needed_by": [6, 7],
+      "needed_by": [
+        6,
+        7
+      ],
       "evidence": "No iOS target or native conformance suite exists at the pinned commit.",
       "exit_gate": "Signed Zag executable code runs on physical iOS devices with lifecycle, ABI, and packaging conformance."
     },
@@ -42,7 +59,10 @@
       "id": "target-android-arm64",
       "category": "object-target",
       "state": "missing",
-      "needed_by": [6, 7],
+      "needed_by": [
+        6,
+        7
+      ],
       "evidence": "No Android target or native conformance suite exists at the pinned commit.",
       "exit_gate": "Zag ARM64 output runs on physical Android devices with ELF, JNI, lifecycle, and packaging conformance."
     },
@@ -50,7 +70,11 @@
       "id": "abi-objective-c",
       "category": "platform-abi",
       "state": "missing",
-      "needed_by": [5, 6, 7],
+      "needed_by": [
+        5,
+        6,
+        7
+      ],
       "evidence": "No Objective C runtime ABI implementation or native conformance exists at the pinned commit.",
       "exit_gate": "Typed Objective C message sends, callbacks, ownership, exceptions boundary, and aggregate cases pass on macOS and iOS devices."
     },
@@ -58,7 +82,10 @@
       "id": "abi-com",
       "category": "platform-abi",
       "state": "missing",
-      "needed_by": [5, 7],
+      "needed_by": [
+        5,
+        7
+      ],
       "evidence": "No COM ABI implementation or native conformance exists at the pinned commit.",
       "exit_gate": "IUnknown lifetime, interface calls, callbacks, HRESULTs, threading model, and aggregate cases pass on Windows."
     },
@@ -66,7 +93,10 @@
       "id": "abi-jni",
       "category": "platform-abi",
       "state": "missing",
-      "needed_by": [6, 7],
+      "needed_by": [
+        6,
+        7
+      ],
       "evidence": "No JNI ABI implementation or native conformance exists at the pinned commit.",
       "exit_gate": "Java to Zag and Zag to Java calls, references, exceptions, threads, callbacks, and cleanup pass on Android devices."
     },
@@ -74,7 +104,12 @@
       "id": "abi-callbacks",
       "category": "foreign-abi",
       "state": "partial",
-      "needed_by": [3, 5, 6, 7],
+      "needed_by": [
+        3,
+        5,
+        6,
+        7
+      ],
       "evidence": "The pinned v2 ABI documents executable qsort evidence for one direct captureless scalar and pointer callback, while captures, returned callbacks, floats, aggregates, ownership, and unload contracts remain unsupported.",
       "exit_gate": "Captureless and context callbacks across each supported platform ABI pass register, stack, lifetime, reentrancy, unwind boundary, and negative tests."
     },
@@ -82,7 +117,12 @@
       "id": "abi-aggregates",
       "category": "foreign-abi",
       "state": "missing",
-      "needed_by": [3, 5, 6, 7],
+      "needed_by": [
+        3,
+        5,
+        6,
+        7
+      ],
       "evidence": "No general foreign aggregate parameter and return ABI conformance exists at the pinned commit.",
       "exit_gate": "Platform ABI suites pass small and large structs, unions, vectors, floats, alignment, return by value, and mixed register classes."
     },
@@ -90,7 +130,12 @@
       "id": "resource-embedding",
       "category": "build-system",
       "state": "partial",
-      "needed_by": [3, 5, 6, 7],
+      "needed_by": [
+        3,
+        5,
+        6,
+        7
+      ],
       "evidence": "The exact clean pinned commit defines compiler-owned #embed, source-relative identity, binary and empty resources, structured E0017 failures, foreground-cache byte identity, deterministic x86-64 execution, and qemu-user ARM64 execution through zag-poc/tests/run_resource_embed.sh. The clean tree also reached a byte-identical self-host fixpoint.",
       "exit_gate": "Deterministic byte resources embed into every supported object format with identity, alignment, lookup, reproducibility, and malformed input tests."
     },
@@ -98,7 +143,12 @@
       "id": "dynamic-platform-loading",
       "category": "runtime",
       "state": "partial",
-      "needed_by": [3, 5, 6, 7],
+      "needed_by": [
+        3,
+        5,
+        6,
+        7
+      ],
       "evidence": "zag-poc/docs/DYNAMIC_SYSTEM_ABI.md proves a narrow x86-64 Linux dynamic ELF import path with scalar outbound calls and one captureless callback; other targets, aggregates, unload, TLS, and general callbacks are unsupported.",
       "exit_gate": "Typed library loading, symbol lookup, version failure, ownership, unload, callback, and aggregate tests pass per supported platform."
     },
@@ -106,7 +156,13 @@
       "id": "main-loop-and-workers",
       "category": "concurrency",
       "state": "partial",
-      "needed_by": [2, 3, 5, 6, 7],
+      "needed_by": [
+        2,
+        3,
+        5,
+        6,
+        7
+      ],
       "evidence": "The pinned v2 concurrency guide documents bounded x86-64 atomics, futex wait and wake, and a direct join-only Linux worker slice; general arguments, detach, TLS, cross-platform workers, and a complete memory model remain unsupported.",
       "exit_gate": "Public main-loop scheduling, wakeup, cancellation, worker pool, atomics, memory model, thread affinity, shutdown, and race tests pass on every target."
     },
@@ -114,7 +170,13 @@
       "id": "package-resolution",
       "category": "package-system",
       "state": "partial",
-      "needed_by": [2, 3, 5, 6, 7],
+      "needed_by": [
+        2,
+        3,
+        5,
+        6,
+        7
+      ],
       "evidence": "zag.mod parsing and local dependency validation exist, but the language specification excludes package registry and dependency resolution semantics.",
       "exit_gate": "Deterministic resolution, lockfile, checksums, offline mode, path dependencies, conflicts, cache ownership, and reproducible fetch tests pass."
     },
@@ -122,7 +184,13 @@
       "id": "incremental-and-reload-hooks",
       "category": "developer-tooling",
       "state": "partial",
-      "needed_by": [2, 3, 5, 6, 7],
+      "needed_by": [
+        2,
+        3,
+        5,
+        6,
+        7
+      ],
       "evidence": "The pinned zagd architecture documents a checksummed incremental declaration index and background semantic rechecking, but not an in-process incremental parser or stable state-preserving library reload contract.",
       "exit_gate": "Dependency invalidation, state preserving reload, ABI rejection, rollback, file race, crash recovery, and deterministic event hooks pass end to end."
     },
@@ -130,7 +198,14 @@
       "id": "generic-numeric-pointer-slices",
       "category": "language-runtime",
       "state": "available",
-      "needed_by": [2, 3, 4, 5, 6, 7],
+      "needed_by": [
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
       "evidence": "The exact clean pinned commit self-hosts bounded *E[lo..hi] formation for every supported numeric slice family. zag-poc/tests/run_generic_pointer_slice.sh passes typed []i64 formation, parameter flow, backing-store mutation aliasing, nested slices, x86-64 execution, qemu-user ARM64 execution, and rejection of open-ended raw-pointer slices.",
       "exit_gate": "Keep typed bounded raw-pointer slice formation, element stride, aliasing, nested slicing, negative diagnostics, and cross-target execution green at every pinned compiler revision."
     },
@@ -138,7 +213,12 @@
       "id": "checksum-and-zlib-inflate",
       "category": "standard-library",
       "state": "available",
-      "needed_by": [2, 3, 6, 7],
+      "needed_by": [
+        2,
+        3,
+        6,
+        7
+      ],
       "evidence": "The exact clean pinned commit contains pure-Zag IEEE CRC32, Adler32, canonical stored-block zlib encode/decode, and bounded general stored/fixed/dynamic DEFLATE inflate. The 12-check primitive suite and 14-check inflater suite pass on x86-64; the same 14 checks pass in a Zag-generated ARM64 ELF under qemu-user, including independent Python-zlib fixtures, mixed blocks, every strict prefix, and single-bit mutations.",
       "exit_gate": "Keep the focused checksum, stored-zlib, and cross-target general-inflate suites green at the exact Zag revision pinned by each Zagkit release."
     }

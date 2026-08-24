@@ -344,7 +344,7 @@ fn semantics_find_index_borrowed(tree: *SemanticsTree, id: NodeKey) i32 {
     return semantics_find_index(tree.*, id);
 }
 
-fn semantics_fail(tree: @borrows_mut *SemanticsTree,
+fn semantics_fail(tree: *SemanticsTree,
     error: SemanticsError, id: NodeKey) SemanticsError {
     tree.*.last_error = error;
     tree.*.error_node = id;
@@ -400,7 +400,7 @@ fn semantics_state_valid(spec: SemanticsSpec) i32 {
     return 1;
 }
 
-fn semantics_add(tree: @borrows_mut *SemanticsTree,
+fn semantics_add(tree: *SemanticsTree,
     spec: SemanticsSpec) SemanticsError {
     if (node_key_equal(spec.id, semantic_root_key()) == 1 ||
         node_key_equal(spec.id, semantic_none_key()) == 1) {

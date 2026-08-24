@@ -106,7 +106,7 @@ more precision is needed and preserve its original ID as the parent.
 
 ## 6. Complete PrismStudio overhaul
 
-- [x] `G6-INVENTORY` Inventory every existing PrismStudio workflow, command, screen, and safety boundary. — Evidence: PrismStudio commit `5e47883`, [migration inventory](../PrismStudio/docs/ZAGKIT_MIGRATION_INVENTORY.md), and [static inventory gate](../PrismStudio/tools/zagkit_migration_inventory_audit.sh)
+- [x] `G6-INVENTORY` Inventory every existing PrismStudio workflow, command, screen, and safety boundary. — Evidence: PrismStudio commit `5e47883`, [migration inventory contract](contracts/prismstudio-migration-inventory.json)
 - [ ] `G6-DESIGN` Select and approve one of three PrismStudio visual directions using representative CAD states. — Exit: maintainers choose a reviewed target with light, dark, contrast, large-text, and reduced-effects variants
 - [ ] `G6-SHELL` Replace the entire visible PrismStudio shell with Zagkit. — Exit: no legacy app-owned widget, layout, or styling path remains in the supported Linux product
 - [ ] `G6-WORKFLOWS` Preserve and modernize all CAD workflows and direct manipulation. — Exit: canonical task scripts pass by keyboard, pointer, and Zagkit Talkback IDs

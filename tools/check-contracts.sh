@@ -257,7 +257,11 @@ done
 find . \( -path './.git' -o -path './.toolchain' \) -prune -o -name '*.md' -type f -print | sort |
 while IFS= read -r markdown_file; do
     markdown_base=$(dirname "$markdown_file")
-    grep -oE '\]\([^)]+\)' "$markdown_file" |
+    awk '
+      /^[[:space:]]*```/ { fenced = !fenced; next }
+      !fenced { print }
+    ' "$markdown_file" |
+    grep -oE '\]\([^)]+\)' |
     sed -e 's/^](//' -e 's/)$//' |
     while IFS= read -r target; do
         case "$target" in

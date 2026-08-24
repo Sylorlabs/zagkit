@@ -6,7 +6,7 @@
     "resolved_ref": "refs/heads/agent/v2-aggregate-let-values",
     "commit": "f84b5736b5f8f1f7dd9d4b539d13a2f5ddf9a34b",
     "compiler_version": "2026.07.0-dev",
-    "edition": "2026"
+    "edition": "2027"
   },
   "audited_on": "2026-08-23",
   "pin_policy": "Every Zagkit release replaces this record with the exact Zag source commit used to build and test it. Branch names and local dirty state are never release identities.",
@@ -16,6 +16,9 @@
     "The pinned tree self-hosts to a byte-identical native compiler fixed point without an external C, assembler, linker, or libc build chain.",
     "Strict native validation passed after the aggregate-valued let initialization repair.",
     "Aggregate runtime regression covers call return, local/parameter copy, field copy, and switch-expression result.",
-    "The revision preserves compiler-owned resource embedding, pure-Zag compression primitives, and existing native authority suites."
+    "The revision preserves compiler-owned resource embedding, pure-Zag compression primitives, and existing native authority suites.",
+    "ZagKit is compiled as an edition-2027 project; the pinned compiler reports 2026.07.0-dev but implements the edition-2027 strict ownership gates used here.",
+    "ZagKit semantics mutation APIs no longer use invalid parameter-position @borrows_mut syntax; strict edition-2027 arity validation passes.",
+    "The sealed-destination Surface negative contract sets the retained DisplayList sealed state directly, isolating Surface fail-closed behavior from display_list_seal ownership semantics."
   ]
 }
