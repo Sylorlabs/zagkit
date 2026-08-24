@@ -82,6 +82,20 @@ jobs:
               raise SystemExit(f'{goal}: expected one non-portable PrismStudio evidence link set, found {count}')
           goal.write_text(text.replace(old, new, 1))
 
+          checker = Path('tools/check-contracts.sh')
+          text = checker.read_text()
+          old = '''    grep -oE '\\]\\([^)]+\\)' "$markdown_file" |
+    sed -e 's/^](//' -e 's/)$//' |
+'''
+          new = '''    awk '\n      /^[[:space:]]*```/ { fenced = !fenced; next }\n      !fenced { print }\n    ' "$markdown_file" |
+    grep -oE '\\]\\([^)]+\\)' |
+    sed -e 's/^](//' -e 's/)$//' |
+'''
+          count = text.count(old)
+          if count != 1:
+              raise SystemExit(f'{checker}: expected one Markdown link scanner, found {count}')
+          checker.write_text(text.replace(old, new, 1))
+
           toolchain = Path('contracts/toolchain.json')
           data = json.loads(toolchain.read_text())
           exact_sha = data['zag']['commit']
