@@ -44,13 +44,19 @@ jobs:
         shell: bash
         run: python3 .github/repair_v2_surface_contracts.py
 
-      - name: Validate strict Zag v2 Surface contracts
+      - name: Validate repository contracts first
         shell: bash
         run: |
           set -euo pipefail
           chmod +x "$ZNC" tools/check-contracts.sh
           "$ZNC" version
+          ./tools/check-contracts.sh
+          git diff --check
 
+      - name: Validate strict Zag v2 Surface contracts
+        shell: bash
+        run: |
+          set -euo pipefail
           "$ZNC" tests/visual_system_v2_policy_contract.zag \
             --no-zagd --analyze-strict --no-foreground-cache \
             -o /tmp/visual-system-v2-policy
@@ -70,9 +76,6 @@ jobs:
             --no-zagd --analyze-strict --no-foreground-cache \
             -o /tmp/design-tokens-contract
           /tmp/design-tokens-contract
-
-          ./tools/check-contracts.sh
-          git diff --check
 
       - name: Commit repair and trigger renderer integration
         shell: bash
