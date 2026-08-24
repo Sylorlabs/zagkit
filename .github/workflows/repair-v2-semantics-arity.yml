@@ -1,0 +1,123 @@
+name: Repair ZagKit v2 semantics arity
+
+on:
+  push:
+    branches: [agent/v2-analytic-shadow-safe]
+    paths:
+      - .github/run-v2-semantics-repair
+
+permissions:
+  contents: write
+
+concurrency:
+  group: zagkit-v2-semantics-repair
+  cancel-in-progress: true
+
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      ZNC: ${{ github.workspace }}/.toolchain/zag/zag-poc/znc
+
+    steps:
+      - name: Check out exact ZagKit integration branch
+        uses: actions/checkout@v6
+        with:
+          ref: agent/v2-analytic-shadow-safe
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Resolve pinned Zag revision
+        id: toolchain
+        shell: bash
+        run: echo "zag_sha=$(jq -r '.zag.commit' contracts/toolchain.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Check out exact Zag compiler
+        uses: actions/checkout@v6
+        with:
+          repository: Sylorlabs/zag
+          ref: ${{ steps.toolchain.outputs.zag_sha }}
+          path: .toolchain/zag
+
+      - name: Repair stale experimental borrow annotations
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/semantics/semantics.zag')
+          text = path.read_text()
+          replacements = {
+              'fn semantics_fail(tree: @borrows_mut *SemanticsTree,':
+                  'fn semantics_fail(tree: *SemanticsTree,',
+              'fn semantics_add(tree: @borrows_mut *SemanticsTree,':
+                  'fn semantics_add(tree: *SemanticsTree,',
+          }
+          for old, new in replacements.items():
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected exactly one {old!r}, found {count}')
+              text = text.replace(old, new, 1)
+          path.write_text(text)
+          PY
+
+      - name: Validate strict Zag v2 semantics and Surface contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x "$ZNC" tools/check-contracts.sh
+          "$ZNC" version
+
+          "$ZNC" tests/visual_system_v2_policy_contract.zag \
+            --no-zagd --analyze-strict --no-foreground-cache \
+            -o /tmp/visual-system-v2-policy
+          /tmp/visual-system-v2-policy
+
+          "$ZNC" tests/surface_v2_contract.zag \
+            --no-zagd --analyze-strict --no-foreground-cache \
+            -o /tmp/surface-v2-contract
+          /tmp/surface-v2-contract
+
+          "$ZNC" tests/surface_contract.zag \
+            --no-zagd --analyze-strict --no-foreground-cache \
+            -o /tmp/surface-contract
+          /tmp/surface-contract
+
+          "$ZNC" tests/design_tokens_contract.zag \
+            --no-zagd --analyze-strict --no-foreground-cache \
+            -o /tmp/design-tokens-contract
+          /tmp/design-tokens-contract
+
+          ./tools/check-contracts.sh
+          git diff --check
+
+      - name: Commit repair and trigger renderer integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path('contracts/toolchain.json')
+          data = json.loads(path.read_text())
+          evidence = data.setdefault('evidence', [])
+          note = ('ZagKit semantics mutation APIs use ordinary pointer parameters on the '
+                  'portable Zag v2 path; stale experimental @borrows_mut parameter syntax '
+                  'was removed after strict arity validation.')
+          if note not in evidence:
+              evidence.append(note)
+          path.write_text(json.dumps(data, indent=2) + '\n')
+          PY
+
+          rm -f .github/run-v2-semantics-repair \
+                .github/workflows/repair-v2-semantics-arity.yml
+
+          git config user.name "zagkit-render-bot"
+          git config user.email "zagkit-render-bot@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && { echo 'repair produced no changes'; exit 1; }
+          git commit -m "fix: align semantics APIs with strict Zag v2 arity"
+          git push origin HEAD:agent/v2-analytic-shadow-safe
