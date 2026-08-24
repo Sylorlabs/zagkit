@@ -1,4 +1,4 @@
-name: Repair ZagKit v2 semantics arity
+name: Repair ZagKit v2 strict ownership fixtures
 
 on:
   push:
@@ -16,7 +16,7 @@ concurrency:
 jobs:
   repair:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 35
     env:
       ZNC: ${{ github.workspace }}/.toolchain/zag/zag-poc/znc
 
@@ -40,15 +40,15 @@ jobs:
           ref: ${{ steps.toolchain.outputs.zag_sha }}
           path: .toolchain/zag
 
-      - name: Repair stale experimental borrow annotations
+      - name: Repair strict-v2 semantics and sealed-destination fixtures
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
 
-          path = Path('src/semantics/semantics.zag')
-          text = path.read_text()
+          semantics = Path('src/semantics/semantics.zag')
+          text = semantics.read_text()
           replacements = {
               'fn semantics_fail(tree: @borrows_mut *SemanticsTree,':
                   'fn semantics_fail(tree: *SemanticsTree,',
@@ -58,12 +58,58 @@ jobs:
           for old, new in replacements.items():
               count = text.count(old)
               if count != 1:
-                  raise SystemExit(f'{path}: expected exactly one {old!r}, found {count}')
+                  raise SystemExit(f'{semantics}: expected exactly one {old!r}, found {count}')
               text = text.replace(old, new, 1)
-          path.write_text(text)
+          semantics.write_text(text)
+
+          contract = Path('tests/surface_contract.zag')
+          text = contract.read_text()
+          old = '''    let sealed_display: DisplayList = display_list_make();
+    let sealed_hits: HitTree = hit_tree_make();
+    let sealed_semantics: SemanticsTree = semantics_tree_make();
+    _ = display_list_seal(&sealed_display);
+    let sealed: SurfaceBuildResult = surface_emit(action_fixture(730,
+        SurfaceCanonicalState.rest), &sealed_display, &sealed_hits,
+        &sealed_semantics);
+    expect(state, sealed.error == SurfaceBuildError.display_error &&
+        sealed.display_error == DisplayError.sealed &&
+        sealed_display.ops.len == 0 && sealed_hits.nodes.len == 0 &&
+        sealed_semantics.nodes.len == 0,
+        "sealed display destinations fail without partial hit or semantic trees");
+    semantics_tree_free(&sealed_semantics);
+    hit_tree_free(&sealed_hits);
+    display_list_free(&sealed_display);
+'''
+          new = '''    // Strict v2 does not permit a local aggregate address to flow through
+    // a call graph that can retain it. This negative destination fixture owns
+    // its builders explicitly on the heap, then releases both inner storage
+    // and the owner objects after the fail-closed assertion.
+    let sealed_display: *DisplayList = new(display_list_make());
+    let sealed_hits: *HitTree = new(hit_tree_make());
+    let sealed_semantics: *SemanticsTree = new(semantics_tree_make());
+    _ = display_list_seal(sealed_display);
+    let sealed: SurfaceBuildResult = surface_emit(action_fixture(730,
+        SurfaceCanonicalState.rest), sealed_display, sealed_hits,
+        sealed_semantics);
+    expect(state, sealed.error == SurfaceBuildError.display_error &&
+        sealed.display_error == DisplayError.sealed &&
+        sealed_display.*.ops.len == 0 && sealed_hits.*.nodes.len == 0 &&
+        sealed_semantics.*.nodes.len == 0,
+        "sealed display destinations fail without partial hit or semantic trees");
+    semantics_tree_free(sealed_semantics);
+    hit_tree_free(sealed_hits);
+    display_list_free(sealed_display);
+    delete(sealed_semantics);
+    delete(sealed_hits);
+    delete(sealed_display);
+'''
+          count = text.count(old)
+          if count != 1:
+              raise SystemExit(f'{contract}: expected one sealed destination fixture, found {count}')
+          contract.write_text(text.replace(old, new, 1))
           PY
 
-      - name: Validate strict Zag v2 semantics and Surface contracts
+      - name: Validate strict Zag v2 Surface contracts
         shell: bash
         run: |
           set -euo pipefail
@@ -104,11 +150,16 @@ jobs:
           path = Path('contracts/toolchain.json')
           data = json.loads(path.read_text())
           evidence = data.setdefault('evidence', [])
-          note = ('ZagKit semantics mutation APIs use ordinary pointer parameters on the '
-                  'portable Zag v2 path; stale experimental @borrows_mut parameter syntax '
-                  'was removed after strict arity validation.')
-          if note not in evidence:
-              evidence.append(note)
+          notes = [
+              ('ZagKit semantics mutation APIs use ordinary pointer parameters on the '
+               'portable Zag v2 path; stale experimental @borrows_mut parameter syntax '
+               'was removed after strict arity validation.'),
+              ('Strict sealed-destination Surface testing uses explicit heap-owned builder '
+               'objects so the v2 lifetime checker can prove that no local aggregate address escapes.'),
+          ]
+          for note in notes:
+              if note not in evidence:
+                  evidence.append(note)
           path.write_text(json.dumps(data, indent=2) + '\n')
           PY
 
@@ -119,5 +170,5 @@ jobs:
           git config user.email "zagkit-render-bot@users.noreply.github.com"
           git add -A
           git diff --cached --quiet && { echo 'repair produced no changes'; exit 1; }
-          git commit -m "fix: align semantics APIs with strict Zag v2 arity"
+          git commit -m "fix: align Surface contracts with strict Zag v2 ownership"
           git push origin HEAD:agent/v2-analytic-shadow-safe
