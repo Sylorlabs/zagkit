@@ -40,7 +40,7 @@ jobs:
           ref: ${{ steps.toolchain.outputs.zag_sha }}
           path: .toolchain/zag
 
-      - name: Repair strict-v2 APIs, fixture, and audit metadata
+      - name: Repair strict-v2 APIs, fixtures, and audit metadata
         shell: bash
         run: |
           set -euo pipefail
@@ -71,6 +71,16 @@ jobs:
           if count != 1:
               raise SystemExit(f'{contract}: expected one sealed transition, found {count}')
           contract.write_text(text.replace(old, new, 1))
+
+          goal = Path('GOAL.md')
+          text = goal.read_text()
+          old = ('[migration inventory](../PrismStudio/docs/ZAGKIT_MIGRATION_INVENTORY.md), '
+                 'and [static inventory gate](../PrismStudio/tools/zagkit_migration_inventory_audit.sh)')
+          new = '[migration inventory contract](contracts/prismstudio-migration-inventory.json)'
+          count = text.count(old)
+          if count != 1:
+              raise SystemExit(f'{goal}: expected one non-portable PrismStudio evidence link set, found {count}')
+          goal.write_text(text.replace(old, new, 1))
 
           toolchain = Path('contracts/toolchain.json')
           data = json.loads(toolchain.read_text())
