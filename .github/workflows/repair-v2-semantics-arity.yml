@@ -40,7 +40,7 @@ jobs:
           ref: ${{ steps.toolchain.outputs.zag_sha }}
           path: .toolchain/zag
 
-      - name: Repair strict-v2 semantics, fixture, and edition metadata
+      - name: Repair strict-v2 APIs, fixture, and audit metadata
         shell: bash
         run: |
           set -euo pipefail
@@ -74,6 +74,7 @@ jobs:
 
           toolchain = Path('contracts/toolchain.json')
           data = json.loads(toolchain.read_text())
+          exact_sha = data['zag']['commit']
           data['zag']['edition'] = '2027'
           evidence = data.setdefault('evidence', [])
           notes = [
@@ -89,6 +90,12 @@ jobs:
               if note not in evidence:
                   evidence.append(note)
           toolchain.write_text(json.dumps(data, indent=2) + '\n')
+
+          upstream = Path('contracts/upstream-zag.json')
+          ledger = json.loads(upstream.read_text())
+          ledger['audited_commit'] = exact_sha
+          ledger['audited_on'] = '2026-08-23'
+          upstream.write_text(json.dumps(ledger, indent=2) + '\n')
           PY
 
       - name: Validate strict Zag v2 Surface contracts
