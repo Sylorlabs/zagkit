@@ -5,6 +5,8 @@ on:
     branches: [agent/v2-analytic-shadow-safe]
     paths:
       - contracts/toolchain.json
+      - .github/workflows/integrate-v2-surface-pipeline.yml
+      - .github/run_integrate_v2_surface_pipeline.py
 
 permissions:
   contents: write
@@ -19,6 +21,7 @@ jobs:
     timeout-minutes: 60
     env:
       ZNC: ${{ github.workspace }}/.toolchain/zag/zag-poc/znc
+
     steps:
       - name: Check out exact integration branch
         uses: actions/checkout@v6
@@ -43,447 +46,89 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          chmod +x .toolchain/zag/zag-poc/znc .toolchain/zag/zag-poc/bootstrap.sh
+          chmod +x "$ZNC" .toolchain/zag/zag-poc/bootstrap.sh
           ZAG_BOOTSTRAP_MEMORY_GUARD=off .toolchain/zag/zag-poc/bootstrap.sh
 
-      - name: Integrate native shadow IR and identity-only SurfaceV2
+      - name: Apply reviewed renderer transplant
         shell: bash
         run: |
           set -euo pipefail
-          set +e
-          (
-            python3 - <<'PY'
-          from pathlib import Path
+          python3 .github/run_integrate_v2_surface_pipeline.py
+          git diff --check
 
-          def replace_once(path: str, old: str, new: str) -> None:
-              file = Path(path)
-              text = file.read_text()
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(
-                      f"{path}: expected one replacement, found {count}: {old[:140]!r}")
-              file.write_text(text.replace(old, new, 1))
+      - name: Verify native shadow IR shape
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'fill_rounded_shadow' src/render/display_list.zag
+          grep -q 'fill_rounded_shadow' src/render/cpu_raster.zag
+          grep -q 'fill_rounded_shadow' src/render/display_list_codec.zag
+          ! grep -q 'fn surface_v2_shadow_bands' src/components/surface_v2.zag
+          grep -q 'fn surface_v2_shadow_operation_count() i32 { return 2; }' src/components/surface_v2.zag
 
-          def replace_between(path: str, start: str, end: str,
-                              replacement: str) -> None:
-              file = Path(path)
-              text = file.read_text()
-              start_index = text.index(start)
-              end_index = text.index(end, start_index)
-              file.write_text(text[:start_index] + replacement + text[end_index:])
+      - name: Run focused strict renderer contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$ZNC" tests/visual_system_v2_policy_contract.zag \
+            --no-zagd --analyze-strict --no-foreground-cache \
+            -o /tmp/visual-system-v2-policy
+          /tmp/visual-system-v2-policy
 
-          # The repository already contains a reviewed dormant renderer patch.
-          # Execute its display-list/codec/CPU contract work, but preserve the
-          # newer ownership-safe public policy and retained legacy component API.
-          preserved_paths = [
-              'src/zagkit_v2.zag',
-              'src/design/visual_system.zag',
-              'src/design/visual_system_v2.zag',
-              'src/render/analytic_shadow.zag',
-              'src/components/surface.zag',
-              'tests/surface_contract.zag',
-              'docs/components/surface.md',
-          ]
-          preserved = {path: Path(path).read_text() for path in preserved_paths}
+          "$ZNC" tests/visual_system_v2_contract.zag \
+            --no-zagd --analyze-strict --no-foreground-cache \
+            -o /tmp/visual-system-v2-contract
+          /tmp/visual-system-v2-contract
 
-          source = Path('.github/workflows/zagkit-v2-visual-system.yml')
-          lines = source.read_text().splitlines()
-          start = next(i for i, line in enumerate(lines)
-                       if line.strip() == "python3 <<'PY'")
-          finish = next(i for i in range(start + 1, len(lines))
-                        if lines[i] == '          PY')
-          body = [line[10:] if line.startswith('          ') else line
-                  for line in lines[start + 1:finish]]
-          exec(compile('\n'.join(body) + '\n',
-                       'zagkit-v2-render-foundation.py', 'exec'),
-               {'__name__': '__main__'})
+          "$ZNC" tests/surface_contract.zag \
+            --no-zagd --analyze-strict --no-foreground-cache \
+            -o /tmp/surface-contract
+          /tmp/surface-contract
 
-          for path, content in preserved.items():
-              Path(path).write_text(content)
+          "$ZNC" tests/surface_v2_contract.zag \
+            --no-zagd --analyze-strict --no-foreground-cache \
+            -o /tmp/surface-v2-contract
+          /tmp/surface-v2-contract
 
-          surface_path = 'src/components/surface_v2.zag'
-          replace_once(
-              surface_path,
-              '''// The current CPU path approximates soft shadows with a fixed number of
-// analytic rounded-rectangle bands. Work is explicit and bounded; no temporary
-// image, Gaussian pass, hidden allocation, or recursive blur is introduced.
-// A future display-list shadow operation may replace the bands without changing
-// this component contract.
-''',
-              '''// SurfaceV2 emits one native analytic contact shadow and one ambient
-// shadow. The CPU oracle evaluates deterministic fixed-point signed-distance
-// falloff; accelerated backends consume the same display-list operation. No
-// temporary image, Gaussian pass, hidden allocation, or recursive blur is used.
-''')
+          "$ZNC" tests/analytic_shadow_contract.zag \
+            --no-zagd --analyze-strict --no-foreground-cache \
+            -o /tmp/analytic-shadow-contract
+          /tmp/analytic-shadow-contract
 
-          replace_once(
-              surface_path,
-              '''fn surface_v2_effect_operation_limit() i32 { return 32; }
-fn surface_v2_ambient_shadow_bands() i32 { return 4; }
-fn surface_v2_contact_shadow_bands() i32 { return 3; }
-''',
-              '''fn surface_v2_effect_operation_limit() i32 { return 24; }
-fn surface_v2_shadow_operation_count() i32 { return 2; }
-fn surface_v2_solid_panel_operation_count() i32 { return 5; }
-fn surface_v2_glass_overlay_operation_count() i32 { return 6; }
-''')
+          "$ZNC" tests/display_list_contract.zag \
+            --no-zagd --analyze-strict --no-foreground-cache \
+            -o /tmp/display-list-contract
+          /tmp/display-list-contract
 
-          native_effects = '''fn surface_v2_shadow_operation(display: *DisplayList,
-    budget: *SurfaceBuildBudget, owner: NodeKey,
-    bounds: Rect, radius: i64,
-    shadow: VisualShadowSpec) SurfaceDrawResult {
-    let result: SurfaceDrawResult = surface_v2_draw_result();
-    if (shadow.alpha <= 0 || shadow.blur_radius <= 0) {
-        return result;
-    }
-    if (surface_take_display(budget) == 0) {
-        result.error = SurfaceBuildError.capacity_error;
-        result.capacity_error = SurfaceCapacityError.display_operations;
-        return result;
-    }
-    let spread: i64 = shadow.spread;
-    let op: DisplayOp = display_op(
-        DisplayOpKind.fill_rounded_shadow, owner);
-    op.bounds = rect(
-        bounds.x + shadow.offset_x - spread,
-        bounds.y + shadow.offset_y - spread,
-        bounds.width + spread * 2,
-        bounds.height + spread * 2);
-    op.parameter = radius + spread;
-    op.paint = semantic_color_with_alpha(
-        SemanticColorToken.shadow, shadow.alpha);
-    op.paint.stroke_width = shadow.blur_radius;
-    let error: DisplayError = display_list_push(display, op);
-    if (error != DisplayError.none) {
-        result.error = SurfaceBuildError.display_error;
-        result.display_error = error;
-    }
-    return result;
-}
+          "$ZNC" tests/display_list_codec_contract.zag \
+            --no-zagd --analyze-strict --no-foreground-cache \
+            -o /tmp/display-list-codec-contract
+          /tmp/display-list-codec-contract
 
-fn surface_v2_draw_focus(spec: SurfaceV2Spec,
-    chrome: Rect, radius: i64, display: *DisplayList,
-    budget: *SurfaceBuildBudget) SurfaceDrawResult {
-    let draw: SurfaceDrawResult = surface_v2_draw_result();
-    if (spec.base.mode != SurfaceMode.actionable ||
-        spec.base.interaction.focus_visible == 0 ||
-        surface_effectively_enabled(spec.base) == 0) {
-        return draw;
-    }
-    let outer: i64 = 3 * unit_scale();
-    draw = surface_push_round(display, budget, spec.base.id,
-        rect(chrome.x - outer, chrome.y - outer,
-            chrome.width + outer * 2, chrome.height + outer * 2),
-        radius + outer,
-        semantic_color_with_alpha(SemanticColorToken.focus, 65535));
-    if (draw.error != SurfaceBuildError.none) { return draw; }
-    let separation: i64 = unit_scale();
-    return surface_push_round(display, budget, spec.base.id,
-        rect(chrome.x - separation, chrome.y - separation,
-            chrome.width + separation * 2,
-            chrome.height + separation * 2),
-        radius + separation,
-        semantic_color_with_alpha(SemanticColorToken.canvas, 65535));
-}
+          "$ZNC" tests/cpu_raster_contract.zag \
+            --no-zagd --analyze-strict --no-foreground-cache \
+            -o /tmp/cpu-raster-contract
+          /tmp/cpu-raster-contract
 
-'''
-          replace_between(
-              surface_path,
-              'fn surface_v2_shadow_bands(',
-              'fn surface_v2_draw_chrome(',
-              native_effects)
+      - name: Run complete native and repository gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x tools/test-native-visual-system.sh tools/test-headless.sh tools/check-contracts.sh
+          ZNC="$ZNC" ./tools/test-native-visual-system.sh
+          ZNC="$ZNC" ./tools/test-headless.sh
+          ./tools/check-contracts.sh
+          git diff --check
 
-          identity_helper = '''fn surface_v2_emit_identity(spec: SurfaceSpec,
-    display: *DisplayList, hits: *HitTree,
-    semantics: *SemanticsTree) SurfaceBuildResult {
-    let result: SurfaceBuildResult = surface_build_result(
-        spec, SurfaceBuildError.none);
-    if (surface_spec_valid(spec) == 0) {
-        result.error = SurfaceBuildError.invalid_spec;
-        return result;
-    }
-    if (display.*.sealed != 0) {
-        result.error = SurfaceBuildError.display_error;
-        result.display_error = DisplayError.sealed;
-        return result;
-    }
-
-    let checkpoint: SurfaceCheckpoint = surface_checkpoint(
-        display, hits, semantics);
-    let limits: SurfaceBuildLimits = SurfaceBuildLimits{
-        .display_operations = 0,
-        .hit_nodes = spec.limits.hit_nodes,
-        .semantic_nodes = spec.limits.semantic_nodes,
-    };
-    let budget: SurfaceBuildBudget = surface_budget(limits);
-    let style: SurfaceResolvedStyle = surface_style(spec);
-    let chrome: Rect = surface_chrome_bounds(spec);
-    let radius: i64 = surface_resolved_radius(style.radius_token, chrome);
-    let enabled: i32 = surface_effectively_enabled(spec);
-
-    if (surface_take_hit(&budget) == 0) {
-        surface_rollback(display, hits, semantics, checkpoint);
-        result.error = SurfaceBuildError.capacity_error;
-        result.capacity_error = SurfaceCapacityError.hit_nodes;
-        return result;
-    }
-    let hit: HitNode = hit_node(spec.id, spec.parent, spec.bounds);
-    hit.clip = spec.bounds;
-    hit.has_clip = 1;
-    hit.z_order = spec.z_order;
-    hit.enabled = enabled;
-    hit.focusable = enabled;
-    let hit_error: HitTreeError = hit_tree_add(hits, hit);
-    if (hit_error != HitTreeError.none) {
-        surface_rollback(display, hits, semantics, checkpoint);
-        result.error = SurfaceBuildError.hit_error;
-        result.hit_error = hit_error;
-        return result;
-    }
-
-    if (surface_take_semantic(&budget) == 0) {
-        surface_rollback(display, hits, semantics, checkpoint);
-        result.error = SurfaceBuildError.capacity_error;
-        result.capacity_error = SurfaceCapacityError.semantic_nodes;
-        return result;
-    }
-    let semantic: SemanticsSpec = semantics_spec(spec.id, spec.parent,
-        surface_semantic_role(spec), spec.name);
-    semantic.description = spec.description;
-    semantic.value = surface_state_value(spec);
-    semantic.has_bounds = 1;
-    semantic.bounds = spec.bounds;
-    semantic.live_region = spec.live_region;
-    if (spec.mode == SurfaceMode.actionable) {
-        semantic.focus_order = spec.focus_order;
-        semantic.disabled = (enabled == 0) as i32;
-        semantic.focused = (spec.interaction.focused != 0 &&
-            enabled != 0) as i32;
-        semantic.selected = spec.interaction.selected;
-        if (enabled != 0) {
-            semantic.action_mask = semantic_actions_add(
-                semantic_actions(SemanticAction.activate),
-                SemanticAction.focus);
-        }
-    }
-    let semantic_error: SemanticsError = semantics_add(semantics, semantic);
-    if (semantic_error != SemanticsError.none) {
-        surface_rollback(display, hits, semantics, checkpoint);
-        result.error = SurfaceBuildError.semantics_error;
-        result.semantics_error = semantic_error;
-        return result;
-    }
-
-    result.artifact = SurfaceArtifact{
-        .id = spec.id,
-        .bounds = spec.bounds,
-        .chrome_bounds = chrome,
-        .content_bounds = surface_content_bounds(spec),
-        .tier = spec.tier,
-        .mode = spec.mode,
-        .interaction = spec.interaction,
-        .style = style,
-        .resolved_radius = radius,
-        .effectively_enabled = enabled,
-        .hover_treatment_visible = (spec.mode == SurfaceMode.actionable &&
-            spec.interaction.hovered != 0) as i32,
-        .focus_ring_visible = (spec.mode == SurfaceMode.actionable &&
-            spec.interaction.focus_visible != 0 && enabled != 0) as i32,
-        .pressed_treatment_visible = (spec.mode == SurfaceMode.actionable &&
-            spec.interaction.pressed != 0) as i32,
-        .selected_marker_visible = (spec.mode == SurfaceMode.actionable &&
-            spec.interaction.selected != 0) as i32,
-        .disabled_treatment_visible = (spec.mode == SurfaceMode.actionable &&
-            spec.interaction.enabled == 0) as i32,
-        .loading_treatment_visible = (spec.mode == SurfaceMode.actionable &&
-            spec.interaction.loading != 0) as i32,
-        .error_treatment_visible = (spec.mode == SurfaceMode.actionable &&
-            spec.interaction.error != 0) as i32,
-        .semantics_role = surface_semantic_role(spec),
-        .display_op_start = checkpoint.display_length,
-        .display_op_end = checkpoint.display_length,
-        .hit_node_index = checkpoint.hit_length,
-        .semantics_node_index = checkpoint.semantics.length,
-        .evidence_hash = 0,
-    };
-    result.artifact.evidence_hash = surface_evidence_hash(
-        spec, result.artifact);
-    return result;
-}
-
-'''
-          marker = '''fn surface_v2_emit(spec: SurfaceV2Spec,
-    display: *DisplayList, hits: *HitTree,
-    semantics: *SemanticsTree) SurfaceV2BuildResult {
-'''
-          replace_once(surface_path, marker, identity_helper + marker)
-
-          replace_once(
-              surface_path,
-              '''        let before: i32 = budget.display_operations;
-        draw = surface_v2_shadow_bands(display, &budget,
-            spec.base.id, chrome, radius,
-            effects.shadows.ambient,
-            surface_v2_ambient_shadow_bands());
-        if (draw.error == SurfaceBuildError.none) {
-            draw = surface_v2_shadow_bands(display, &budget,
-                spec.base.id, chrome, radius,
-                effects.shadows.contact,
-                surface_v2_contact_shadow_bands());
-        }
-        shadow_operations = budget.display_operations - before;
-''',
-              '''        let before: i32 = budget.display_operations;
-        draw = surface_v2_shadow_operation(display, &budget,
-            spec.base.id, chrome, radius,
-            effects.shadows.ambient);
-        if (draw.error == SurfaceBuildError.none) {
-            draw = surface_v2_shadow_operation(display, &budget,
-                spec.base.id, chrome, radius,
-                effects.shadows.contact);
-        }
-        shadow_operations = budget.display_operations - before;
-''')
-
-          replace_once(
-              surface_path,
-              '''    let base_result: SurfaceBuildResult = surface_emit(
-        base_spec, display, hits, semantics);
-''',
-              '''    let base_result: SurfaceBuildResult = surface_v2_emit_identity(
-        base_spec, display, hits, semantics);
-''')
-
-          replace_once(
-              surface_path,
-              '''    draw = surface_v2_draw_chrome(spec, effects,
-        base_result.artifact.chrome_bounds,
-        radius, display, &budget);
-    if (draw.error == SurfaceBuildError.none) {
-        draw = surface_v2_draw_states(spec,
-            base_result.artifact.chrome_bounds,
-            display, &budget);
-    }
-''',
-              '''    draw = surface_v2_draw_focus(spec,
-        base_result.artifact.chrome_bounds,
-        radius, display, &budget);
-    if (draw.error == SurfaceBuildError.none) {
-        draw = surface_v2_draw_chrome(spec, effects,
-            base_result.artifact.chrome_bounds,
-            radius, display, &budget);
-    }
-    if (draw.error == SurfaceBuildError.none) {
-        draw = surface_v2_draw_states(spec,
-            base_result.artifact.chrome_bounds,
-            display, &budget);
-    }
-''')
-
-          test_path = 'tests/surface_v2_contract.zag'
-          replace_once(
-              test_path,
-              '''        built_panel.artifact.shadow_operations ==
-            surface_v2_ambient_shadow_bands() +
-            surface_v2_contact_shadow_bands(),
-        "content panel is opaque modern depth with bounded two-part shadow work");''',
-              '''        built_panel.artifact.shadow_operations ==
-            surface_v2_shadow_operation_count() &&
-        built_panel.artifact.effect_operations ==
-            surface_v2_solid_panel_operation_count() &&
-        built_panel.artifact.display_op_end -
-            built_panel.artifact.display_op_start ==
-            built_panel.artifact.effect_operations &&
-        display.ops.data[built_panel.artifact.display_op_start].kind ==
-            DisplayOpKind.fill_rounded_shadow,
-        "content panel uses two native shadows and no duplicate legacy chrome");''')
-
-          replace_once(
-              test_path,
-              '''        built_overlay.artifact.effects.blur_radius == 36 * unit_scale() &&
-        built_overlay.artifact.shadow_operations == 7,
-        "transient overlay receives one bounded glass treatment and overlay depth");''',
-              '''        built_overlay.artifact.effects.blur_radius == 36 * unit_scale() &&
-        built_overlay.artifact.shadow_operations ==
-            surface_v2_shadow_operation_count() &&
-        built_overlay.artifact.effect_operations ==
-            surface_v2_glass_overlay_operation_count() &&
-        built_overlay.artifact.display_op_end -
-            built_overlay.artifact.display_op_start ==
-            built_overlay.artifact.effect_operations,
-        "transient overlay uses bounded glass with two native shadow operations");''')
-
-          replace_once(
-              test_path,
-              '''        focused.artifact.base.focus_ring_visible == 1 &&
-        focused.artifact.base.semantics_role == SemanticRole.button &&
-''',
-              '''        focused.artifact.base.focus_ring_visible == 1 &&
-        focused.artifact.effect_operations == 7 &&
-        focused.artifact.display_op_end -
-            focused.artifact.display_op_start == 7 &&
-        focused.artifact.base.semantics_role == SemanticRole.button &&
-''')
-
-          Path('docs/components/surface-v2.md').write_text('''# SurfaceV2\n\nSurfaceV2 owns all modern pixels while retaining one stable `NodeKey` across the display list, hit tree, semantics tree, focus, and ZagKit Talkback. The compatibility `Surface` implementation is used only as a retained contract source; SurfaceV2 emits hit and semantics identity without repainting legacy chrome.\n\n## Bounded render work\n\nA resting solid panel emits exactly five display operations: one ambient analytic shadow, one contact analytic shadow, border, fill, and scene-light edge highlight. A transient glass overlay emits six because it adds one bounded tint layer. The former seven shadow bands and duplicate legacy chrome are removed.\n\n`fill_rounded_shadow` stores deterministic fixed-point geometry, corner radius, blur support, and alpha in the same immutable render IR consumed by the CPU oracle and accelerated backends. It does not allocate a temporary image or execute recursive blur.\n\nKeyboard-visible focus adds a two-pixel outer focus ring and a one-pixel separation layer. Pointer focus remains semantic truth without painting the ring. Reduced transparency and compact density continue to demote sampled materials to solid equivalents.\n\n## Verification\n\nRun `tools/test-native-visual-system.sh`, `tools/test-headless.sh`, and the strict `tests/surface_v2_contract.zag` contract with the exact Zag revision pinned in `contracts/toolchain.json`.\n''')
-
-          print('Prepared native shadow IR and identity-only SurfaceV2 pipeline')
-          PY
-
-            chmod +x "$ZNC" tools/test-headless.sh tools/check-contracts.sh \
-              tools/test-native-visual-system.sh
-            "$ZNC" tests/visual_system_v2_policy_contract.zag \
-              --no-zagd --analyze-strict --no-foreground-cache \
-              -o /tmp/visual-system-v2-policy
-            /tmp/visual-system-v2-policy
-            "$ZNC" tests/visual_system_v2_contract.zag \
-              --no-zagd --analyze-strict --no-foreground-cache \
-              -o /tmp/visual-system-v2-contract
-            /tmp/visual-system-v2-contract
-            "$ZNC" tests/surface_contract.zag \
-              --no-zagd --analyze-strict --no-foreground-cache \
-              -o /tmp/surface-contract
-            /tmp/surface-contract
-            "$ZNC" tests/surface_v2_contract.zag \
-              --no-zagd --analyze-strict --no-foreground-cache \
-              -o /tmp/surface-v2-contract
-            /tmp/surface-v2-contract
-            "$ZNC" tests/display_list_contract.zag \
-              --no-zagd --analyze-strict --no-foreground-cache \
-              -o /tmp/display-list-contract
-            /tmp/display-list-contract
-            "$ZNC" tests/display_list_codec_contract.zag \
-              --no-zagd --analyze-strict --no-foreground-cache \
-              -o /tmp/display-list-codec-contract
-            /tmp/display-list-codec-contract
-            "$ZNC" tests/cpu_raster_contract.zag \
-              --no-zagd --analyze-strict --no-foreground-cache \
-              -o /tmp/cpu-raster-contract
-            /tmp/cpu-raster-contract
-            ZNC="$ZNC" ./tools/test-native-visual-system.sh
-            ZNC="$ZNC" ./tools/test-headless.sh
-            ./tools/check-contracts.sh
-            git diff --check
-          ) > /tmp/zagkit-v2-surface-pipeline.log 2>&1
-          status=$?
-          set -e
-
+      - name: Commit verified renderer integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/run_integrate_v2_surface_pipeline.py \
+                .github/workflows/integrate-v2-surface-pipeline.yml
           git config user.name "zagkit-render-bot"
           git config user.email "zagkit-render-bot@users.noreply.github.com"
-
-          if [ "$status" -ne 0 ]; then
-            git restore .
-            tail -n 700 /tmp/zagkit-v2-surface-pipeline.log > \
-              .github/v2-surface-pipeline-failure.log
-            git add -A
-            git commit -m "ci: record v2 surface pipeline failure"
-            git push origin HEAD:agent/v2-analytic-shadow-safe
-            cat .github/v2-surface-pipeline-failure.log
-            exit "$status"
-          fi
-
-          cat /tmp/zagkit-v2-surface-pipeline.log
-          rm -f .github/workflows/integrate-v2-surface-pipeline.yml
           git add -A
+          git diff --cached --quiet && { echo 'integration produced no changes'; exit 1; }
           git commit -m "render: integrate native v2 surface pipeline"
           git push origin HEAD:agent/v2-analytic-shadow-safe
