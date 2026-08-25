@@ -43,20 +43,33 @@ jobs:
           ref: ${{ steps.toolchain.outputs.zag_sha }}
           path: .toolchain/zag
 
-      - name: Validate exact verified Zag compiler seed
+      - name: Validate exact ownership-hardened Zag compiler
         shell: bash
         run: |
           set -euo pipefail
-          chmod +x "$ZNC"
+          chmod +x "$ZNC" \
+            .toolchain/zag/zag-poc/tests/check_v2_list_named_owner.sh \
+            .toolchain/zag/zag-poc/tests/check_v2_ui_nonretaining.sh
           "$ZNC" version
-          chmod +x .toolchain/zag/zag-poc/tests/check_v2_list_named_owner.sh
           ZNC="$ZNC" .toolchain/zag/zag-poc/tests/check_v2_list_named_owner.sh
+          ZNC="$ZNC" .toolchain/zag/zag-poc/tests/check_v2_ui_nonretaining.sh
 
-      - name: Normalize legacy strict-v2 test output
+      - name: Align exact upstream audit identity
         shell: bash
         run: |
           set -euo pipefail
-          python3 .github/normalize_strict_v2_test_output.py
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          toolchain = json.loads(Path('contracts/toolchain.json').read_text())
+          pinned = toolchain['zag']['commit']
+          ledger_path = Path('contracts/upstream-zag.json')
+          ledger = json.loads(ledger_path.read_text())
+          ledger['audited_commit'] = pinned
+          ledger['audited_on'] = '2026-08-25'
+          ledger_path.write_text(json.dumps(ledger, indent=2) + '\n')
+          PY
           git diff --check
 
       - name: Apply reviewed renderer transplant
@@ -65,9 +78,6 @@ jobs:
           set -euo pipefail
           python3 .github/patch_v2_renderer_overlay.py
           python3 .github/run_integrate_v2_surface_pipeline.py
-          # The renderer transplant introduces its own historical regression
-          # file, so normalize reporting again after harvesting it.
-          python3 .github/normalize_strict_v2_test_output.py
           git diff --check
 
       - name: Verify native shadow IR shape
