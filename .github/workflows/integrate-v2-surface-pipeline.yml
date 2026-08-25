@@ -51,6 +51,13 @@ jobs:
           chmod +x .toolchain/zag/zag-poc/tests/check_v2_list_named_owner.sh
           ZNC="$ZNC" .toolchain/zag/zag-poc/tests/check_v2_list_named_owner.sh
 
+      - name: Normalize legacy strict-v2 test output
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .github/normalize_strict_v2_test_output.py
+          git diff --check
+
       - name: Apply reviewed renderer transplant
         shell: bash
         run: |
@@ -126,7 +133,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rm -f .github/run_integrate_v2_surface_pipeline.py \
+          rm -f .github/normalize_strict_v2_test_output.py \
+                .github/run_integrate_v2_surface_pipeline.py \
                 .github/workflows/integrate-v2-surface-pipeline.yml
           git config user.name "zagkit-render-bot"
           git config user.email "zagkit-render-bot@users.noreply.github.com"
