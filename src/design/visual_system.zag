@@ -281,6 +281,11 @@ fn visual_resolve_material(role: VisualSurfaceRole,
     hash = visual_mix_hash(hash, material.blur_radius);
     hash = visual_mix_hash(hash, visual_shadow_extent(shadow));
 
+    let policy_error: VisualPolicyError = VisualPolicyError.none;
+    if (invalid != 0) {
+        policy_error = VisualPolicyError.invalid_environment;
+    }
+
     return ResolvedVisualMaterial{
         .material_token = token,
         .elevation_token = elevation,
@@ -292,8 +297,7 @@ fn visual_resolve_material(role: VisualSurfaceRole,
         .fallback_reason = reason,
         .shadow = shadow,
         .evidence_hash = hash,
-        .error = if (invalid != 0) VisualPolicyError.invalid_environment
-            else VisualPolicyError.none,
+        .error = policy_error,
     };
 }
 
