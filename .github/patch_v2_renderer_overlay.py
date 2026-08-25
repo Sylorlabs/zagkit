@@ -7,8 +7,23 @@ overlay = '''    apply_reviewed_surface_edits(worktree)\n\n    # The reviewed na
 if text.count(anchor) != 1:
     raise SystemExit(f'expected one renderer overlay anchor, found {text.count(anchor)}')
 text = text.replace(anchor, overlay, 1)
+
 old_codec_gate = "        'src/render/display_list_codec.zag': 'fill_rounded_shadow',\n"
 new_codec_gate = "        'src/render/display_list_codec.zag': 'kind_code > 13',\n"
 if text.count(old_codec_gate) != 1:
     raise SystemExit(f'expected one codec gate, found {text.count(old_codec_gate)}')
-helper.write_text(text.replace(old_codec_gate, new_codec_gate, 1))
+text = text.replace(old_codec_gate, new_codec_gate, 1)
+
+old_status = '''    status = subprocess.check_output(\n        ['git', '-C', str(worktree), 'diff', '--name-status', '--no-renames'],\n        text=True,\n    ).splitlines()\n'''
+new_status = '''    status = subprocess.check_output(\n        ['git', '-C', str(worktree), 'status', '--porcelain', '--untracked-files=all'],\n        text=True,\n    ).splitlines()\n'''
+if text.count(old_status) != 1:
+    raise SystemExit(f'expected one harvest status command, found {text.count(old_status)}')
+text = text.replace(old_status, new_status, 1)
+
+old_parse = '''        code, path = row.split('\\t', 1)\n        if path in protected_exact or path.startswith(protected_prefixes):\n            continue\n        destination = repo / path\n        source = worktree / path\n        if code.startswith('D'):\n            destination.unlink(missing_ok=True)\n            copied.append(f'D {path}')\n            continue\n        destination.parent.mkdir(parents=True, exist_ok=True)\n        shutil.copy2(source, destination)\n        copied.append(f'{code} {path}')\n'''
+new_parse = '''        code = row[:2]\n        path = row[3:]\n        if path in protected_exact or path.startswith(protected_prefixes):\n            continue\n        destination = repo / path\n        source = worktree / path\n        if 'D' in code:\n            destination.unlink(missing_ok=True)\n            copied.append(f'D {path}')\n            continue\n        destination.parent.mkdir(parents=True, exist_ok=True)\n        shutil.copy2(source, destination)\n        copied.append(f'{code.strip() or code} {path}')\n'''
+if text.count(old_parse) != 1:
+    raise SystemExit(f'expected one harvest row parser, found {text.count(old_parse)}')
+text = text.replace(old_parse, new_parse, 1)
+
+helper.write_text(text)
