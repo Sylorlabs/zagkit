@@ -65,6 +65,9 @@ jobs:
           set -euo pipefail
           python3 .github/patch_v2_renderer_overlay.py
           python3 .github/run_integrate_v2_surface_pipeline.py
+          # The renderer transplant introduces its own historical regression
+          # file, so normalize reporting again after harvesting it.
+          python3 .github/normalize_strict_v2_test_output.py
           git diff --check
 
       - name: Verify native shadow IR shape
