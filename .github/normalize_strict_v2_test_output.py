@@ -10,8 +10,9 @@ for path in sorted(Path("tests").glob("*.zag")):
     # _zag_println bridge instead of passing owned conversion buffers to
     # _zag_print. This touches reporting only; assertions and product code stay
     # unchanged.
-    updated = updated.replace("_zag_print(passed_text);", "_zag_println(passed_text);")
-    updated = updated.replace("_zag_print(failed_text);", "_zag_println(failed_text);")
+    for name in ("passed_text", "failed_text", "passed", "failed"):
+        updated = updated.replace(
+            f"_zag_print({name});", f"_zag_println({name});")
     if updated != text:
         path.write_text(updated)
         changed.append(str(path))
