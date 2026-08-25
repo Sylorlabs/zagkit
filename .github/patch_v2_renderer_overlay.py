@@ -1,7 +1,7 @@
 from pathlib import Path
 
 # Renderer transplant compatibility for the current strict-v2 compiler pin.
-# Rerun after visual-policy strict-analyzer cleanup.
+# Rerun after statement-form native-codegen portability cleanup.
 helper = Path('.github/run_integrate_v2_surface_pipeline.py')
 text = helper.read_text()
 anchor = '''    apply_reviewed_surface_edits(worktree)\n\n    # Require the intended retained-native shadow path before harvesting.\n'''
