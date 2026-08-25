@@ -73,7 +73,7 @@ jobs:
           set -euo pipefail
           grep -q 'fill_rounded_shadow' src/render/display_list.zag
           grep -q 'fill_rounded_shadow' src/render/cpu_raster.zag
-          grep -q 'fill_rounded_shadow' src/render/display_list_codec.zag
+          grep -q 'kind_code > 13' src/render/display_list_codec.zag
           ! grep -q 'fn surface_v2_shadow_bands' src/components/surface_v2.zag
           grep -q 'fn surface_v2_shadow_operation_count() i32 { return 2; }' src/components/surface_v2.zag
 
