@@ -257,14 +257,25 @@ done
 find . \( -path './.git' -o -path './.toolchain' \) -prune -o -name '*.md' -type f -print | sort |
 while IFS= read -r markdown_file; do
     markdown_base=$(dirname "$markdown_file")
-    grep -oE '\]\([^)]+\)' "$markdown_file" |
+    awk '
+      /^[[:space:]]*```/ { fenced = !fenced; next }
+      !fenced { print }
+    ' "$markdown_file" |
+    grep -oE '\]\([^)]+\)' |
     sed -e 's/^](//' -e 's/)$//' |
     while IFS= read -r target; do
         case "$target" in
             ''|'#'*|http://*|https://*|mailto:*) continue ;;
         esac
         link_path=${target%%#*}
-        [ -e "$markdown_base/$link_path" ] \
+        link_candidate="$markdown_base/$link_path"
+        # A path escaping the ZagKit checkout references a sibling repository.
+        # Isolated CI cannot validate another checkout's filesystem; local
+        # links that remain inside this repository are still strict.
+        case "$link_candidate" in
+            ../*|./../*) continue ;;
+        esac
+        [ -e "$link_candidate" ] \
             || fail "broken Markdown link in $markdown_file: $target"
     done
 done

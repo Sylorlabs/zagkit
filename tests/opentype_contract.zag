@@ -152,11 +152,10 @@ fn malformed_contract(state: *TestState) void {
 fn main() i32 {
     let state: TestState = TestState{ .passed = 0, .failed = 0 };
     parse_contract(&state); malformed_contract(&state);
-    let passed_text: []u8 = _zag_i64_to_str(state.passed as i64);
-    let failed_text: []u8 = _zag_i64_to_str(state.failed as i64);
-    _zag_print("OpenType contract: pass="); _zag_print(passed_text);
-    _zag_print(" fail="); _zag_println(failed_text);
-    _zag_str_free(passed_text); _zag_str_free(failed_text);
-    if (state.failed == 0) { return 0; }
+    if (state.failed == 0) {
+        _zag_println("OpenType contract: PASS");
+        return 0;
+    }
+    _zag_println("OpenType contract: FAIL");
     return 1;
 }

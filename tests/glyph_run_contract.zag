@@ -34,15 +34,18 @@ fn main() i32 {
         "positioned glyph contours assemble into one canonical retained path");
     let payload: PathEncodeResult = path_encode(run_path.path);
     let list: DisplayList = display_list_make();
-    _ = display_list_add_resource(&list, render_resource_spec(
-        77, RenderResourceKind.path, payload.bytes.data[0..payload.bytes.len],
-        path_resource_format_tag()));
+    let add_resource_error: RenderResourceError = display_list_add_resource(&list,
+        render_resource_spec(77, RenderResourceKind.path,
+            payload.bytes.data[0..payload.bytes.len], path_resource_format_tag()));
     path_encode_free(&payload);
     let draw: DisplayOp = display_op(DisplayOpKind.draw_path, node_key(77));
     draw.resource_id = 77; draw.paint = paint_rgba16(65535, 65535, 65535, 65535);
-    _ = display_list_push(&list, draw); _ = display_list_seal(&list);
+    let push_error: DisplayError = display_list_push(&list, draw);
+    let seal_error: DisplayError = display_list_seal(&list);
     let raster: CpuRasterResult = cpu_rasterize(list, 24, 10);
-    expect(&state, raster.error == CpuRasterError.none && raster.pixels_touched > 0,
+    expect(&state, add_resource_error == RenderResourceError.none &&
+        push_error == DisplayError.none && seal_error == DisplayError.none &&
+        raster.error == CpuRasterError.none && raster.pixels_touched > 0,
         "a positioned multi-glyph run executes through the CPU oracle");
     cpu_raster_free(&raster); display_list_free(&list);
     glyph_run_path_result_free(&run_path); nominal_glyph_run_free(&run);

@@ -370,8 +370,12 @@ fn grapheme_segment_utf8(bytes: []u8) GraphemeSegmentation {
         }
         scalar_index = scalar_index + 1;
     }
-    _ = grapheme_push_span(&result, decoded, cluster_start,
+    let final_span_ok: i32 = grapheme_push_span(&result, decoded, cluster_start,
         decoded.scalars.len, bytes.len as i64);
+    if (final_span_ok == 0) {
+        utf8_decode_free(&decoded);
+        return result;
+    }
     utf8_decode_free(&decoded);
     return result;
 }

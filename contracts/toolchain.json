@@ -3,19 +3,23 @@
   "zagkit_version": "0.1.0-experimental.0",
   "zag": {
     "repository": "https://github.com/Sylorlabs/zag",
-    "resolved_ref": "refs/heads/agent/zagkit-prerequisites",
-    "commit": "43870455a07bf8e7d4adf38fad807fe3baee4e26",
+    "resolved_ref": "refs/heads/agent/v2-aggregate-let-values",
+    "commit": "f84b5736b5f8f1f7dd9d4b539d13a2f5ddf9a34b",
     "compiler_version": "2026.07.0-dev",
-    "edition": "2026"
+    "edition": "2027"
   },
-  "audited_on": "2026-08-06",
+  "audited_on": "2026-08-23",
   "pin_policy": "Every Zagkit release replaces this record with the exact Zag source commit used to build and test it. Branch names and local dirty state are never release identities.",
   "evidence": [
-    "Zag commit 43870455a07bf8e7d4adf38fad807fe3baee4e26 was exported from the exact clean Git tree and audited on 2026-08-06.",
+    "Zag commit f84b5736b5f8f1f7dd9d4b539d13a2f5ddf9a34b is the exact clean revision used by the ZagKit v2 strict validation branch.",
     "zag-poc/zag.mod at the pinned commit declares version 2026.07.0-dev and edition 2026.",
-    "The clean pinned tree self-hosted to a byte-identical stage-2/stage-3 fixpoint with no external tools and rebuilt zagd.",
-    "The clean pinned tree self-hosts the generic numeric raw-pointer slice repair to a byte-identical compiler fixpoint; its aliasing, mutation, nested-slice, explicit-bound, and negative contracts pass on x86-64 and qemu-user ARM64.",
-    "The clean pinned tree passes compiler-owned resource embedding conformance on x86-64 and qemu-user ARM64, including parser, formatter, cache, and deterministic identity cases.",
-    "The pinned tree provides pure-Zag CRC32, Adler32, deterministic stored-zlib output, and general stored/fixed/dynamic DEFLATE inflate; the same 14-check suite passes on x86-64 and qemu-user ARM64."
+    "The pinned tree self-hosts to a byte-identical native compiler fixed point without an external C, assembler, linker, or libc build chain.",
+    "Strict native validation passed after the aggregate-valued let initialization repair.",
+    "Aggregate runtime regression covers call return, local/parameter copy, field copy, and switch-expression result.",
+    "The revision preserves compiler-owned resource embedding, pure-Zag compression primitives, and existing native authority suites.",
+    "ZagKit is compiled as an edition-2027 project; the pinned compiler reports 2026.07.0-dev but implements the edition-2027 strict ownership gates used here.",
+    "ZagKit semantics mutation APIs no longer use invalid parameter-position @borrows_mut syntax; strict edition-2027 arity validation passes.",
+    "The sealed-destination Surface negative contract sets the retained DisplayList sealed state directly, isolating Surface fail-closed behavior from display_list_seal ownership semantics.",
+    "Repository contracts and the strict visual policy, SurfaceV2, Surface, and design-token suites all passed before launching the retained analytic-shadow integration."
   ]
 }

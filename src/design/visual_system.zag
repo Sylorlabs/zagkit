@@ -171,16 +171,16 @@ fn visual_shadow_pair(elevation: SemanticElevationToken) VisualShadowPair {
     }
     if (elevation == SemanticElevationToken.panel) {
         return VisualShadowPair{
-            .contact = visual_shadow_layer(1 * unit_scale(), 1 * unit_scale(),
+            .contact = visual_shadow_layer(unit_scale(), unit_scale(),
                 4 * unit_scale(), 0, 19661),
             .ambient = visual_shadow_layer(2 * unit_scale(), 6 * unit_scale(),
-                18 * unit_scale(), 1 * unit_scale(), 10486),
+                18 * unit_scale(), unit_scale(), 10486),
             .edge_highlight_alpha_16 = 9175,
         };
     }
     if (elevation == SemanticElevationToken.raised) {
         return VisualShadowPair{
-            .contact = visual_shadow_layer(1 * unit_scale(), 2 * unit_scale(),
+            .contact = visual_shadow_layer(unit_scale(), 2 * unit_scale(),
                 6 * unit_scale(), 0, 22282),
             .ambient = visual_shadow_layer(3 * unit_scale(), 10 * unit_scale(),
                 28 * unit_scale(), 2 * unit_scale(), 13107),
@@ -281,6 +281,11 @@ fn visual_resolve_material(role: VisualSurfaceRole,
     hash = visual_mix_hash(hash, material.blur_radius);
     hash = visual_mix_hash(hash, visual_shadow_extent(shadow));
 
+    let policy_error: VisualPolicyError = VisualPolicyError.none;
+    if (invalid != 0) {
+        policy_error = VisualPolicyError.invalid_environment;
+    }
+
     return ResolvedVisualMaterial{
         .material_token = token,
         .elevation_token = elevation,
@@ -292,8 +297,7 @@ fn visual_resolve_material(role: VisualSurfaceRole,
         .fallback_reason = reason,
         .shadow = shadow,
         .evidence_hash = hash,
-        .error = if (invalid != 0) VisualPolicyError.invalid_environment
-            else VisualPolicyError.none,
+        .error = policy_error,
     };
 }
 

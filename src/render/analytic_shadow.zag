@@ -22,8 +22,10 @@ struct AnalyticShadowSpec {
 fn visual_rounded_rect(x: i64, y: i64, width: i64,
     height: i64, radius: i64) VisualRoundedRect {
     let resolved_radius: i64 = radius;
-    let half_width: i64 = if (width > 0) width / 2 else 0;
-    let half_height: i64 = if (height > 0) height / 2 else 0;
+    let half_width: i64 = 0;
+    let half_height: i64 = 0;
+    if (width > 0) { half_width = width / 2; }
+    if (height > 0) { half_height = height / 2; }
     if (resolved_radius < 0) { resolved_radius = 0; }
     if (resolved_radius > half_width) { resolved_radius = half_width; }
     if (resolved_radius > half_height) { resolved_radius = half_height; }

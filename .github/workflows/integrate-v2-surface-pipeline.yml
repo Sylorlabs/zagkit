@@ -1,0 +1,160 @@
+name: Integrate pinned ZagKit v2 surface pipeline
+
+on:
+  push:
+    branches: [agent/v2-analytic-shadow-safe]
+    paths:
+      - contracts/toolchain.json
+      - .github/workflows/integrate-v2-surface-pipeline.yml
+      - .github/run_integrate_v2_surface_pipeline.py
+      - .github/patch_v2_renderer_overlay.py
+
+permissions:
+  contents: write
+
+concurrency:
+  group: zagkit-v2-surface-pipeline
+  cancel-in-progress: true
+
+jobs:
+  integrate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      ZNC: ${{ github.workspace }}/.toolchain/zag/zag-poc/znc
+
+    steps:
+      - name: Check out exact integration branch
+        uses: actions/checkout@v6
+        with:
+          ref: agent/v2-analytic-shadow-safe
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Resolve pinned Zag revision
+        id: toolchain
+        shell: bash
+        run: echo "zag_sha=$(jq -r '.zag.commit' contracts/toolchain.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Check out exact Zag toolchain
+        uses: actions/checkout@v6
+        with:
+          repository: Sylorlabs/zag
+          ref: ${{ steps.toolchain.outputs.zag_sha }}
+          path: .toolchain/zag
+
+      - name: Validate exact ownership-hardened Zag compiler
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x "$ZNC" \
+            .toolchain/zag/zag-poc/tests/check_v2_list_named_owner.sh \
+            .toolchain/zag/zag-poc/tests/check_v2_ui_nonretaining.sh
+          "$ZNC" version
+          ZNC="$ZNC" .toolchain/zag/zag-poc/tests/check_v2_list_named_owner.sh
+          ZNC="$ZNC" .toolchain/zag/zag-poc/tests/check_v2_ui_nonretaining.sh
+
+      - name: Align exact upstream audit identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          toolchain = json.loads(Path('contracts/toolchain.json').read_text())
+          pinned = toolchain['zag']['commit']
+          ledger_path = Path('contracts/upstream-zag.json')
+          ledger = json.loads(ledger_path.read_text())
+          ledger['audited_commit'] = pinned
+          ledger['audited_on'] = '2026-08-25'
+          ledger_path.write_text(json.dumps(ledger, indent=2) + '\n')
+          PY
+          git diff --check
+
+      - name: Apply reviewed renderer transplant
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .github/patch_v2_renderer_overlay.py
+          python3 .github/run_integrate_v2_surface_pipeline.py
+          git diff --check
+
+      - name: Verify native shadow IR shape
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'fill_rounded_shadow' src/render/display_list.zag
+          grep -q 'fill_rounded_shadow' src/render/cpu_raster.zag
+          grep -q 'kind_code > 13' src/render/display_list_codec.zag
+          ! grep -q 'fn surface_v2_shadow_bands' src/components/surface_v2.zag
+          grep -q 'fn surface_v2_shadow_operation_count() i32 { return 2; }' src/components/surface_v2.zag
+
+      - name: Run focused strict renderer contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$ZNC" tests/visual_system_v2_policy_contract.zag \
+            --no-zagd --analyze-strict --no-foreground-cache \
+            -o /tmp/visual-system-v2-policy
+          /tmp/visual-system-v2-policy
+
+          "$ZNC" tests/visual_system_v2_contract.zag \
+            --no-zagd --analyze-strict --no-foreground-cache \
+            -o /tmp/visual-system-v2-contract
+          /tmp/visual-system-v2-contract
+
+          "$ZNC" tests/surface_contract.zag \
+            --no-zagd --analyze-strict --no-foreground-cache \
+            -o /tmp/surface-contract
+          /tmp/surface-contract
+
+          "$ZNC" tests/surface_v2_contract.zag \
+            --no-zagd --analyze-strict --no-foreground-cache \
+            -o /tmp/surface-v2-contract
+          /tmp/surface-v2-contract
+
+          "$ZNC" tests/analytic_shadow_contract.zag \
+            --no-zagd --analyze-strict --no-foreground-cache \
+            -o /tmp/analytic-shadow-contract
+          /tmp/analytic-shadow-contract
+
+          "$ZNC" tests/display_list_contract.zag \
+            --no-zagd --analyze-strict --no-foreground-cache \
+            -o /tmp/display-list-contract
+          /tmp/display-list-contract
+
+          "$ZNC" tests/display_list_codec_contract.zag \
+            --no-zagd --analyze-strict --no-foreground-cache \
+            -o /tmp/display-list-codec-contract
+          /tmp/display-list-codec-contract
+
+          "$ZNC" tests/cpu_raster_contract.zag \
+            --no-zagd --analyze-strict --no-foreground-cache \
+            -o /tmp/cpu-raster-contract
+          /tmp/cpu-raster-contract
+
+      - name: Run complete native and repository gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x tools/test-native-visual-system.sh tools/test-headless.sh tools/check-contracts.sh
+          ZNC="$ZNC" ./tools/test-native-visual-system.sh
+          ZNC="$ZNC" ./tools/test-headless.sh
+          ./tools/check-contracts.sh
+          git diff --check
+
+      - name: Commit verified renderer integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/normalize_strict_v2_test_output.py \
+                .github/patch_v2_renderer_overlay.py \
+                .github/run_integrate_v2_surface_pipeline.py \
+                .github/workflows/integrate-v2-surface-pipeline.yml
+          git config user.name "zagkit-render-bot"
+          git config user.email "zagkit-render-bot@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && { echo 'integration produced no changes'; exit 1; }
+          git commit -m "render: integrate native v2 surface pipeline"
+          git push origin HEAD:agent/v2-analytic-shadow-safe
