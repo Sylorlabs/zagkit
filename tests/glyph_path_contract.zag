@@ -40,15 +40,18 @@ fn main() i32 {
         "font units scale around an exact baseline without pixel rounding");
     let payload: PathEncodeResult = path_encode(result.path);
     let list: DisplayList = display_list_make();
-    _ = display_list_add_resource(&list, render_resource_spec(
-        41, RenderResourceKind.path, payload.bytes.data[0..payload.bytes.len],
-        path_resource_format_tag()));
+    let add_resource_error: RenderResourceError = display_list_add_resource(&list,
+        render_resource_spec(41, RenderResourceKind.path,
+            payload.bytes.data[0..payload.bytes.len], path_resource_format_tag()));
     path_encode_free(&payload);
     let draw: DisplayOp = display_op(DisplayOpKind.draw_path, node_key(41));
     draw.resource_id = 41; draw.paint = paint_rgba16(65535, 65535, 65535, 65535);
-    _ = display_list_push(&list, draw); _ = display_list_seal(&list);
+    let push_error: DisplayError = display_list_push(&list, draw);
+    let seal_error: DisplayError = display_list_seal(&list);
     let raster: CpuRasterResult = cpu_rasterize(list, 10, 10);
-    expect(&state, raster.error == CpuRasterError.none &&
+    expect(&state, add_resource_error == RenderResourceError.none &&
+        push_error == DisplayError.none && seal_error == DisplayError.none &&
+        raster.error == CpuRasterError.none &&
         raster.rendered_ops == 1 && raster.pixels_touched > 0,
         "glyph paths execute through the deterministic CPU oracle");
     cpu_raster_free(&raster); display_list_free(&list);
