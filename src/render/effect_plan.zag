@@ -156,16 +156,22 @@ fn visual_effect_plan(bounds: VisualEffectRect,
     }
 
     let capture_inflate: i64 = visual_glass_capture_inflate(material);
-    let capture: VisualEffectRect = if (material.translucent != 0)
-        visual_effect_rect_inflate(bounds, capture_inflate) else bounds;
+    let capture: VisualEffectRect = bounds;
+    if (material.translucent != 0) {
+        capture = visual_effect_rect_inflate(bounds, capture_inflate);
+    }
     let damage: VisualEffectRect = visual_effect_rect_inflate(bounds,
         shadow_extent);
-    let capture_pixels: i64 = if (material.translucent != 0)
-        visual_effect_pixel_area(capture) else 0;
+    let capture_pixels: i64 = 0;
+    if (material.translucent != 0) {
+        capture_pixels = visual_effect_pixel_area(capture);
+    }
     let divisor: i64 = material.backdrop_downsample as i64;
-    let temporary_pixels: i64 = if (capture_pixels > 0)
-        (capture_pixels + divisor * divisor - 1) /
-            (divisor * divisor) else 0;
+    let temporary_pixels: i64 = 0;
+    if (capture_pixels > 0) {
+        temporary_pixels = (capture_pixels + divisor * divisor - 1) /
+            (divisor * divisor);
+    }
 
     if (temporary_pixels > limits.max_capture_pixels) {
         return visual_effect_empty_plan(bounds, material,
